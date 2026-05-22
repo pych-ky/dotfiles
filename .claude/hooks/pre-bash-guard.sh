@@ -32,20 +32,20 @@ trimmed_command="$(
 # ブロック理由を集める配列
 blocked_reasons=()
 
-# ルール 1: 先頭が rm -rf
-if [[ $trimmed_command =~ ^[[:space:]]*rm[[:space:]]+-rf ]]; then
-  blocked_reasons+=("rm -rf は許可していません。")
-fi
+# 正規表現に一致した場合のみブロック理由を追加するヘルパ
+block_if_matches() {
+  local pattern="$1"
+  local reason="$2"
 
-# ルール 2: 先頭が sudo
-if [[ $trimmed_command =~ ^[[:space:]]*sudo[[:space:]]+ ]]; then
-  blocked_reasons+=("sudo の使用は Claude からは許可していません。")
-fi
+  if [[ $trimmed_command =~ $pattern ]]; then
+    blocked_reasons+=("$reason")
+  fi
+}
 
-# ルール 3 & 4: curl / wget ... | sh / bash
-if [[ $trimmed_command =~ (curl|wget)[^|]*\|[[:space:]]*(sh|bash) ]]; then
-  blocked_reasons+=("curl / wget ... | sh / bash 形式のコマンドは許可していません。")
-fi
+# 各ブロックルールを同じ形式で評価
+block_if_matches '^[[:space:]]*rm[[:space:]]+-rf' "rm -rf は許可していません。"
+block_if_matches '^[[:space:]]*sudo[[:space:]]+' "sudo の使用は Claude からは許可していません。"
+block_if_matches '(curl|wget)[^|]*\|[[:space:]]*(sh|bash)' "curl / wget ... | sh / bash 形式のコマンドは許可していません。"
 
 # ブロック対象でなければそのまま許可
 if ((${#blocked_reasons[@]} == 0)); then
