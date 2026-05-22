@@ -1,0 +1,245 @@
+## ============================================================================
+## コア設定
+## ============================================================================
+
+# メインモデル
+model        = "gpt-5.5"  # 通常タスク用モデル
+review_model = "gpt-5.5"  # コードレビュー用モデル
+
+# 推論関連
+model_reasoning_effort   = "xhigh"   # 推論の深さ (low / medium / high / xhigh)
+model_reasoning_summary  = "auto"    # 推論要約の形式 (auto / concise / detailed / none)
+model_verbosity          = "medium"  # 応答の詳細度 (low / medium / high)
+hide_agent_reasoning     = true      # エージェント推論過程を非表示
+show_raw_agent_reasoning = false     # 生の推論データを非表示
+
+# 応答スタイル
+personality = "pragmatic"  # 性格プリセット (none / friendly / pragmatic)
+
+# 検索関連
+web_search = "live"  # Web 検索モード (disabled / cached / live)
+
+# 認証情報の保管場所
+cli_auth_credentials_store = "keyring"  # CLI 認証情報の保存先 (auto / keyring / file)
+
+
+## ============================================================================
+## 承認ポリシー & サンドボックス
+## ============================================================================
+
+approval_policy = "on-request"       # 操作の承認要否 (untrusted / on-request / never)
+sandbox_mode    = "workspace-write"  # サンドボックス制限 (read-only / workspace-write / danger-full-access)
+approvals_reviewer = "user"
+
+# workspace-write サンドボックスの詳細挙動
+[sandbox_workspace_write]
+network_access = true  # サンドボックス内からのネットワークアクセスを許可する
+
+
+## ============================================================================
+## シェル環境
+## ============================================================================
+
+[shell_environment_policy]
+inherit                 = "core"                # 親シェルから環境変数を継承する範囲 (all / core / none)
+ignore_default_excludes = false                 # デフォルト除外リストを無視しない
+exclude                 = ["AWS_*", "AZURE_*"]  # 除外する環境変数パターン
+set                     = {}                    # 追加で設定する環境変数
+
+
+## ============================================================================
+## ターミナル表示
+## ============================================================================
+
+[tui]
+notifications = true  # デスクトップ通知を有効にする
+# ステータスラインに表示する項目
+status_line = [
+  "model-with-reasoning",  # 使用モデルと推論レベル
+  "current-dir",           # カレントディレクトリ
+  "git-branch",            # Git ブランチ名
+  "context-used",          # 使用中のコンテキスト量
+  "five-hour-limit",       # 5 時間単位の利用上限
+  "weekly-limit",          # 週次の利用上限
+  "fast-mode",             # Fast モードの有効/無効
+]
+
+[tui.model_availability_nux]
+"gpt-5.5" = 4
+
+
+## ============================================================================
+## 履歴
+## ============================================================================
+
+[history]
+persistence = "save-all"  # 履歴の永続化 (none / save-all)
+
+
+## ============================================================================
+## 実験的機能
+## ============================================================================
+
+[features]
+prevent_idle_sleep = true  # アイドル時のスリープを防止する
+
+[mcp_servers.serena]
+command = "uvx"
+args = [
+  "-p",
+  "3.13",
+  "--from",
+  "git+https://github.com/oraios/serena",
+  "serena",
+  "start-mcp-server",
+  "--project-from-cwd",
+  "--context",
+  "codex",
+  "--open-web-dashboard",
+  "false",
+]
+startup_timeout_sec = 60.0
+
+[mcp_servers.context7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp@latest"]
+
+
+## ============================================================================
+## プロジェクト trust level
+## ============================================================================
+
+# trusted にすると、そのプロジェクト配下の .codex/config.toml を読み込みます
+[projects."/Users/ksonoda/src/one-platform-all/one-platform"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda/src/one-platform-all/one-platform-infra"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda/src/toughness-all/keycloakSSO"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda/src/test/one-platform-infra"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda/src/one-platform-all/one-platform-prd"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda/src/toughness-all/toughness-user-backend"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda/src/toughness-all/toughness-user-frontend"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda/Documents/Codex/2026-05-18/new-chat"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda/Documents/Codex/2026-05-18/google-chrome"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda/Documents/Codex/2026-05-18/codex-codex-github"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda/Documents/Codex/2026-05-18/codex-chrome-ui-claude-claude-in"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda/Documents/Codex/2026-05-18/chrome"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda/Documents/Codex/2026-05-18/teams-slack-google-chrome-1"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda/Documents/Codex/2026-05-18/kimi-claude-in-chrome-codex-chrome"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda/Documents/Codex/2026-05-18/codex-app-2-a-b-a"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda/Documents/Codex/2026-05-18/new-chat-2"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda/Documents/Codex/2026-05-19/isms-1q-ms365-teams-sharepoint-office"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda/Documents/Codex/2026-05-19/codex-1-2"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda/Documents/Codex/2026-05-19/datadog-chrome-chrome"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda/Documents/Codex/2026-05-19/chrome-aws-iam-codex-chrome"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda/Documents/Codex/2026-05-19/notion-notion-1-identity-center-control"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda/Documents/Codex/2026-05-20/chrome"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda/Documents/Codex/2026-05-20/cloud-md-agents-md-codex-agents"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda/Documents/Codex/2026-05-21/chrome-chrome-chrome"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda/Documents/Codex/2026-05-21/claude-code-codex-stable-stable"]
+trust_level = "trusted"
+
+[projects."/Users/ksonoda/Documents/Codex/2026-05-21/chrome-figma-figma"]
+trust_level = "trusted"
+
+
+## ============================================================================
+## Plugins
+## ============================================================================
+
+[plugins."github@openai-curated"]
+enabled = true  # OpenAI 公式キュレーションプラグインを有効にする
+
+[plugins."documents@openai-primary-runtime"]
+enabled = true
+
+[plugins."spreadsheets@openai-primary-runtime"]
+enabled = true
+
+[plugins."presentations@openai-primary-runtime"]
+enabled = true
+
+[plugins."browser@openai-bundled"]
+enabled = true
+
+[plugins."chrome@openai-bundled"]
+enabled = true
+
+[plugins."slack@openai-curated"]
+enabled = true
+
+[plugins."notion@openai-curated"]
+enabled = true
+
+[apps.connector_76869538009648d5b282a4bb21c3d157.tools.github_resolve_review_thread]
+approval_mode = "approve"
+
+[notice]
+hide_full_access_warning = true
+
+[marketplaces.openai-bundled]
+last_updated = "2026-05-20T00:27:47Z"
+source_type = "local"
+source = "/Users/ksonoda/.codex/.tmp/bundled-marketplaces/openai-bundled"
+
+[marketplaces.openai-primary-runtime]
+last_updated = "2026-05-19T02:00:04Z"
+source_type = "local"
+source = "/Users/ksonoda/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime"
+
+[hooks.state]
+
+[hooks.state."/Users/ksonoda/src/one-platform-all/one-platform/.codex/hooks.json:pre_tool_use:0:0"]
+trusted_hash = "sha256:3c1d8dd078d6478b8204da0486f0ec3e95a57edcb773ee5031bc5d9d4590322b"
+
+[hooks.state."/Users/ksonoda/src/one-platform-all/one-platform/.codex/hooks.json:user_prompt_submit:0:0"]
+trusted_hash = "sha256:2dd6a0346007eca56521f5b425b19faa47bfb6dd67e5d08890189ecb6e7bf3d8"
