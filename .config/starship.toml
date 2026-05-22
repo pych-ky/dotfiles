@@ -1,0 +1,20 @@
+[git_status]
+disabled = true
+
+[nodejs]
+disabled = true
+
+[gradle]
+disabled = true
+
+[java]
+disabled = true
+
+[package]
+disabled = true
+
+[terraform]
+disabled = true
+
+[aws]
+disabled = true
