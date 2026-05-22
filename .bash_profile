@@ -1,2 +1,2 @@
-# Load interactive Bash configuration for login shells.
+# bash はログインシェルだと .bashrc を読まないので明示的にロード
 [ -r "$HOME/.bashrc" ] && . "$HOME/.bashrc"
