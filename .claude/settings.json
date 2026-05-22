@@ -1,0 +1,205 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "language": "日本語",
+  "model": "opus",
+  "effortLevel": "xhigh",
+  "alwaysThinkingEnabled": true,
+  "skipDangerousModePermissionPrompt": false,
+  "showThinkingSummaries": true,
+  "showClearContextOnPlanAccept": true,
+  "plansDirectory": ".claude/plans",
+  "cleanupPeriodDays": 20,
+  "autoUpdatesChannel": "stable",
+  "attribution": {
+    "commit": ""
+  },
+  "env": {
+    "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1"
+  },
+  "enabledPlugins": {
+    "serena@claude-plugins-official": true,
+    "context7@claude-plugins-official": true,
+    "superpowers@claude-plugins-official": false
+  },
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(find *)",
+      "Bash(head *)",
+      "Bash(grep *)",
+      "Bash(rg *)",
+      "Bash(mkdir -p *)",
+      "Bash(touch *)",
+      "Bash(mv -i *)",
+      "Bash(chmod *)",
+      "Bash(git --version)",
+      "Bash(git status *)",
+      "Bash(git log *)",
+      "Bash(git diff *)",
+      "Bash(git config --list)",
+      "Bash(git config --get *)",
+      "Bash(git check-ignore *)",
+      "Bash(GIT_TRACE_EXCLUDE=1 git status .claude)",
+      "Bash(git fetch *)",
+      "Bash(git checkout *)",
+      "Bash(git checkout -b *)",
+      "Bash(git switch *)",
+      "Bash(git restore --staged *)",
+      "Bash(git commit *)",
+      "Bash(gh auth status)",
+      "Bash(gh issue list *)",
+      "Bash(gh issue view *)",
+      "Bash(gh pr list *)",
+      "Bash(gh pr view *)",
+      "Bash(gh pr diff *)",
+      "Bash(gh pr checks *)",
+      "Bash(gh pr checkout *)",
+      "Bash(gh repo view *)",
+      "Bash(npm view *)",
+      "Bash(npm run build *)",
+      "Bash(npm run lint *)",
+      "Bash(npm run check-types *)",
+      "Bash(npm run format:check *)",
+      "Bash(npm run test *)",
+      "Bash(npm run generate:icons *)",
+      "Bash(pnpm run build *)",
+      "Bash(pnpm run lint *)",
+      "Bash(pnpm run check-types *)",
+      "Bash(pnpm run format:check *)",
+      "Bash(pnpm run test *)",
+      "Bash(pnpm run generate:icons *)",
+      "Bash(npx --no-install tsc *)",
+      "Bash(npx --no-install prettier *)",
+      "Bash(npx --no-install eslint *)",
+      "Bash(npx --package=tailwindcss@^3.0.0 tailwindcss *)",
+      "Bash(prettier --help)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebFetch(domain:docs.coderabbit.ai)",
+      "WebFetch(domain:ui.shadcn.com)",
+      "WebFetch(domain:www.radix-ui.com)",
+      "WebFetch(domain:registry.terraform.io)",
+      "WebFetch(domain:releases.hashicorp.com)",
+      "mcp__plugin_serena_serena",
+      "mcp__plugin_context7_context7"
+    ],
+    "ask": [
+      "Bash(git rebase *)",
+      "Bash(git push *)",
+      "Bash(git merge *)",
+      "Bash(npm install *)",
+      "Bash(pnpm install *)",
+      "Bash(docker *)"
+    ],
+    "deny": [
+      "Bash(rm *)",
+      "Bash(rm -rf *)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(while *)",
+      "Bash(until *)",
+      "Bash(eval *)",
+      "Bash(exec *)",
+      "Bash(source *)",
+      "Bash(. *)",
+      "Bash(git rm *)",
+      "Bash(git reset --hard *)",
+      "Bash(git submodule add *)",
+      "Bash(git submodule deinit *)",
+      "Bash(git submodule rm *)",
+      "Bash(gh auth login)",
+      "Bash(gh auth logout)",
+      "Bash(npm ci *)",
+      "Bash(npm uninstall *)",
+      "Bash(npm update *)",
+      "Bash(npm run dev *)",
+      "Bash(npm run serve *)",
+      "Bash(npm run start *)",
+      "Bash(npm run storybook *)",
+      "Bash(pnpm add *)",
+      "Bash(pnpm remove *)",
+      "Bash(pnpm update *)",
+      "Bash(pnpm dlx *)",
+      "Bash(pnpm exec *)",
+      "Bash(pnpm run dev *)",
+      "Bash(pnpm dev *)",
+      "Bash(pnpm run serve *)",
+      "Bash(pnpm serve *)",
+      "Bash(pnpm run start *)",
+      "Bash(pnpm start *)",
+      "Bash(pnpm run storybook *)",
+      "Bash(pnpm storybook *)",
+      "Bash(npx http-server *)",
+      "Bash(npx serve *)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./secrets/**)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/credentials)",
+      "Read(~/.aws/config)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/*.p12)",
+      "Read(**/id_rsa)",
+      "Read(**/id_rsa.pub)",
+      "Read(**/id_ed25519*)"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "allowUnsandboxedCommands": true,
+    "failIfUnavailable": false,
+    "excludedCommands": [
+      "terraform *",
+      "terragrunt *",
+      "docker *",
+      "gh *"
+    ],
+    "filesystem": {
+      "denyRead": [
+        "~/.aws/credentials",
+        "~/.aws/config",
+        "~/.ssh"
+      ]
+    },
+    "network": {
+      "allowedDomains": [
+        "github.com",
+        "*.githubusercontent.com",
+        "api.github.com",
+        "registry.terraform.io",
+        "*.terraform.io",
+        "releases.hashicorp.com",
+        "*.hashicorp.com",
+        "registry.npmjs.org",
+        "*.npmjs.org",
+        "pypi.org",
+        "*.pypi.org",
+        "docs.anthropic.com",
+        "code.claude.com",
+        "*.amazonaws.com"
+      ]
+    }
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/pre-bash-guard.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "npx ccusage@latest statusline"
+  }
+}
