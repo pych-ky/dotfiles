@@ -5,6 +5,8 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 backup_dir="${HOME}/.dotfiles-backup/$(date +%Y%m%d%H%M%S)"
 dry_run=0
+backup_created=0
+backup_keep=5
 
 usage() {
   cat <<'EOF'
@@ -33,6 +35,23 @@ backup_path() {
   printf '%s/%s' "$backup_dir" "$relative"
 }
 
+prune_backups() {
+  local root="$HOME/.dotfiles-backup"
+  [[ -d "$root" ]] || return 0
+
+  local backups
+  backups="$(find "$root" -mindepth 1 -maxdepth 1 -type d -print | sort -r)"
+  local count=0
+  local backup
+
+  while IFS= read -r backup; do
+    [[ -n "$backup" ]] || continue
+    count=$((count + 1))
+    ((count <= backup_keep)) && continue
+    run rm -rf "$backup"
+  done <<<"$backups"
+}
+
 link_file() {
   local relative="$1"
   local source="$repo_dir/$relative"
@@ -58,6 +77,7 @@ link_file() {
     backup="$(backup_path "$target")"
     run mkdir -p "$(dirname "$backup")"
     run mv "$target" "$backup"
+    backup_created=1
   fi
 
   run ln -s "$source" "$target"
@@ -113,6 +133,10 @@ main() {
     printf 'dry run complete\n'
   elif [[ -d "$backup_dir" ]]; then
     printf 'backups: %s\n' "$backup_dir"
+    if (( backup_created )); then
+      prune_backups
+      printf 'kept latest %d backup generations\n' "$backup_keep"
+    fi
   fi
 }
 
