@@ -1,1 +1,5 @@
+# Serena MCP のローカル状態
 .serena/
+
+# Codex のローカルユーザー設定
+.codex/config.toml
