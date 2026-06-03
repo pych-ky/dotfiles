@@ -1,0 +1,117 @@
+## ============================================================================
+## Codex ベース設定 (/etc/codex/config.toml として配置)
+## ============================================================================
+
+# Codex は起動時に以下 2 つをマージし、同じキーは ~/.codex 側を優先する:
+# - /etc/codex/config.toml : この dotfiles が提供するベース設定
+# - ~/.codex/config.toml   : Codex App が管理するローカル設定 (git 管理しない)
+
+
+## ============================================================================
+## コア設定
+## ============================================================================
+
+# メインモデル
+model        = "gpt-5.5"  # 通常タスク用モデル
+review_model = "gpt-5.5"  # コードレビュー用モデル
+
+# 推論関連
+model_reasoning_effort   = "xhigh"   # 推論の深さ (low / medium / high / xhigh)
+model_reasoning_summary  = "auto"    # 推論要約の形式 (auto / concise / detailed / none)
+model_verbosity          = "medium"  # 応答の詳細度 (low / medium / high)
+hide_agent_reasoning     = true      # エージェント推論過程を非表示
+show_raw_agent_reasoning = false     # 生の推論データを非表示
+
+# 応答スタイル
+personality = "pragmatic"  # 性格プリセット (none / friendly / pragmatic)
+
+# Web 検索
+web_search = "live"  # Web 検索モード (disabled / cached / live)
+
+# 認証情報の保管場所
+cli_auth_credentials_store = "keyring"  # CLI 認証情報の保存先 (auto / keyring / file)
+
+
+## ============================================================================
+## 承認ポリシー & サンドボックス
+## ============================================================================
+
+approval_policy = "on-request"       # 操作の承認要否 (untrusted / on-request / never)
+sandbox_mode    = "workspace-write"  # サンドボックス制限 (read-only / workspace-write / danger-full-access)
+
+# workspace-write サンドボックスの詳細挙動
+[sandbox_workspace_write]
+network_access = true  # サンドボックス内からのネットワークアクセスを許可する
+
+
+## ============================================================================
+## シェル環境
+## ============================================================================
+
+[shell_environment_policy]
+inherit                 = "core"                # 親シェルから環境変数を継承する範囲 (all / core / none)
+ignore_default_excludes = false                 # デフォルト除外リストを無視しない
+exclude                 = ["AWS_*", "AZURE_*"]  # 除外する環境変数パターン
+set                     = {}                    # 追加で設定する環境変数
+
+
+## ============================================================================
+## ターミナル表示
+## ============================================================================
+
+[tui]
+notifications = true  # デスクトップ通知を有効にする
+# ステータスラインに表示する項目
+status_line = [
+  "model-with-reasoning",  # 使用モデルと推論レベル
+  "current-dir",           # カレントディレクトリ
+  "git-branch",            # Git ブランチ名
+  "context-used",          # 使用中のコンテキスト量
+  "five-hour-limit",       # 5 時間単位の利用上限
+  "weekly-limit",          # 週次の利用上限
+  "fast-mode",             # Fast モードの有効/無効
+]
+
+
+## ============================================================================
+## 履歴
+## ============================================================================
+
+[history]
+persistence = "save-all"  # 履歴の永続化 (none / save-all)
+
+
+## ============================================================================
+## 実験的機能
+## ============================================================================
+
+[features]
+prevent_idle_sleep = true  # アイドル時のスリープを防止する
+
+
+## ============================================================================
+## MCP サーバー
+## ============================================================================
+
+# Serena
+[mcp_servers.serena]
+command = "uvx"
+args = [
+  "-p",
+  "3.13",
+  "--from",
+  "git+https://github.com/oraios/serena",
+  "serena",
+  "start-mcp-server",
+  "--project-from-cwd",
+  "--context",
+  "codex",
+  "--open-web-dashboard",
+  "false",
+]
+startup_timeout_sec = 60.0  # 初回起動時は依存取得に時間がかかるため余裕を持たせる
+
+# Context7
+[mcp_servers.context7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp@latest"]

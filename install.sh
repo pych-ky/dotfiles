@@ -8,21 +8,24 @@ set -euo pipefail
 # グローバル設定
 # ============================================================================
 
-repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"  # このスクリプトを置いているリポジトリのルート
-backup_dir="${HOME}/.dotfiles-backup/$(date +%Y%m%d%H%M%S)"  # 今回実行分のバックアップ先
-dry_run=0          # 1 のとき実コマンドを実行せず内容のみ表示
-backup_created=0   # 退避が 1 件以上発生したかを示すフラグ
-backup_keep=5      # 保持するバックアップ世代数
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"    # このスクリプトを置いているリポジトリのルート
+backup_dir="${HOME}/.dotfiles-backup/$(date +%Y%m%d%H%M%S)" # 今回実行分のバックアップ先
+dry_run=0                                                   # 1 のとき実コマンドを実行せず内容のみ表示
+backup_created=0                                            # 退避が 1 件以上発生したかを示すフラグ
+backup_keep=5                                               # 保持するバックアップ世代数
 
+# 使い方を標準出力に表示
 usage() {
   cat <<'EOF'
 Usage: ./install.sh [--dry-run]
 
 Create symlinks from this repository into $HOME.
 Existing regular files are moved to ~/.dotfiles-backup/<timestamp>/ first.
+
+Options:
+  --dry-run  Show actions without changing files.
 EOF
 }
-
 
 # ============================================================================
 # ユーティリティ
@@ -30,9 +33,8 @@ EOF
 
 # dry-run 時はコマンドの表示のみ行う実行ラッパ
 run() {
-  if (( dry_run )); then
-    printf 'DRY-RUN: %q' "$1"
-    shift
+  if ((dry_run)); then
+    printf 'DRY-RUN:'
     printf ' %q' "$@"
     printf '\n'
   else
@@ -40,12 +42,16 @@ run() {
   fi
 }
 
+# シンボリックリンク作成結果のサマリを出力 (dry-run 時は "would link" に切り替え)
+report_link() {
+  local verb='linked'
+  ((dry_run)) && verb='would link'
+  printf '%s: %s -> %s\n' "$verb" "$1" "$2"
+}
+
 # $HOME からの相対パスをバックアップ先における同じ相対パスへ変換
 backup_path() {
-  local target="$1"
-  local relative="${target#"$HOME"/}"
-
-  printf '%s/%s' "$backup_dir" "$relative"
+  printf '%s/%s' "$backup_dir" "${1#"$HOME"/}"
 }
 
 # 古いバックアップを backup_keep 世代だけ残して削除
@@ -53,20 +59,19 @@ prune_backups() {
   local root="$HOME/.dotfiles-backup"
   [[ -d "$root" ]] || return 0
 
-  # ディレクトリ名がタイムスタンプ昇順なので、降順ソートして先頭から N 世代を保持
-  local backups
-  backups="$(find "$root" -mindepth 1 -maxdepth 1 -type d -print | sort -r)"
-  local count=0
-  local backup
-
-  while IFS= read -r backup; do
-    [[ -n "$backup" ]] || continue
-    count=$((count + 1))
-    ((count <= backup_keep)) && continue
-    run rm -rf "$backup"
-  done <<<"$backups"
+  # タイムスタンプ降順に並べ、先頭 backup_keep 件以降を削除対象とする
+  find "$root" -mindepth 1 -maxdepth 1 -type d -print |
+    sort -r |
+    tail -n +$((backup_keep + 1)) |
+    while IFS= read -r backup; do
+      run rm -rf "$backup"
+    done
 }
 
+# 既存リンクが指定 source を指しているかを判定
+is_correct_symlink() {
+  [[ -L "$1" && "$(readlink "$1")" == "$2" ]]
+}
 
 # ============================================================================
 # リンク作成
@@ -83,19 +88,17 @@ link_file() {
     return 1
   fi
 
+  if is_correct_symlink "$target" "$source"; then
+    printf 'ok: %s -> %s\n' "$target" "$source"
+    return 0
+  fi
+
   run mkdir -p "$(dirname "$target")"
 
   if [[ -L "$target" ]]; then
-    # 既存リンクが同一ターゲットなら冪等に何もせず終了
-    local current
-    current="$(readlink "$target")"
-    if [[ "$current" == "$source" ]]; then
-      printf 'ok: %s -> %s\n' "$target" "$source"
-      return 0
-    fi
     run rm "$target"
   elif [[ -e "$target" ]]; then
-    # 実体ファイルがある場合のみバックアップへ退避
+    # 実体ファイルはバックアップへ退避
     local backup
     backup="$(backup_path "$target")"
     run mkdir -p "$(dirname "$backup")"
@@ -104,35 +107,74 @@ link_file() {
   fi
 
   run ln -s "$source" "$target"
-  if (( dry_run )); then
-    printf 'would link: %s -> %s\n' "$target" "$source"
-  else
-    printf 'linked: %s -> %s\n' "$target" "$source"
-  fi
+  report_link "$target" "$source"
 }
 
+# ============================================================================
+# Codex
+# ============================================================================
+
+# config.toml より優先される /etc/codex/managed_config.toml の残存を警告
+warn_legacy_codex_managed_config() {
+  local target="/etc/codex/managed_config.toml"
+
+  [[ -e "$target" || -L "$target" ]] || return 0
+
+  printf 'warning: %s exists and has higher precedence than /etc/codex/config.toml\n' "$target" >&2
+  printf '         remove it if you want Codex App local config to override dotfiles defaults\n' >&2
+}
+
+# Codex ベース設定を /etc/codex/config.toml へ sudo でシンボリックリンク作成
+link_codex_system_config() {
+  local source="$repo_dir/.config/codex/config.toml"
+  local target="/etc/codex/config.toml"
+
+  if [[ ! -e "$source" ]]; then
+    printf 'missing source: %s\n' "$source" >&2
+    return 1
+  fi
+
+  if is_correct_symlink "$target" "$source"; then
+    printf 'ok: %s -> %s\n' "$target" "$source"
+    return 0
+  fi
+
+  if [[ -L "$target" ]]; then
+    printf 'existing symlink is different: %s -> %s\n' "$target" "$(readlink "$target")" >&2
+    return 1
+  elif [[ -e "$target" ]]; then
+    printf 'existing file: %s\n' "$target" >&2
+    printf 'move or remove it before installing the Codex base config symlink\n' >&2
+    return 1
+  fi
+
+  run sudo mkdir -p "$(dirname "$target")"
+  run sudo ln -s "$source" "$target"
+  report_link "$target" "$source"
+}
 
 # ============================================================================
 # エントリポイント
 # ============================================================================
 
+# CLI 引数を解釈し、リンク作成・Codex 関連処理・バックアップ整理を実行
 main() {
-  # 簡易引数解析、サポートは --dry-run / --help のみ
-  case "${1:-}" in
+  while (($#)); do
+    case "$1" in
     --dry-run)
       dry_run=1
-      shift
       ;;
-    -h|--help)
+    -h | --help)
       usage
       return 0
       ;;
-  esac
-
-  if (($#)); then
-    usage >&2
-    return 2
-  fi
+    *)
+      usage >&2
+      return 2
+      ;;
+    esac
+    shift
+  done
 
   # 管理対象ファイル一覧、リポジトリ相対パスと $HOME 相対パスは同一
   local files=(
@@ -145,7 +187,6 @@ main() {
     ".config/karabiner/karabiner.json"
     ".config/starship.toml"
     ".codex/AGENTS.md"
-    ".codex/config.toml"
     ".claude/CLAUDE.md"
     ".claude/settings.json"
     ".claude/hooks/inject-guidelines-context.sh"
@@ -159,12 +200,15 @@ main() {
     link_file "$file"
   done
 
+  warn_legacy_codex_managed_config
+  link_codex_system_config
+
   # 実バックアップが発生した場合のみ世代整理
-  if (( dry_run )); then
+  if ((dry_run)); then
     printf 'dry run complete\n'
   elif [[ -d "$backup_dir" ]]; then
     printf 'backups: %s\n' "$backup_dir"
-    if (( backup_created )); then
+    if ((backup_created)); then
       prune_backups
       printf 'kept latest %d backup generations\n' "$backup_keep"
     fi
