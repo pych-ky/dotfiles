@@ -189,7 +189,7 @@ main() {
     ".bashrc"
     ".zshenv"
     ".zshrc"
-    ".zsh/functions/aws.zsh"
+    ".shell/functions/aws.sh"
     ".zsh/functions/git-worktree.zsh"
     # terminal
     ".wezterm.lua"
