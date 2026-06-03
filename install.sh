@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 #
-# dotfiles を $HOME 配下にシンボリックリンクとして展開し、既存ファイルは ~/.dotfiles-backup/ に退避
+# ============================================================================
+# dotfiles を $HOME 配下にシンボリックリンク展開するスクリプト
+# ============================================================================
 
 set -euo pipefail
 
@@ -34,6 +36,7 @@ EOF
 # dry-run 時はコマンドの表示のみ行う実行ラッパ
 run() {
   if ((dry_run)); then
+    # %q で各引数を再実行可能な形にクオートして表示
     printf 'DRY-RUN:'
     printf ' %q' "$@"
     printf '\n'
@@ -59,7 +62,7 @@ prune_backups() {
   local root="$HOME/.dotfiles-backup"
   [[ -d "$root" ]] || return 0
 
-  # タイムスタンプ降順に並べ、先頭 backup_keep 件以降を削除対象とする
+  # タイムスタンプ降順に並べ、先頭 backup_keep 件以降を削除対象化
   find "$root" -mindepth 1 -maxdepth 1 -type d -print |
     sort -r |
     tail -n +$((backup_keep + 1)) |
@@ -83,6 +86,7 @@ link_file() {
   local source="$repo_dir/$relative"
   local target="$HOME/$relative"
 
+  # -L も見るのは壊れたシンボリックリンクを source として扱うため (-e は壊れたリンクで false)
   if [[ ! -e "$source" && ! -L "$source" ]]; then
     printf 'missing source: %s\n' "$source" >&2
     return 1
@@ -93,20 +97,20 @@ link_file() {
     return 0
   fi
 
-  run mkdir -p "$(dirname "$target")"
+  run mkdir -p "$(dirname "$target")" || return
 
   if [[ -L "$target" ]]; then
-    run rm "$target"
+    run rm "$target" || return
   elif [[ -e "$target" ]]; then
     # 実体ファイルはバックアップへ退避
     local backup
     backup="$(backup_path "$target")"
-    run mkdir -p "$(dirname "$backup")"
-    run mv "$target" "$backup"
+    run mkdir -p "$(dirname "$backup")" || return
+    run mv "$target" "$backup" || return
     backup_created=1
   fi
 
-  run ln -s "$source" "$target"
+  run ln -s "$source" "$target" || return
   report_link "$target" "$source"
 }
 
@@ -139,6 +143,7 @@ link_codex_system_config() {
     return 0
   fi
 
+  # link_file と異なりシステム領域 (/etc) のファイルは退避せず、競合時は中断
   if [[ -L "$target" ]]; then
     printf 'existing symlink is different: %s -> %s\n' "$target" "$(readlink "$target")" >&2
     return 1
@@ -148,8 +153,8 @@ link_codex_system_config() {
     return 1
   fi
 
-  run sudo mkdir -p "$(dirname "$target")"
-  run sudo ln -s "$source" "$target"
+  run sudo mkdir -p "$(dirname "$target")" || return
+  run sudo ln -s "$source" "$target" || return
   report_link "$target" "$source"
 }
 
@@ -159,6 +164,7 @@ link_codex_system_config() {
 
 # CLI 引数を解釈し、リンク作成・Codex 関連処理・バックアップ整理を実行
 main() {
+  # CLI 引数を解釈
   while (($#)); do
     case "$1" in
     --dry-run)
@@ -176,42 +182,65 @@ main() {
     shift
   done
 
-  # 管理対象ファイル一覧、リポジトリ相対パスと $HOME 相対パスは同一
+  # 管理対象ファイル一覧、リポジトリ相対パスと $HOME 相対パスは同一 (順序は挙動に影響なし)
   local files=(
+    # shell
     ".bash_profile"
     ".bashrc"
     ".zshenv"
     ".zshrc"
+    ".zsh/functions/aws.zsh"
+    ".zsh/functions/git-worktree.zsh"
+    # terminal
     ".wezterm.lua"
-    ".config/agents/AGENTS.md"
-    ".config/karabiner/karabiner.json"
     ".config/starship.toml"
+    # keyboard
+    ".config/karabiner/karabiner.json"
+    # AI エージェント
+    ".config/agents/AGENTS.md"
     ".codex/AGENTS.md"
     ".claude/CLAUDE.md"
     ".claude/settings.json"
     ".claude/hooks/inject-guidelines-context.sh"
     ".claude/hooks/pre-bash-guard.sh"
-    ".zsh/functions/aws.zsh"
-    ".zsh/functions/git-worktree.zsh"
+    # AWS プロファイル復元
+    ".aws/load-active-profile.sh"
   )
 
+  # 各ファイルを $HOME 配下にリンクし、失敗したものを記録
   local file
+  local -a failed_items
+  failed_items=()
+
   for file in "${files[@]}"; do
-    link_file "$file"
+    if ! link_file "$file"; then
+      failed_items+=("$file")
+    fi
   done
 
+  # Codex ベース設定 (/etc/codex/config.toml) を sudo でリンク
   warn_legacy_codex_managed_config
-  link_codex_system_config
+  if ! link_codex_system_config; then
+    failed_items+=("/etc/codex/config.toml")
+  fi
 
-  # 実バックアップが発生した場合のみ世代整理
+  # バックアップディレクトリの後処理 (dry-run 表示 / 完了報告 / 世代整理)
   if ((dry_run)); then
     printf 'dry run complete\n'
   elif [[ -d "$backup_dir" ]]; then
     printf 'backups: %s\n' "$backup_dir"
+    # 実バックアップが発生した場合のみ世代整理
     if ((backup_created)); then
       prune_backups
       printf 'kept latest %d backup generations\n' "$backup_keep"
     fi
+  fi
+
+  # 失敗があれば一覧を stderr に出して非ゼロ終了
+  if ((${#failed_items[@]} > 0)); then
+    printf 'failed items:\n' >&2
+    printf '  %s\n' "${failed_items[@]}" >&2
+    return 1
   fi
 }
 
