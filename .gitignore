@@ -1,5 +1,12 @@
+# Codex のローカル設定・生成物
+.codex/config.toml
+.config/codex/memories/
+.config/codex/tmp/
+
+# Claude Code のローカル生成物
+.claude/plans/
+.claude/projects/
+.claude/todos/
+
 # Serena MCP のローカル状態
 .serena/
-
-# Codex のローカルユーザー設定
-.codex/config.toml

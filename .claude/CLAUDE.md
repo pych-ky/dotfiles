@@ -1,1 +1,3 @@
-@/Users/ksonoda/.config/agents/AGENTS.md
+# CLAUDE.md
+
+@~/.config/agents/AGENTS.md
