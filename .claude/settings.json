@@ -8,6 +8,7 @@
   "skipDangerousModePermissionPrompt": false,
   "showThinkingSummaries": true,
   "showClearContextOnPlanAccept": true,
+  "agentPushNotifEnabled": true,
   "plansDirectory": ".claude/plans",
   "cleanupPeriodDays": 20,
   "autoUpdatesChannel": "stable",
