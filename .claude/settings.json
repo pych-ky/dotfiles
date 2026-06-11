@@ -5,7 +5,6 @@
   "model": "claude-fable-5[1m]",
   "effortLevel": "xhigh",
   "alwaysThinkingEnabled": true,
-  "skipDangerousModePermissionPrompt": false,
   "showThinkingSummaries": true,
   "showClearContextOnPlanAccept": true,
   "agentPushNotifEnabled": true,
@@ -23,8 +22,9 @@
     "context7@claude-plugins-official": true,
     "superpowers@claude-plugins-official": false
   },
+  "skipDangerousModePermissionPrompt": true,
   "permissions": {
-    "defaultMode": "acceptEdits",
+    "defaultMode": "bypassPermissions",
     "allow": [
       "Bash(ls *)",
       "Bash(cat *)",
@@ -89,14 +89,6 @@
       "mcp__plugin_serena_serena",
       "mcp__plugin_context7_context7"
     ],
-    "ask": [
-      "Bash(git rebase *)",
-      "Bash(git push *)",
-      "Bash(git merge *)",
-      "Bash(npm install *)",
-      "Bash(pnpm install *)",
-      "Bash(docker *)"
-    ],
     "deny": [
       "Bash(rm *)",
       "Bash(rm -rf *)",
@@ -110,11 +102,22 @@
       "Bash(. *)",
       "Bash(git rm *)",
       "Bash(git reset --hard *)",
+      "Bash(git push --force)",
+      "Bash(git push --force *)",
+      "Bash(git push -f)",
+      "Bash(git push -f *)",
       "Bash(git submodule add *)",
       "Bash(git submodule deinit *)",
       "Bash(git submodule rm *)",
       "Bash(gh auth login)",
       "Bash(gh auth logout)",
+      "Bash(docker rm *)",
+      "Bash(docker rmi *)",
+      "Bash(docker volume rm *)",
+      "Bash(docker volume prune *)",
+      "Bash(docker system prune *)",
+      "Bash(docker compose down -v)",
+      "Bash(docker compose down -v *)",
       "Bash(npm ci *)",
       "Bash(npm uninstall *)",
       "Bash(npm update *)",
