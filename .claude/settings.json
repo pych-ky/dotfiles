@@ -5,6 +5,7 @@
   "model": "claude-fable-5[1m]",
   "effortLevel": "xhigh",
   "alwaysThinkingEnabled": true,
+  "autoMemoryEnabled": false,
   "showThinkingSummaries": true,
   "showClearContextOnPlanAccept": true,
   "agentPushNotifEnabled": true,
