@@ -206,6 +206,8 @@
   },
   "statusLine": {
     "type": "command",
-    "command": "npx ccusage@latest statusline"
+    "command": "$HOME/.claude/hooks/statusline.sh",
+    "padding": 0,
+    "refreshInterval": 10
   }
 }
