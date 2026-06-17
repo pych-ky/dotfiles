@@ -199,6 +199,7 @@ main() {
     # AI エージェント
     ".config/agents/AGENTS.md"
     ".codex/AGENTS.md"
+    ".codex/browser/config.toml"
     ".claude/CLAUDE.md"
     ".claude/settings.json"
     ".claude/hooks/inject-guidelines-context.sh"

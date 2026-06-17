@@ -60,8 +60,7 @@ set                     = {}                    # 追加で設定する環境変
 ## ============================================================================
 
 [tui]
-notifications = true  # デスクトップ通知を有効化
-# ステータスラインに表示する項目
+notifications = true       # デスクトップ通知を有効化
 status_line = [
   "model-with-reasoning",  # 使用モデルと推論レベル
   "current-dir",           # カレントディレクトリ
@@ -145,6 +144,10 @@ enabled = true
 [plugins."documents@openai-primary-runtime"]
 enabled = true
 
+# PDF
+[plugins."pdf@openai-primary-runtime"]
+enabled = true
+
 # Spreadsheets
 [plugins."spreadsheets@openai-primary-runtime"]
 enabled = true
@@ -159,12 +162,28 @@ enabled = true
 ## ============================================================================
 
 [desktop]
+# 提案表示
+ambient-suggestions-enabled = false  # 提案表示を無効化
+
 # 入力操作
-composerEnterBehavior = "cmdIfMultiline"  # 複数行入力時は Cmd/Ctrl+Enter で送信
+composerEnterBehavior                     = "cmdIfMultiline"  # 複数行入力時は Cmd/Ctrl+Enter で送信
+hotkey-window-projectless-default-enabled = true              # グローバルホットキーでプロジェクトなしウィンドウを開く
 
 # 実行中の follow-up
 followUpQueueMode = "steer"  # 実行中の follow-up で現在の turn を steer
 
+# 表示
+conversationDetailMode    = "STEPS_COMMANDS"  # 会話詳細にステップとコマンドを表示
+git-show-sidebar-pr-icons = true              # Git サイドバーに PR アイコンを表示
+show-context-window-usage = true              # コンテキスト使用量を表示
+
+# レビュー
+reviewDelivery = "inline"  # レビュー結果をインラインで表示
+
 # 電源管理
 preventSleepWhileRunning             = true  # チャット実行中のスリープを防止
 keepRemoteControlAwakeWhilePluggedIn = true  # 電源接続中の Remote Control で app suspension を防止
+
+# ファイルを開く
+[desktop.open-in-target-preferences]
+global = "vscode"  # ファイルを開く既定ターゲット
