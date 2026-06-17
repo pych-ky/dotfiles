@@ -204,6 +204,7 @@ main() {
     ".claude/settings.json"
     ".claude/hooks/inject-guidelines-context.sh"
     ".claude/hooks/pre-bash-guard.sh"
+    ".claude/hooks/statusline.sh"
     # AWS プロファイル復元
     ".aws/load-active-profile.sh"
   )

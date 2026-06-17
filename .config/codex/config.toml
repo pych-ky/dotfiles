@@ -60,7 +60,9 @@ set                     = {}                    # 追加で設定する環境変
 ## ============================================================================
 
 [tui]
-notifications = true       # デスクトップ通知を有効化
+notifications          = true  # デスクトップ通知を有効化
+status_line_use_colors = true  # ステータスラインの項目別色分けを有効化
+# ステータスラインの表示項目は Codex と Claude で共用
 status_line = [
   "model-with-reasoning",  # 使用モデルと推論レベル
   "current-dir",           # カレントディレクトリ
