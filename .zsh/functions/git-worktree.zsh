@@ -29,6 +29,7 @@ _wto_path_has_branch() {
   local branch="$2"
 
   git worktree list --porcelain | awk -v path="$PWD/$worktree_path" -v branch="refs/heads/$branch" '
+    # パスは空白を含みうるため "worktree " プレフィックス以降を丸ごと取得
     $1 == "worktree" { worktree = substr($0, 10) }
     $1 == "branch" && worktree == path && $2 == branch { found = 1 }
     END { exit found ? 0 : 1 }

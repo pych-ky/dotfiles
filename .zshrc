@@ -1,8 +1,8 @@
 # typeset -U で path / PATH の重複要素を自動的に除去
 typeset -U path PATH
 path=(
-  "$HOME/.local/bin"           # ユーザーローカルのバイナリ (後から作られても使えるよう常に追加)
-  /usr/local/opt/git/bin(N-/)  # Homebrew 版 git (環境依存のため存在時のみ)
+  "$HOME/.local/bin"           # ユーザーローカルのバイナリ (常に追加)
+  /usr/local/opt/git/bin(N-/)  # Homebrew 版 git (存在時のみ)
   $path
 )
 

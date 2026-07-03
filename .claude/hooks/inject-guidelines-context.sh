@@ -34,12 +34,8 @@ default_rules_globs() {
   esac
 }
 
-# 注入する Cursor ルールファイル (.cursor/rules 配下の .mdc) を絞り込んで列挙
-# 全ルールを毎回注入するとコンテキストが膨らむので、ファイル名パターンで対象を絞り込む仕組み
-# INJECT_RULES_GLOBS に ":" 区切りでパターンを任意個並べ、いずれかに一致した .mdc すべてが対象
-#   "*.mdc"                          -> 配下の全 .mdc (既定)
-#   "overview.mdc:*_guidelines.mdc"  -> overview.mdc と、末尾が _guidelines.mdc の全ファイル
-# 未指定時は default_rules_globs が返すプロジェクト別の既定パターン
+# 注入する Cursor ルール (.cursor/rules 配下の .mdc) を列挙
+# INJECT_RULES_GLOBS (":" 区切りの glob) で絞り込み、未指定時はプロジェクト別の既定パターンを使う
 find_rule_files() {
   [[ -d "$rules_dir" ]] || return 0
 
