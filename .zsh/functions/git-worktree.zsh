@@ -6,10 +6,11 @@
 _wto_branches() {
   {
     git for-each-ref --format='%(refname:short)' refs/heads
-    git for-each-ref --format='%(refname:short)' refs/remotes/origin |
-      sed 's#^origin/##' |
-      grep -vE '^(HEAD|main|master)$' || true
-  } | awk '!seen[$0]++'
+    git for-each-ref --format='%(refname)' refs/remotes/origin |
+      sed 's#^refs/remotes/origin/##'
+  } |
+    grep -vE '^(HEAD|main|master)$' |
+    awk '!seen[$0]++'
 }
 
 # パス衝突回避用の安定サフィックスとして文字列の SHA-1 先頭 6 文字を返却
@@ -23,11 +24,12 @@ _wto_hash6() {
 
 # 指定 path / branch の worktree が登録済みかを確認し、一致時は終了コード 0 を返却
 _wto_path_has_branch() {
-  local path="$1"
+  # zsh では path が PATH と連動する特殊変数のため、local 変数にその名前を使わない
+  local worktree_path="$1"
   local branch="$2"
 
-  git worktree list --porcelain | awk -v path="$PWD/$path" -v branch="refs/heads/$branch" '
-    $1 == "worktree" { worktree = $2 }
+  git worktree list --porcelain | awk -v path="$PWD/$worktree_path" -v branch="refs/heads/$branch" '
+    $1 == "worktree" { worktree = substr($0, 10) }
     $1 == "branch" && worktree == path && $2 == branch { found = 1 }
     END { exit found ? 0 : 1 }
   '
@@ -61,16 +63,16 @@ wto() {
     leaf="${branch##*/}"
     dir=".worktrees/$leaf"
 
-    if [ -e "$dir" ]; then
-      # 既に同じ branch が割り当て済みなら冪等にスキップ
-      if _wto_path_has_branch "$dir" "$branch"; then
-        echo "exists: $dir (branch=$branch)"
-        created_paths+=("$dir")
-        continue
-      fi
-
-      # leaf 名が衝突するだけのときはハッシュサフィックスを付けて回避
+    # leaf 名が別ブランチに使われているだけのときはハッシュサフィックスを付けて回避
+    if [ -e "$dir" ] && ! _wto_path_has_branch "$dir" "$branch"; then
       dir=".worktrees/${leaf}__$(_wto_hash6 "$branch")"
+    fi
+
+    # 確定したパスに既に同じ branch が割り当て済みなら冪等にスキップ
+    if [ -e "$dir" ] && _wto_path_has_branch "$dir" "$branch"; then
+      echo "exists: $dir (branch=$branch)"
+      created_paths+=("$dir")
+      continue
     fi
 
     # ローカルにブランチが無ければ origin から追跡ブランチを作成
@@ -78,7 +80,8 @@ wto() {
       git branch --track "$branch" "origin/$branch" >/dev/null 2>&1 || true
     fi
 
-    if git worktree add "$dir" "$branch" >/dev/null 2>&1; then
+    # stdout は抑制しつつ、失敗原因が分かるよう stderr は通す
+    if git worktree add "$dir" "$branch" >/dev/null; then
       echo "created: $dir (branch=$branch)"
       created_paths+=("$dir")
     else

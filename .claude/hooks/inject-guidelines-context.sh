@@ -76,11 +76,16 @@ trap 'rm -f "$context_file"' EXIT
 if [ -t 1 ]; then
   cat "$context_file"
 elif grep -q '[^[:space:]]' "$context_file"; then
-  jq -n --rawfile context "$context_file" '{
-    suppressOutput: true,
-    hookSpecificOutput: {
-      hookEventName: "UserPromptSubmit",
-      additionalContext: $context
-    }
-  }'
+  if command -v jq >/dev/null 2>&1; then
+    jq -n --rawfile context "$context_file" '{
+      suppressOutput: true,
+      hookSpecificOutput: {
+        hookEventName: "UserPromptSubmit",
+        additionalContext: $context
+      }
+    }'
+  else
+    # jq が無ければ生テキストで返却
+    cat "$context_file"
+  fi
 fi

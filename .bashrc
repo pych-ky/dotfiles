@@ -1,11 +1,12 @@
 # ~/.local/bin と Homebrew Git を標準 PATH より優先
-for dir in "$HOME/.local/bin" /usr/local/opt/git/bin; do
+for dir in /usr/local/opt/git/bin "$HOME/.local/bin"; do
   [ -d "$dir" ] || continue
   case ":$PATH:" in
     *":$dir:"*) ;;
     *) PATH="$dir:$PATH" ;;
   esac
 done
+unset dir
 export PATH
 
 # asdf を初期化して shim を PATH に反映

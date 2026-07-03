@@ -306,11 +306,6 @@ status_line_use_colors="$(toml_scalar "$codex_config" status_line_use_colors)"
 style_code_for_item() {
   local item="$1"
 
-  if [[ "$status_line_use_colors" != true ]]; then
-    printf '2'
-    return 0
-  fi
-
   case "$item" in
   model | model-name | model-with-reasoning | reasoning | run-state | status | fast-mode | raw-output | permissions | approval-mode | approval | codex-version | thread-id | session-id)
     printf '36'

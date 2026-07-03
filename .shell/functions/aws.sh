@@ -47,6 +47,11 @@ __aws_login_sso_profile() {
   local profile="${1:?usage: __aws_login_sso_profile <profile> <credential-mode>}"
   local credential_mode="${2:?usage: __aws_login_sso_profile <profile> <credential-mode>}"
 
+  if ! command -v aws >/dev/null 2>&1; then
+    printf 'aws: aws CLI not found\n' >&2
+    return 127
+  fi
+
   __aws_require_sso_profile "$profile" || return
   __aws_clear_credentials
 
@@ -57,8 +62,11 @@ __aws_login_sso_profile() {
       export AWS_PROFILE="$profile"
       ;;
     env)
-      aws sso login --profile "$profile" >/dev/null || return
-      eval "$(aws configure export-credentials --profile "$profile" --format env)" || return
+      aws sso login --profile "$profile" || return
+      # コマンド置換の終了コードは eval に伝わらないため、一旦変数に受けて失敗を検知する
+      local credentials
+      credentials="$(aws configure export-credentials --profile "$profile" --format env)" || return
+      eval "$credentials"
       ;;
     *)
       printf 'aws: unknown credential mode: %s\n' "$credential_mode" >&2

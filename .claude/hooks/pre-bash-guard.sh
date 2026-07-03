@@ -63,7 +63,9 @@ detect_block_reasons() {
 
   emit_if_matches "$command" "$command_start$rm_recursive_force" "rm -rf / rm -Rf / rm --recursive --force は許可していません。"
   emit_if_matches "$command" "${command_start}sudo[[:space:]]+" "sudo の使用は Claude からは許可していません。"
-  emit_if_matches "$command" '(curl|wget)[^|]*\|[[:space:]]*(sh|bash)' "curl / wget ... | sh / bash 形式のコマンドは許可していません。"
+  # (sh|bash) の直後がコマンド名構成文字 (英数字 _ . -) でないことを要求し、
+  # shasum / shuf など前方一致コマンドの誤検知を防ぎつつ、リダイレクト直結 (| sh>log 等) は検知する
+  emit_if_matches "$command" '(curl|wget)[^|]*\|[[:space:]]*(sh|bash)($|[^[:alnum:]_.-])' "curl / wget ... | sh / bash 形式のコマンドは許可していません。"
 }
 
 # ============================================================================
@@ -79,7 +81,13 @@ print_block_json() {
   details=$(printf '%s\n' "$@" | sed 's/^/- /')
 
   local msg="危険な可能性がある Bash コマンドをブロックしました。"$'\n\n'"Command:"$'\n  '"$command"$'\n\n'"Reasons:"$'\n'"$details"
-  jq -n --arg msg "$msg" '{decision:"block", reason:$msg}'
+  jq -n --arg msg "$msg" '{
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: $msg
+    }
+  }'
 }
 
 # ============================================================================
@@ -106,9 +114,9 @@ main() {
   done < <(detect_block_reasons "$command")
   ((${#reasons[@]})) || return 0
 
-  # 1 件以上ヒットしたら JSON を返して exit 2 でブロック
+  # 1 件以上ヒットしたら permissionDecision: deny の JSON を返してブロック
   print_block_json "$command" "${reasons[@]}"
-  return 2
+  return 0
 }
 
 main "$@"
