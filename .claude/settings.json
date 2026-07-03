@@ -2,7 +2,8 @@
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "language": "日本語",
   "theme": "dark",
-  "model": "claude-opus-4-8[1m]",
+  "tui": "fullscreen",
+  "model": "claude-fable-5[1m]",
   "effortLevel": "xhigh",
   "alwaysThinkingEnabled": true,
   "autoMemoryEnabled": false,
@@ -11,7 +12,7 @@
   "agentPushNotifEnabled": true,
   "plansDirectory": ".claude/plans",
   "cleanupPeriodDays": 20,
-  "autoUpdatesChannel": "stable",
+  "autoUpdatesChannel": "latest",
   "attribution": {
     "commit": ""
   },
