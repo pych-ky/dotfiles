@@ -10,6 +10,7 @@
   "showThinkingSummaries": true,
   "showClearContextOnPlanAccept": true,
   "agentPushNotifEnabled": true,
+  "enableWorkflows": true,
   "plansDirectory": ".claude/plans",
   "cleanupPeriodDays": 20,
   "autoUpdatesChannel": "latest",
