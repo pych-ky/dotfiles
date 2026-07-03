@@ -66,6 +66,7 @@ prune_backups() {
   # タイムスタンプ降順に並べ、先頭 backup_keep 件以降を削除対象化
   {
     find "$root" -mindepth 1 -maxdepth 1 -type d -print
+    # dry-run では未作成の今回分 backup_dir も削除候補の算出に含める
     if ((dry_run && backup_created)); then
       printf '%s\n' "$backup_dir"
     fi
