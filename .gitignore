@@ -4,6 +4,7 @@
 .config/codex/tmp/
 
 # Claude Code のローカル生成物
+.claude/.cc-writes/
 .claude/plans/
 .claude/projects/
 .claude/todos/

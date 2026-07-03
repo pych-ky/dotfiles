@@ -8,7 +8,7 @@ return {
       mods = "CMD",
       action = wezterm.action_callback(function(window, pane)
         local dims = pane:get_dimensions()
-        -- スクロールバックの先頭から末尾までを矩形範囲として取得
+        -- スクロールバックの先頭から末尾までを 1 つの選択範囲として取得
         local text = pane:get_text_from_region(
           0,
           dims.scrollback_top,

@@ -1,2 +1,6 @@
-full_cdp_access_enabled = true
-approval_mode = "never_ask"
+## ============================================================================
+## Codex browser plugin 設定 (~/.codex/browser/config.toml として配置)
+## ============================================================================
+
+full_cdp_access_enabled = true         # CDP (Chrome DevTools Protocol) へのフルアクセスを許可
+approval_mode           = "never_ask"  # ブラウザ操作ごとの承認を求めない

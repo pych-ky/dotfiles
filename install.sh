@@ -19,13 +19,14 @@ backup_keep=5                                               # 保持するバッ
 # 使い方を標準出力に表示
 usage() {
   cat <<'EOF'
-Usage: ./install.sh [--dry-run]
+Usage: ./install.sh [--dry-run] [-h | --help]
 
 Create symlinks from this repository into $HOME.
 Existing regular files are moved to ~/.dotfiles-backup/<timestamp>/ first.
 
 Options:
-  --dry-run  Show actions without changing files.
+  --dry-run   Show actions without changing files.
+  -h, --help  Show this help and exit.
 EOF
 }
 
@@ -63,7 +64,12 @@ prune_backups() {
   [[ -d "$root" ]] || return 0
 
   # タイムスタンプ降順に並べ、先頭 backup_keep 件以降を削除対象化
-  find "$root" -mindepth 1 -maxdepth 1 -type d -print |
+  {
+    find "$root" -mindepth 1 -maxdepth 1 -type d -print
+    if ((dry_run && backup_created)); then
+      printf '%s\n' "$backup_dir"
+    fi
+  } |
     sort -r |
     tail -n +$((backup_keep + 1)) |
     while IFS= read -r backup; do
@@ -228,6 +234,10 @@ main() {
 
   # バックアップディレクトリの後処理 (dry-run 表示 / 完了報告 / 世代整理)
   if ((dry_run)); then
+    # 実行時に発生する世代整理もそのまま表示
+    if ((backup_created)); then
+      prune_backups
+    fi
     printf 'dry run complete\n'
   elif [[ -d "$backup_dir" ]]; then
     printf 'backups: %s\n' "$backup_dir"
