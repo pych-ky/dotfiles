@@ -1,5 +1,12 @@
+# Homebrew の PATH と HOMEBREW_PREFIX を反映 (Apple Silicon: /opt/homebrew, Intel: /usr/local)
+if [ -x /opt/homebrew/bin/brew ]; then
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [ -x /usr/local/bin/brew ]; then
+  eval "$(/usr/local/bin/brew shellenv)"
+fi
+
 # ~/.local/bin と Homebrew Git を標準 PATH より優先
-for dir in /usr/local/opt/git/bin "$HOME/.local/bin"; do
+for dir in "${HOMEBREW_PREFIX:-/usr/local}/opt/git/bin" "$HOME/.local/bin"; do
   [ -d "$dir" ] || continue
   case ":$PATH:" in
     *":$dir:"*) ;;
@@ -8,9 +15,6 @@ for dir in /usr/local/opt/git/bin "$HOME/.local/bin"; do
 done
 unset dir
 export PATH
-
-# asdf を初期化して shim を PATH に反映
-[ -r /usr/local/opt/asdf/libexec/asdf.sh ] && . /usr/local/opt/asdf/libexec/asdf.sh
 
 # aws-use / aws-env / aws-clear の読み込み
 [ -r "$HOME/.shell/functions/aws.sh" ] && . "$HOME/.shell/functions/aws.sh"

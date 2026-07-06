@@ -1,13 +1,17 @@
+# Homebrew の PATH と HOMEBREW_PREFIX を反映 (Apple Silicon: /opt/homebrew, Intel: /usr/local)
+if [[ -x /opt/homebrew/bin/brew ]]; then
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [[ -x /usr/local/bin/brew ]]; then
+  eval "$(/usr/local/bin/brew shellenv)"
+fi
+
 # typeset -U で path / PATH の重複要素を自動的に除去
 typeset -U path PATH
 path=(
-  "$HOME/.local/bin"           # ユーザーローカルのバイナリ (常に追加)
-  /usr/local/opt/git/bin(N-/)  # Homebrew 版 git (存在時のみ)
+  "$HOME/.local/bin"                               # ユーザーローカルのバイナリ (常に追加)
+  ${HOMEBREW_PREFIX:-/usr/local}/opt/git/bin(N-/)  # Homebrew 版 git (存在時のみ)
   $path
 )
-
-# バージョン管理ツール asdf
-[ -r /usr/local/opt/asdf/libexec/asdf.sh ] && . /usr/local/opt/asdf/libexec/asdf.sh
 
 # dumb ターミナル以外で starship プロンプトを初期化
 if [[ "$TERM" != "dumb" ]] && command -v starship >/dev/null 2>&1; then
