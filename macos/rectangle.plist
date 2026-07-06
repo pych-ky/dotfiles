@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>SUEnableAutomaticChecks</key>
+	<false/>
+	<key>SUHasLaunchedBefore</key>
+	<true/>
+	<key>allowAnyShortcut</key>
+	<true/>
+	<key>alternateDefaultShortcuts</key>
+	<true/>
+	<key>footprintAnimationDurationMultiplier</key>
+	<real>0.0</real>
+	<key>hapticFeedbackOnSnap</key>
+	<integer>2</integer>
+	<key>internalTilingNotified</key>
+	<true/>
+	<key>landscapeSnapAreas</key>
+	<string>[4,{"action":21},6,{"action":13},1,{"action":20},3,{"action":24},5,{"action":23},2,{"action":30},7,{"action":2},8,{"action":14}]</string>
+	<key>lastVersion</key>
+	<string>99</string>
+	<key>launchOnLogin</key>
+	<true/>
+	<key>reflowTodo</key>
+	<dict>
+		<key>keyCode</key>
+		<integer>45</integer>
+		<key>modifierFlags</key>
+		<integer>786432</integer>
+	</dict>
+	<key>subsequentExecutionMode</key>
+	<integer>1</integer>
+	<key>toggleTodo</key>
+	<dict>
+		<key>keyCode</key>
+		<integer>11</integer>
+		<key>modifierFlags</key>
+		<integer>786432</integer>
+	</dict>
+	<key>unsnapRestore</key>
+	<integer>2</integer>
+	<key>windowSnapping</key>
+	<integer>1</integer>
+</dict>
+</plist>
