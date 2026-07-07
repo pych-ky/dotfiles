@@ -39,9 +39,6 @@ defaults write com.apple.inputmethod.Kotoeri JIMPrefLiveConversionKey -bool fals
 # 入力中の自動修正を無効化
 defaults write com.apple.inputmethod.Kotoeri JIMPrefAutocorrectionKey -bool false
 
-# メニューバーに入力メニュー (「あ」アイコン) を表示
-defaults write com.apple.TextInputMenu visible -bool true
-
 # ============================================================================
 # マウス / トラックパッド
 # ============================================================================
@@ -88,9 +85,6 @@ defaults write com.apple.finder ShowPathbar -bool true
 # デフォルトの表示スタイルをリスト表示に
 defaults write com.apple.finder FXPreferredViewStyle -string Nlsv
 
-# 新規ウィンドウで「最近の項目」を開く
-defaults write com.apple.finder NewWindowTarget -string PfAF
-
 # ============================================================================
 # メニューバー / コントロールセンター
 # ============================================================================
@@ -115,14 +109,14 @@ fi
 defaults import com.knollsoft.Rectangle "$script_dir/rectangle.plist"
 
 # ============================================================================
-# 電源管理 (sudo が必要、失敗しても後続の反映処理は続行)
+# 電源管理 (認証済み sudo が必要。未認証時はプロンプトを出さず警告して続行)
 # ============================================================================
 
 # 電源アダプタ接続時は自動スリープさせない
-sudo pmset -c sleep 0 || printf 'warning: skipped pmset sleep setting\n' >&2
+sudo -n pmset -c sleep 0 2>/dev/null || printf 'warning: skipped pmset sleep setting\n' >&2
 
 # ディスプレイを自動的にオフにしない (好みに応じて分数を調整)
-sudo pmset -a displaysleep 0 || printf 'warning: skipped pmset displaysleep setting\n' >&2
+sudo -n pmset -a displaysleep 0 2>/dev/null || printf 'warning: skipped pmset displaysleep setting\n' >&2
 
 # ============================================================================
 # 反映

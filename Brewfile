@@ -5,7 +5,6 @@
 # ----------------------------------------------------------------------------
 # サードパーティ tap
 # ----------------------------------------------------------------------------
-tap "hudochenkov/sshpass"
 tap "terraform-linters/tap"
 
 # ----------------------------------------------------------------------------
@@ -17,7 +16,6 @@ brew "bash"
 brew "starship"
 brew "fzf"
 brew "zoxide"
-brew "tmux"
 
 # 基本ユーティリティ
 brew "tree"
@@ -46,10 +44,9 @@ brew "openshift-cli"
 brew "rosa-cli"
 brew "trivy"
 
-# DB / その他
-# libpq の PATH 追加は .zshrc 側では行っていない (必要時: export PATH="$(brew --prefix libpq)/bin:$PATH")
+# DB
+# keg-only のため psql 等の PATH 追加は .zshrc 側で行う
 brew "libpq"
-brew "hudochenkov/sshpass/sshpass", trusted: true
 
 # ----------------------------------------------------------------------------
 # GUI アプリ (cask)
@@ -60,27 +57,19 @@ cask "google-chrome"
 
 # ターミナル
 cask "wezterm"
-cask "warp"
 
 # 開発エディタ / AI ツール
 cask "visual-studio-code" # 設定・拡張は VS Code Settings Sync 側で管理
 cask "claude"
-cask "codex"
 
 # コミュニケーション / コラボレーション
 cask "slack"
 cask "notion"
-cask "obsidian"
 
-# DB ツール
-cask "dbeaver-community"
-
-# 入力 / ウィンドウ管理 / 自動化
+# 入力 / ウィンドウ管理
 cask "karabiner-elements"
 cask "typeless"
 cask "rectangle"
-cask "hammerspoon"
-cask "raycast"
 
 # ユーティリティ
 cask "appcleaner"
@@ -95,10 +84,3 @@ cask "docker-desktop"
 
 # IaC linter (cask 配布)
 cask "terraform-linters/tap/tflint", trusted: true
-
-# ----------------------------------------------------------------------------
-# npm グローバル (MCP サーバー)
-# ----------------------------------------------------------------------------
-npm "@modelcontextprotocol/server-github"
-npm "@upstash/context7-mcp"
-npm "chrome-devtools-mcp"
