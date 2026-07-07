@@ -22,7 +22,7 @@ usage() {
 Usage: ./install.sh [--dry-run] [-h | --help]
 
 Create symlinks from this repository into $HOME.
-Existing regular files are moved to ~/.dotfiles-backup/<timestamp>/ first.
+Existing regular files and directories are moved to ~/.dotfiles-backup/<timestamp>/ first.
 
 Options:
   --dry-run   Show actions without changing files.
@@ -87,7 +87,7 @@ is_correct_symlink() {
 # リンク作成
 # ============================================================================
 
-# repo_dir の relative を $HOME 配下にシンボリックリンクとして作成し、既存ファイルは退避
+# repo_dir の relative を $HOME 配下にシンボリックリンクとして作成し、既存の実体は退避
 link_file() {
   local relative="$1"
   local source="$repo_dir/$relative"
@@ -109,7 +109,7 @@ link_file() {
   if [[ -L "$target" ]]; then
     run rm "$target" || return
   elif [[ -e "$target" ]]; then
-    # 実体ファイルはバックアップへ退避
+    # 実体 (ファイルまたはディレクトリ) はバックアップへ退避
     local backup
     backup="$(backup_path "$target")"
     run mkdir -p "$(dirname "$backup")" || return
@@ -201,8 +201,8 @@ main() {
     # terminal
     ".wezterm.lua"
     ".config/starship.toml"
-    # keyboard
-    ".config/karabiner/karabiner.json"
+    # keyboard (karabiner.json 単体の symlink では Karabiner が設定変更を検知できないためディレクトリごとリンク)
+    ".config/karabiner"
     # AI エージェント
     ".config/agents/AGENTS.md"
     ".codex/AGENTS.md"

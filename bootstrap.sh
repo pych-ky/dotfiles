@@ -40,7 +40,10 @@ elif [ -x /usr/local/bin/brew ]; then
 fi
 
 step 'brew bundle'
-brew bundle --file="$repo_dir/Brewfile"
+# 一部パッケージの失敗 (例: 廃止された cask) は致命ではないため、警告を出して続行
+if ! brew bundle --file="$repo_dir/Brewfile"; then
+  printf 'warning: brew bundle reported failures, continuing\n' >&2
+fi
 
 # ============================================================================
 # zsh プラグイン (.zshrc が ~/.zsh/plugins/*/*.plugin.zsh を一括ロードする)

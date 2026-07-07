@@ -9,5 +9,12 @@
 .claude/projects/
 .claude/todos/
 
+# Karabiner-Elements のローカル生成物
+.config/karabiner/assets/
+.config/karabiner/automatic_backups/
+
 # Serena MCP のローカル状態
 .serena/
+
+# Finder のメタデータ
+.DS_Store

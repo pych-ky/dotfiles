@@ -77,6 +77,7 @@ cask "dbeaver-community"
 
 # 入力 / ウィンドウ管理 / 自動化
 cask "karabiner-elements"
+cask "typeless"
 cask "rectangle"
 cask "hammerspoon"
 cask "raycast"
@@ -85,7 +86,6 @@ cask "raycast"
 cask "appcleaner"
 cask "licecap"
 cask "logi-options+"
-cask "tomatobar"
 
 # セキュリティ / パスワード管理
 cask "1password"
