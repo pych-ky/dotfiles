@@ -18,3 +18,24 @@
 
 # Finder のメタデータ
 .DS_Store
+
+# 認証情報・秘密鍵（誤追加防止）
+.env
+.env.*
+!.env.example
+.aws/credentials
+.aws/config
+.aws/active-profile
+.ssh/
+.gnupg/
+.config/gh/hosts.yml
+.config/gcloud/
+.docker/config.json
+.kube/config
+.netrc
+.npmrc
+.pypirc
+*.pem
+*.key
+*.p12
+*.pfx
