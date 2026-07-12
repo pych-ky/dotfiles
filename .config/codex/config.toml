@@ -12,8 +12,8 @@
 ## ============================================================================
 
 # メインモデル
-model        = "gpt-5.5"  # 通常タスク用モデル
-review_model = "gpt-5.5"  # コードレビュー用モデル
+model        = "gpt-5.6-sol"  # 通常タスク用モデル
+review_model = "gpt-5.6-sol"  # コードレビュー用モデル
 
 # 推論関連
 model_reasoning_effort   = "xhigh"   # 推論の深さ (low / medium / high / xhigh)
@@ -156,6 +156,18 @@ enabled = true
 
 # Presentations
 [plugins."presentations@openai-primary-runtime"]
+enabled = true
+
+# Template Creator
+[plugins."template-creator@openai-primary-runtime"]
+enabled = true
+
+# Sites
+[plugins."sites@openai-bundled"]
+enabled = true
+
+# Visualize
+[plugins."visualize@openai-bundled"]
 enabled = true
 
 
