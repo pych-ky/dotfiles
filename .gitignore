@@ -1,40 +1,54 @@
-# Codex のローカル設定・生成物
+# ローカル設定・生成物
+
+## Codex
 .codex/config.toml
 .config/codex/memories/
 .config/codex/tmp/
 
-# Claude Code のローカル生成物
+## Claude Code
 .claude/.cc-writes/
 .claude/plans/
 .claude/projects/
 .claude/todos/
 
-# Karabiner-Elements のローカル生成物
+## Karabiner-Elements
 .config/karabiner/assets/
 .config/karabiner/automatic_backups/
 
-# Serena MCP のローカル状態
+## Serena MCP
 .serena/
 
-# Finder のメタデータ
+# OS メタデータ
 .DS_Store
 
-# 認証情報・秘密鍵（誤追加防止）
+# 認証情報・秘密鍵 (誤追加防止)
+
+## 環境変数
 .env
 .env.*
 !.env.example
+
+## AWS CLI
 .aws/credentials
 .aws/config
 .aws/active-profile
-.ssh/
-.gnupg/
+.aws/sso/
+.aws/cli/
+
+## CLI・サービスの認証情報
+.codex/auth.json
 .config/gh/hosts.yml
 .config/gcloud/
 .docker/config.json
 .kube/config
 .netrc
+.pgpass
 .npmrc
 .pypirc
+
+## 鍵・証明書
+.ssh/
+.gnupg/
 *.pem
 *.key
 *.p12
