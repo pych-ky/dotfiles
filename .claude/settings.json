@@ -21,7 +21,7 @@
     "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1"
   },
   "enabledPlugins": {
-    "serena@claude-plugins-official": true,
+    "serena@claude-plugins-official": false,
     "context7@claude-plugins-official": true,
     "superpowers@claude-plugins-official": false
   },
@@ -89,7 +89,7 @@
       "WebFetch(domain:www.radix-ui.com)",
       "WebFetch(domain:registry.terraform.io)",
       "WebFetch(domain:releases.hashicorp.com)",
-      "mcp__plugin_serena_serena",
+      "mcp__serena",
       "mcp__plugin_context7_context7"
     ],
     "deny": [
@@ -154,7 +154,8 @@
       "Read(**/*.p12)",
       "Read(**/id_rsa)",
       "Read(**/id_rsa.pub)",
-      "Read(**/id_ed25519*)"
+      "Read(**/id_ed25519*)",
+      "mcp__serena__execute_shell_command"
     ]
   },
   "sandbox": {
