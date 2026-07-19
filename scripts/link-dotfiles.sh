@@ -10,7 +10,7 @@ set -euo pipefail
 # グローバル設定
 # ============================================================================
 
-repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"    # このスクリプトを置いているリポジトリのルート
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" # このスクリプトを置いているリポジトリのルート
 backup_dir="${HOME}/.dotfiles-backup/$(date +%Y%m%d%H%M%S)" # 今回実行分のバックアップ先
 dry_run=0                                                   # 1 のとき実コマンドを実行せず内容のみ表示
 backup_created=0                                            # 退避が 1 件以上発生したかを示すフラグ
@@ -19,7 +19,7 @@ backup_keep=5                                               # 保持するバッ
 # 使い方を標準出力に表示
 usage() {
   cat <<'EOF'
-Usage: ./install.sh [--dry-run] [-h | --help]
+Usage: ./scripts/link-dotfiles.sh [--dry-run] [-h | --help]
 
 Create symlinks from this repository into $HOME.
 Existing regular files and directories are moved to ~/.dotfiles-backup/<timestamp>/ first.
