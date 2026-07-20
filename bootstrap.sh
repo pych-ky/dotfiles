@@ -12,7 +12,8 @@
 #   5. macos/Brewfile に基づくパッケージの一括インストール
 #   6. zsh プラグインの取得
 #   7. Claude Code CLI / Codex CLI の導入 (未導入時)
-#   8. private Agent Skills の取得と同期 (アクセス可能な場合)
+#   8. private Codex Custom Pets の取得と一括インストール (アクセス可能な場合)
+#   9. private Agent Skills の取得と同期 (アクセス可能な場合)
 #
 # 終了後に手動で行う設定は README.md の「手動セットアップ」を参照。
 
@@ -149,6 +150,13 @@ step 'Codex'
 if ! command -v codex >/dev/null 2>&1 && [[ ! -x "$HOME/.local/bin/codex" ]]; then
   curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh
 fi
+
+# ============================================================================
+# Codex Custom Pets
+# ============================================================================
+
+step 'Codex Custom Pets'
+"$repo_dir/pets/setup.sh"
 
 # ============================================================================
 # Agent Skills
