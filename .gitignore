@@ -18,8 +18,18 @@
 ## Serena MCP
 .serena/
 
-# OS メタデータ
+# エディタ・OS メタデータ
 .DS_Store
+.idea/
+.vscode/
+*~
+
+# ローカル生成物
+*.bak
+*.log
+*.tmp
+.tmp/
+work/
 
 # 認証情報・秘密鍵 (誤追加防止)
 
@@ -27,6 +37,8 @@
 .env
 .env.*
 !.env.example
+secrets/
+credentials/
 
 ## AWS CLI
 .aws/credentials
