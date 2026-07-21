@@ -10,10 +10,11 @@
 #   3. scripts/link-dotfiles.sh による dotfiles のシンボリックリンク展開
 #   4. Homebrew の導入 (未導入時、Xcode Command Line Tools も同時に導入される)
 #   5. macos/Brewfile に基づく不足パッケージのインストール
-#   6. zsh プラグインの取得
-#   7. Claude Code CLI / Codex CLI の導入 (未導入時)
-#   8. private Codex Custom Pets の取得と一括インストール (アクセス可能な場合)
-#   9. private Agent Skills の取得と同期 (アクセス可能な場合)
+#   6. scripts/setup-git.sh による Git の共通設定
+#   7. zsh プラグインの取得
+#   8. Claude Code CLI / Codex CLI の導入 (未導入時)
+#   9. private Codex Custom Pets の取得と一括インストール (アクセス可能な場合)
+#  10. private Agent Skills の取得と同期 (アクセス可能な場合)
 #
 # 終了後に手動で行う設定は README.md の「手動セットアップ」を参照。
 
@@ -232,6 +233,13 @@ fi
 # 以降は管理者権限を使わないため、ここで timestamp を無効化する
 sudo -k 2>/dev/null || true
 trap - EXIT
+
+# ============================================================================
+# Git の共通設定
+# ============================================================================
+
+step 'scripts/setup-git.sh'
+run_and_record 'scripts/setup-git.sh' "$repo_dir/scripts/setup-git.sh"
 
 # ============================================================================
 # zsh プラグイン (.zshrc が ~/.zsh/plugins/*/*.plugin.zsh を一括ロードする)
