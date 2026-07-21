@@ -27,8 +27,13 @@ for f in "$HOME"/.zsh/plugins/*/*.plugin.zsh(N); do
   . "$f"
 done
 
+# Git worktree 共通関数の読み込み
+[[ -r "$HOME/.shell/functions/git-worktree.sh" ]] && . "$HOME/.shell/functions/git-worktree.sh"
+
 # 自作シェル関数の一括ロード
 for f in "$HOME"/.zsh/functions/*.zsh(N); do
-  . "$f"
+  # git-worktree.zsh はリンク先にかかわらず読み込まない
+  [[ "$f" == "$HOME/.zsh/functions/git-worktree.zsh" ]] && continue
+  [[ -r "$f" ]] && . "$f"
 done
 unset f
