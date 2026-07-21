@@ -9,7 +9,63 @@
 
 set -euo pipefail
 
+if ((EUID == 0)); then
+  printf 'error: do not run macos/defaults.sh with sudo or as root\n' >&2
+  exit 1
+fi
+
+if [[ "$(uname -s)" != Darwin ]]; then
+  printf 'error: macos/defaults.sh supports macOS only\n' >&2
+  exit 1
+fi
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Rectangle の終了待機は 0.2 秒間隔で最大 10 秒とする
+rectangle_shutdown_max_attempts=50
+rectangle_shutdown_interval=0.2
+rectangle_restart_pending=0
+
+# Rectangle の終了をタイムアウト付きで待機
+wait_for_rectangle_exit() {
+  local attempts=0
+
+  while pgrep -xq Rectangle; do
+    if ((attempts >= rectangle_shutdown_max_attempts)); then
+      printf 'error: timed out waiting for Rectangle to exit\n' >&2
+      return 1
+    fi
+
+    sleep "$rectangle_shutdown_interval"
+    attempts=$((attempts + 1))
+  done
+}
+
+# import 前に停止した Rectangle を一度だけ再起動
+restart_rectangle() {
+  ((rectangle_restart_pending)) || return 0
+  rectangle_restart_pending=0
+  open -a Rectangle
+}
+
+# 終了時に Rectangle の稼働状態を復元し、終了コードを保持
+restore_rectangle_on_exit() {
+  local status="$1"
+  local restart_status
+
+  trap - EXIT
+  if restart_rectangle; then
+    :
+  else
+    restart_status=$?
+    printf 'warning: failed to restart Rectangle\n' >&2
+    if ((status == 0)); then
+      status="$restart_status"
+    fi
+  fi
+
+  exit "$status"
+}
 
 # ============================================================================
 # キーボード
@@ -97,12 +153,12 @@ defaults write com.apple.controlcenter "NSStatusItem Visible Sound" -bool true
 # ============================================================================
 
 # 稼働中に設定を書き換えると終了時に旧値で上書きされうるため、import 前に終了
-rectangle_running=0
 if pgrep -xq Rectangle; then
-  rectangle_running=1
+  rectangle_restart_pending=1
+  trap 'restore_rectangle_on_exit "$?"' EXIT
   killall Rectangle 2>/dev/null || true
   # 終了時の設定書き戻しと import が競合しないよう終了を待つ
-  while pgrep -xq Rectangle; do sleep 0.2; done
+  wait_for_rectangle_exit
 fi
 
 # エクスポート済みの設定 (ショートカット・スナップ挙動) を取り込み
@@ -127,9 +183,8 @@ killall Dock 2>/dev/null || true
 killall Finder 2>/dev/null || true
 killall ControlCenter 2>/dev/null || true
 
-# import 前に終了させた Rectangle を再起動
-if ((rectangle_running)); then
-  open -a Rectangle
-fi
+# Rectangle を再起動して復旧 trap を解除
+restart_rectangle
+trap - EXIT
 
 printf 'done: some settings take effect after re-login\n'
