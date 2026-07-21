@@ -42,6 +42,11 @@ EOF
 validate_environment() {
   local physical_home
 
+  if ((EUID == 0)); then
+    printf 'error: do not run scripts/link-dotfiles.sh with sudo or as root\n' >&2
+    return 1
+  fi
+
   if [[ -z "$home_dir" || "$home_dir" != /* || "$home_dir" == / || ! -d "$home_dir" ]]; then
     printf 'error: HOME must be an existing absolute path other than /\n' >&2
     return 1

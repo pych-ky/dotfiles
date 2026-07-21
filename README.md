@@ -13,19 +13,21 @@ git clone <このリポジトリ> && cd dotfiles
 
 実行内容は次の通りです。
 各ステップは原則として冪等なので途中で失敗しても再実行できます。
-致命ではない失敗 (廃止された cask やリンク競合など) は警告を出して続行します。
+実行環境や最初の sudo 認証に問題がある場合は終了します。独立したステップは失敗を記録して続行し、記録があれば最後に一覧を表示して非ゼロで終了します。
 
 1. sudo 認証を行い、特権処理の終了時に timestamp を無効化する
 2. `macos/defaults.sh` で macOS 設定を適用する
 3. `scripts/link-dotfiles.sh` で dotfiles のシンボリックリンクを展開する
 4. Homebrew を導入する (未導入時、Xcode Command Line Tools も同時に導入)
-5. `macos/Brewfile` に基づいて CLI / GUI アプリを一括インストールする
+5. `macos/Brewfile` に基づいて不足している CLI / GUI アプリを一括インストールする
 6. zsh プラグイン (zsh-autosuggestions, fast-syntax-highlighting) を取得する
 7. Claude Code CLI と Codex CLI を導入する (未導入時)
 8. private Codex Custom Pets を取得し、収録ペットを一括インストールする (アクセス可能な場合)
 9. private Agent Skills を取得し、管理 CLI で同期する (アクセス可能な場合)
 
-バックグラウンドで sudo 認証を延長しないため、処理中に timestamp が失効し、後続処理で sudo が必要になった場合は再認証を求めます。
+`bootstrap.sh`、`macos/defaults.sh`、`scripts/link-dotfiles.sh` は `sudo` を付けずに実行してください。
+sudo 認証はバックグラウンドで延長せず、各特権処理で有効な timestamp を再利用します。失効時や Homebrew の cask が個別に要求する場合は再認証が必要です。
+Homebrew、Claude Code、Codex のリモートインストーラは取得完了後に実行します。
 
 終了後は下記の「手動セットアップ」を実施してください。
 
@@ -52,10 +54,15 @@ git clone <このリポジトリ> && cd dotfiles
 ### macos/Brewfile (パッケージ管理)
 
 ```sh
-brew bundle --file=macos/Brewfile           # 一括インストール
-brew bundle check --file=macos/Brewfile     # 不足パッケージの確認
-brew bundle cleanup --file=macos/Brewfile   # Brewfile にないパッケージの確認 (削除は --force)
+brew bundle --no-upgrade --file=macos/Brewfile        # 不足パッケージのインストール
+brew bundle upgrade --file=macos/Brewfile             # 管理対象パッケージのアップグレード
+brew bundle check --no-upgrade --file=macos/Brewfile  # 不足パッケージの確認
+brew bundle cleanup --file=macos/Brewfile             # Brewfile にないパッケージの確認 (削除は --force)
 ```
+
+- `bootstrap.sh` は formula / cask を一括アップグレードしない
+  - 不足パッケージの依存関係は更新される場合がある
+- Homebrew 本体とパッケージ情報は自動更新される
 
 ### macos/defaults.sh (macOS 設定)
 

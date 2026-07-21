@@ -9,6 +9,16 @@
 
 set -euo pipefail
 
+if ((EUID == 0)); then
+  printf 'error: do not run macos/defaults.sh with sudo or as root\n' >&2
+  exit 1
+fi
+
+if [[ "$(uname -s)" != Darwin ]]; then
+  printf 'error: macos/defaults.sh supports macOS only\n' >&2
+  exit 1
+fi
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Rectangle の終了待機は 0.2 秒間隔で最大 10 秒とする
