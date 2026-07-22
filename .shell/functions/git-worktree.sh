@@ -105,7 +105,7 @@ wto() {
   done <<<"$branches"
 
   # 作成 / 既存 worktree のパス一覧をエディタで開きやすい形式で表示
-  if (( ${#created_paths[@]} )); then
+  if ((${#created_paths[@]})); then
     echo "Open these folders in your editor:"
     printf '  %s\n' "${created_paths[@]}"
   fi
