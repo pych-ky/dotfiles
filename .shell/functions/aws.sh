@@ -63,8 +63,7 @@ __aws_verify_profile_credentials() (
   local profile="$1"
 
   __aws_clear_credentials || exit
-  export AWS_PROFILE="$profile"
-  AWS_PAGER= aws sts get-caller-identity
+  AWS_PROFILE="$profile" AWS_PAGER='' aws sts get-caller-identity
 )
 
 # export-credentials の候補を現在の shell へ設定
@@ -86,7 +85,7 @@ __aws_set_env_credentials() {
 __aws_verify_env_credentials() (
   __aws_clear_credentials || exit
   __aws_set_env_credentials "$@"
-  AWS_PAGER= aws sts get-caller-identity
+  AWS_PAGER='' aws sts get-caller-identity
 )
 
 # 指定プロファイルが AWS SSO 用に設定済みかを検証
@@ -142,74 +141,74 @@ __aws_login_sso_profile() {
   fi
 
   case "$credential_mode" in
-    profile | env) ;;
-    *)
-      printf 'aws: unknown credential mode: %s\n' "$credential_mode" >&2
-      return 2
-      ;;
+  profile | env) ;;
+  *)
+    printf 'aws: unknown credential mode: %s\n' "$credential_mode" >&2
+    return 2
+    ;;
   esac
 
   __aws_require_sso_profile "$profile" || return
   __aws_run_without_credentials aws sso login --profile "$profile" || return
 
   case "$credential_mode" in
-    profile)
-      # 候補の疎通確認後に永続化し、現在の shell へ反映
-      __aws_verify_profile_credentials "$profile" || return
-      __aws_persist_active_profile "$profile" || return
-      __aws_clear_credentials || return
-      export AWS_PROFILE="$profile"
-      ;;
-    env)
-      credentials="$(__aws_run_without_credentials \
-        aws configure export-credentials --profile "$profile" --format env)" || return
+  profile)
+    # 候補の疎通確認後に永続化し、現在の shell へ反映
+    __aws_verify_profile_credentials "$profile" || return
+    __aws_persist_active_profile "$profile" || return
+    __aws_clear_credentials || return
+    export AWS_PROFILE="$profile"
+    ;;
+  env)
+    credentials="$(__aws_run_without_credentials \
+      aws configure export-credentials --profile "$profile" --format env)" || return
 
-      # AWS CLI の既知の代入だけを受理し、eval しない
-      while IFS= read -r line; do
-        case "$line" in
-          'export AWS_ACCESS_KEY_ID='*)
-            candidate_access_key_id="${line#export AWS_ACCESS_KEY_ID=}"
-            ;;
-          'export AWS_SECRET_ACCESS_KEY='*)
-            candidate_secret_access_key="${line#export AWS_SECRET_ACCESS_KEY=}"
-            ;;
-          'export AWS_SESSION_TOKEN='*)
-            candidate_session_token="${line#export AWS_SESSION_TOKEN=}"
-            ;;
-          'export AWS_CREDENTIAL_EXPIRATION='*)
-            candidate_expiration="${line#export AWS_CREDENTIAL_EXPIRATION=}"
-            ;;
-          '') ;;
-          *)
-            printf 'aws: export-credentials returned unexpected output\n' >&2
-            return 1
-            ;;
-        esac
-      done <<EOF
+    # AWS CLI の既知の代入だけを受理し、eval しない
+    while IFS= read -r line; do
+      case "$line" in
+      'export AWS_ACCESS_KEY_ID='*)
+        candidate_access_key_id="${line#export AWS_ACCESS_KEY_ID=}"
+        ;;
+      'export AWS_SECRET_ACCESS_KEY='*)
+        candidate_secret_access_key="${line#export AWS_SECRET_ACCESS_KEY=}"
+        ;;
+      'export AWS_SESSION_TOKEN='*)
+        candidate_session_token="${line#export AWS_SESSION_TOKEN=}"
+        ;;
+      'export AWS_CREDENTIAL_EXPIRATION='*)
+        candidate_expiration="${line#export AWS_CREDENTIAL_EXPIRATION=}"
+        ;;
+      '') ;;
+      *)
+        printf 'aws: export-credentials returned unexpected output\n' >&2
+        return 1
+        ;;
+      esac
+    done <<EOF
 $credentials
 EOF
 
-      if [ -z "$candidate_access_key_id" ] ||
-        [ -z "$candidate_secret_access_key" ] ||
-        [ -z "$candidate_session_token" ]; then
-        printf 'aws: export-credentials returned incomplete credentials\n' >&2
-        return 1
-      fi
+    if [ -z "$candidate_access_key_id" ] ||
+      [ -z "$candidate_secret_access_key" ] ||
+      [ -z "$candidate_session_token" ]; then
+      printf 'aws: export-credentials returned incomplete credentials\n' >&2
+      return 1
+    fi
 
-      # 候補の疎通確認後に永続化し、現在の shell へ反映
-      __aws_verify_env_credentials \
-        "$candidate_access_key_id" \
-        "$candidate_secret_access_key" \
-        "$candidate_session_token" \
-        "$candidate_expiration" || return
-      __aws_persist_active_profile "$profile" || return
-      __aws_clear_credentials || return
-      __aws_set_env_credentials \
-        "$candidate_access_key_id" \
-        "$candidate_secret_access_key" \
-        "$candidate_session_token" \
-        "$candidate_expiration"
-      ;;
+    # 候補の疎通確認後に永続化し、現在の shell へ反映
+    __aws_verify_env_credentials \
+      "$candidate_access_key_id" \
+      "$candidate_secret_access_key" \
+      "$candidate_session_token" \
+      "$candidate_expiration" || return
+    __aws_persist_active_profile "$profile" || return
+    __aws_clear_credentials || return
+    __aws_set_env_credentials \
+      "$candidate_access_key_id" \
+      "$candidate_secret_access_key" \
+      "$candidate_session_token" \
+      "$candidate_expiration"
+    ;;
   esac
 }
 
