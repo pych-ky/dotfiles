@@ -9,8 +9,8 @@ fi
 for dir in "${HOMEBREW_PREFIX:-/usr/local}/opt/git/bin" "$HOME/.local/bin"; do
   [ -d "$dir" ] || continue
   case ":$PATH:" in
-    *":$dir:"*) ;;
-    *) PATH="$dir:$PATH" ;;
+  *":$dir:"*) ;;
+  *) PATH="$dir:$PATH" ;;
   esac
 done
 unset dir

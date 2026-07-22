@@ -122,7 +122,8 @@ format_directory_display() {
   if [[ "$dir" == "$HOME" ]]; then
     printf '~'
   elif [[ "$dir" == "$HOME"/* ]]; then
-    printf '~/%s' "${dir#"$HOME"/}"
+    printf '~'
+    printf '/%s' "${dir#"$HOME"/}"
   else
     printf '%s' "$dir"
   fi
