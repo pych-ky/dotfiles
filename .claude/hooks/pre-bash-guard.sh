@@ -31,6 +31,7 @@ import sys
 
 RM_REASON = "rm -rf / rm -Rf / rm --recursive --force は許可していません。"
 SUDO_REASON = "sudo の使用は Claude からは許可していません。"
+HASH_REBIND_REASON = "hash -p によるコマンドパスの再束縛は許可していません。"
 PIPE_SHELL_REASON = "curl / wget ... | sh / bash 形式のコマンドは許可していません。"
 SHELL_STDIN_REASON = "内容を安全に検証できない標準入力を shell script として実行できません。"
 PARSE_REASON = "Bash コマンドを安全に解析できませんでした。"
@@ -2384,6 +2385,19 @@ def rm_has_recursive_force(arguments):
     return recursive and force
 
 
+def hash_rebinds_command(arguments):
+    for argument in arguments:
+        if argument == "--":
+            return False
+        if command_word_is_dynamic(argument):
+            raise ShellScanError("dynamic hash option")
+        if argument == "-" or not argument.startswith("-"):
+            return False
+        if "p" in argument[1:]:
+            return True
+    return False
+
+
 def command_word_is_dynamic(word):
     """実行コマンド名がシェル展開の結果に依存するか判定する。"""
     if any(marker in word for marker in DYNAMIC_COMMAND_MARKERS):
@@ -3081,6 +3095,9 @@ class CommandScanner:
                     raise ShellScanError("dynamic rm option")
             if rm_has_recursive_force(arguments):
                 add_reason(self.reasons, RM_REASON)
+        elif command == "hash":
+            if hash_rebinds_command(arguments):
+                add_reason(self.reasons, HASH_REBIND_REASON)
         elif command == "eval":
             if arguments and arguments[0] == "--":
                 arguments = arguments[1:]
