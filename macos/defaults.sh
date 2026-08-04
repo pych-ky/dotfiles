@@ -85,6 +85,9 @@ defaults write NSGlobalDomain NSAutomaticQuoteSubstitutionEnabled -bool false
 defaults write NSGlobalDomain NSAutomaticDashSubstitutionEnabled -bool false
 defaults write NSGlobalDomain NSAutomaticPeriodSubstitutionEnabled -bool false
 
+# インライン予測テキストを無効化
+defaults write NSGlobalDomain NSAutomaticInlinePredictionEnabled -bool false
+
 # ============================================================================
 # 日本語入力 (再ログイン後に反映)
 # ============================================================================
@@ -92,8 +95,14 @@ defaults write NSGlobalDomain NSAutomaticPeriodSubstitutionEnabled -bool false
 # ライブ変換を無効化
 defaults write com.apple.inputmethod.Kotoeri JIMPrefLiveConversionKey -bool false
 
+# 推測候補表示を無効化
+defaults write com.apple.inputmethod.Kotoeri JIMPrefPredictiveCandidateKey -bool false
+
 # 入力中の自動修正を無効化
 defaults write com.apple.inputmethod.Kotoeri JIMPrefAutocorrectionKey -bool false
+
+# 句読点で変換を無効化
+defaults write com.apple.inputmethod.Kotoeri JIMPrefConvertWithPunctuationKey -bool false
 
 # ============================================================================
 # マウス / トラックパッド
