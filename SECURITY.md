@@ -4,9 +4,9 @@
 
 ## 非公開での報告
 
-脆弱性や認証情報の露出は、公開 Issue ではなく [GitHub の非公開脆弱性報告](https://github.com/pych-ky/dotfiles/security/advisories/new)から報告してください。
+脆弱性や認証情報の露出を報告する際は、公開 Issue ではなく [GitHub の非公開脆弱性報告](https://github.com/pych-ky/dotfiles/security/advisories/new)を利用してください。
 
 - 秘密情報そのものは記載しない
 - 分かる範囲で再現手順、影響範囲、修正案を記載する
 
-確認後、必要に応じて修正し、認証情報を失効・ローテーションします。
+報告を確認後、必要に応じて修正し、認証情報を失効またはローテーションします。
