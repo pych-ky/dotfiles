@@ -46,7 +46,7 @@ if [[ -z "$codex_config" || ! -r "$codex_config" ]]; then
     codex_config="$repo_dir/.config/codex/config.toml"
   fi
 fi
-claude_settings="$repo_dir/.claude/settings.json"
+claude_settings="${CODEX_STATUSLINE_CLAUDE_SETTINGS:-$repo_dir/.claude/settings.json}"
 
 # ============================================================================
 # 入力・設定の読み取り
@@ -57,25 +57,113 @@ has_command() {
   command -v "$1" >/dev/null 2>&1
 }
 
-# Claude から渡された JSON を jq で問い合わせる
-json_query() {
-  local query="$1"
+# Claude から渡された JSON を 1 回で読み取り、表示用の値へ展開する
+read_input_json() {
+  local payload="$1"
+  local key
+  local value
 
-  [[ -n "${input:-}" ]] || return 0
+  [[ -n "$payload" ]] || return 0
   has_command jq || return 0
 
-  jq -r "$query // empty" 2>/dev/null <<<"$input" || true
+  while IFS= read -r -d '' key && IFS= read -r -d '' value; do
+    case "$key" in
+    cwd) input_cwd="$value" ;;
+    model_name) input_model_name="$value" ;;
+    effort) input_effort="$value" ;;
+    transcript_path) input_transcript_path="$value" ;;
+    context_used) input_context_used="$value" ;;
+    context_input_tokens) input_context_input_tokens="$value" ;;
+    context_window_size) input_context_window_size="$value" ;;
+    context_window) input_context_window="$value" ;;
+    used_tokens) input_used_tokens="$value" ;;
+    five_hour_limit) input_five_hour_limit="$value" ;;
+    weekly_limit) input_weekly_limit="$value" ;;
+    esac
+  done < <(
+    jq -j '
+      def scalar:
+        if . == null or . == false then ""
+        elif type == "string" then .
+        else tostring
+        end;
+      . as $root
+      | (try $root.model catch null) as $model
+      |
+      [
+        ["cwd", (try ($root.workspace.current_dir // $root.cwd) catch null)],
+        ["model_name", (
+          if ($model | type) == "object" then
+            $model.display_name // $model.name // $model.id
+          elif ($model | type) == "string" then
+            $model
+          else
+            null
+          end
+        )],
+        ["effort", (try $root.effort.level catch null)],
+        ["transcript_path", (try $root.transcript_path catch null)],
+        ["context_used", (
+          try $root.context_window.used_percentage catch null
+        )],
+        ["context_input_tokens", (
+          try $root.context_window.total_input_tokens catch null
+        )],
+        ["context_window_size", (
+          try $root.context_window.context_window_size catch null
+        )],
+        ["context_window", (try (
+          $root.model_context_window //
+          $root.context.window //
+          $root.usage.context_window
+        ) catch null)],
+        ["used_tokens", (try (
+          $root.usage.total_tokens //
+          $root.context.total_tokens //
+          $root.context.used_tokens
+        ) catch null)],
+        ["five_hour_limit", (
+          try $root.rate_limits.five_hour.used_percentage catch null
+        )],
+        ["weekly_limit", (
+          try $root.rate_limits.seven_day.used_percentage catch null
+        )]
+      ]
+      | .[]
+      | .[0] + "\u0000" + (.[1] | scalar) + "\u0000"
+    ' 2>/dev/null <<<"$payload" || true
+  )
 }
 
-# JSON ファイルを jq で問い合わせる
-json_file_query() {
+# Claude 設定を 1 回で読み取り、入力 JSON のフォールバック値へ展開する
+read_claude_settings() {
   local file="$1"
-  local query="$2"
+  local key
+  local value
 
   [[ -r "$file" ]] || return 0
   has_command jq || return 0
 
-  jq -r "$query // empty" "$file" 2>/dev/null || true
+  while IFS= read -r -d '' key && IFS= read -r -d '' value; do
+    case "$key" in
+    model) settings_model="$value" ;;
+    effort) settings_effort="$value" ;;
+    esac
+  done < <(
+    jq -j '
+      def scalar:
+        if . == null or . == false then ""
+        elif type == "string" then .
+        else tostring
+        end;
+      [
+        ["model", (try .model catch null)],
+        ["effort", (try .effortLevel catch null)]
+      ]
+      | .[]
+      | .[0] + "\u0000" + (.[1] | scalar) + "\u0000"
+    ' "$file" 2>/dev/null || true
+  )
 }
 
 # TOML から単純な scalar 値を取り出す
@@ -363,37 +451,49 @@ main() {
   local input
   input="$(cat)"
 
-  local cwd
-  cwd="$(json_query '.workspace.current_dir // .cwd')"
+  local input_cwd=''
+  local input_model_name=''
+  local input_effort=''
+  local input_transcript_path=''
+  local input_context_used=''
+  local input_context_input_tokens=''
+  local input_context_window_size=''
+  local input_context_window=''
+  local input_used_tokens=''
+  local input_five_hour_limit=''
+  local input_weekly_limit=''
+  local settings_model=''
+  local settings_effort=''
+  read_input_json "$input"
+  read_claude_settings "$claude_settings"
+
+  local cwd="$input_cwd"
   [[ -n "$cwd" ]] || cwd="$PWD"
 
-  local model_name
-  model_name="$(json_query '.model.display_name // .model.name // .model.id // (if (.model | type) == "string" then .model else empty end)')"
-  [[ -n "$model_name" ]] || model_name="$(json_file_query "$claude_settings" '.model')"
+  local model_name="$input_model_name"
+  [[ -n "$model_name" ]] || model_name="$settings_model"
   [[ -n "$model_name" ]] || model_name="$(toml_scalar "$codex_config" model)"
 
-  local claude_effort
-  claude_effort="$(json_query '.effort.level')"
-  [[ -n "$claude_effort" ]] || claude_effort="$(json_file_query "$claude_settings" '.effortLevel')"
+  local claude_effort="$input_effort"
+  [[ -n "$claude_effort" ]] || claude_effort="$settings_effort"
   [[ -n "$claude_effort" ]] || claude_effort="$(toml_scalar "$codex_config" model_reasoning_effort)"
 
   local reasoning
   reasoning="$(reasoning_label "$claude_effort")"
 
-  local transcript_path context_used
-  transcript_path="$(json_query '.transcript_path')"
-  context_used="$(json_query '.context_window.used_percentage')"
+  local transcript_path="$input_transcript_path"
+  local context_used="$input_context_used"
   if [[ -z "$context_used" ]]; then
     local context_window_tokens context_window_size
-    context_window_tokens="$(json_query '.context_window.total_input_tokens')"
-    context_window_size="$(json_query '.context_window.context_window_size')"
+    context_window_tokens="$input_context_input_tokens"
+    context_window_size="$input_context_window_size"
     context_used="$(token_usage_percent "$context_window_tokens" "$context_window_size")"
   fi
   if [[ -z "$context_used" ]]; then
     local context_window used_tokens
-    context_window="$(json_query '.model_context_window // .context.window // .usage.context_window')"
+    context_window="$input_context_window"
     [[ -n "$context_window" ]] || context_window="$default_claude_context_window"
-    used_tokens="$(json_query '.usage.total_tokens // .context.total_tokens // .context.used_tokens')"
+    used_tokens="$input_used_tokens"
     [[ -n "$used_tokens" ]] || used_tokens="$(last_transcript_usage_total "$transcript_path")"
     context_used="$(context_used_percent "$used_tokens" "$context_window")"
   fi
@@ -401,8 +501,8 @@ main() {
 
   local service_tier five_hour_limit weekly_limit
   service_tier="$(toml_scalar "$codex_config" service_tier)"
-  five_hour_limit="$(json_query '.rate_limits.five_hour.used_percentage')"
-  weekly_limit="$(json_query '.rate_limits.seven_day.used_percentage')"
+  five_hour_limit="$input_five_hour_limit"
+  weekly_limit="$input_weekly_limit"
 
   local status_line=''
   local -a status_items=()

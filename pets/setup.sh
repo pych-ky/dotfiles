@@ -9,6 +9,19 @@ set -euo pipefail
 
 temporary_clone_dir=
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+setup_common_library="$script_dir/../lib/setup-common.sh"
+if [[ ! -f "$setup_common_library" || -L "$setup_common_library" ]]; then
+  printf 'error: setup library is missing or unsafe: %s\n' \
+    "$setup_common_library" >&2
+  exit 1
+fi
+source_working_dir="$PWD"
+cd "$script_dir/.." || exit 1
+source lib/setup-common.sh
+cd "$source_working_dir" || exit 1
+unset source_working_dir
+
 # ============================================================================
 # ユーティリティ
 # ============================================================================
@@ -26,16 +39,6 @@ handle_access_failure() {
   fi
 
   printf 'warning: private Codex Custom Pets repository is not accessible; skipping\n' >&2
-}
-
-# Git の認証プロンプトを無効化する
-run_noninteractive_git() {
-  GIT_TERMINAL_PROMPT=0 \
-    GCM_INTERACTIVE=Never \
-    GIT_ASKPASS=/usr/bin/false \
-    SSH_ASKPASS=/usr/bin/false \
-    GIT_SSH_COMMAND='ssh -o BatchMode=yes' \
-    git "$@"
 }
 
 # / および . / .. 成分を含む絶対パスを拒否
@@ -211,54 +214,46 @@ cleanup() {
 # リポジトリ検証
 # ============================================================================
 
-# repository root、origin、install-pet の実行権と --all 対応を検証
+# repository root、origin、install-pet の実行権を検証
 verify_repository() {
   local repository_dir="$1"
   local expected_url="$2"
-  local repository_root
-  local repository_dir_physical
-  local repository_root_physical
-  local origin_url
+  local repository_error
+
+  if ! repository_error="$(setup_verify_repository \
+    "$repository_dir" \
+    "$expected_url" \
+    'Codex Custom Pets' \
+    'CODEX_CUSTOM_PETS_REPO_DIR' \
+    'CODEX_CUSTOM_PETS_REPO_URL' \
+    'bin/install-pet' \
+    'Codex Custom Pets installer is missing or not executable')"; then
+    error "$repository_error"
+    return 1
+  fi
+}
+
+# 新しい一括インストールを優先し、未対応の checkout では個別に導入
+install_repository_pets() {
+  local repository_dir="$1"
   local installer="$repository_dir/bin/install-pet"
-  local installer_usage
-  local installer_status
+  local pet_dir
+  local pet_id
+  local found=0
 
-  if [[ ! -d "$repository_dir" ]] ||
-    ! repository_root="$(git -C "$repository_dir" rev-parse --show-toplevel 2>/dev/null)"; then
-    error 'Codex Custom Pets destination is not a Git working tree'
-    return 1
-  fi
-
-  repository_dir_physical="$(cd "$repository_dir" && pwd -P)"
-  repository_root_physical="$(cd "$repository_root" && pwd -P)"
-  if [[ "$repository_dir_physical" != "$repository_root_physical" ]]; then
-    error 'CODEX_CUSTOM_PETS_REPO_DIR must point to the repository root'
-    return 1
+  if "$installer" --capabilities 2>/dev/null | grep -Fxq install-all; then
+    "$installer" --all
+    return
   fi
 
-  if ! origin_url="$(git -C "$repository_dir" config --local --get remote.origin.url 2>/dev/null)" ||
-    [[ "$origin_url" != "$expected_url" ]]; then
-    error 'Codex Custom Pets repository origin does not match CODEX_CUSTOM_PETS_REPO_URL'
-    return 1
-  fi
-
-  if [[ ! -f "$installer" || -L "$installer" || ! -x "$installer" ]]; then
-    error 'Codex Custom Pets installer is missing or not executable'
-    return 1
-  fi
-
-  if installer_usage="$("$installer" 2>&1)"; then
-    installer_status=0
-  else
-    installer_status=$?
-  fi
-  if [[ "$installer_status" -ne 2 ||
-    "$installer_usage" != "Usage: $installer {<pet-id>|--all}" ]]; then
-    error "Codex Custom Pets checkout does not support bin/install-pet --all; \
-update it to 422d80e or later (for example, run git switch main && \
-git pull --ff-only in $repository_dir)"
-    return 1
-  fi
+  for pet_dir in "$repository_dir"/pets/*; do
+    [[ -d "$pet_dir" && ! -L "$pet_dir" &&
+      -f "$pet_dir/pet.json" && ! -L "$pet_dir/pet.json" ]] || continue
+    pet_id="${pet_dir##*/}"
+    "$installer" "$pet_id" || return
+    found=1
+  done
+  ((found)) || error 'Codex Custom Pets repository does not contain installable pets'
 }
 
 # ============================================================================
@@ -344,7 +339,7 @@ main() {
 
   if [[ ! -e "$repository_dir" && ! -L "$repository_dir" ]]; then
     clone_required=1
-    if ! run_noninteractive_git ls-remote -- "$repository_url" HEAD >/dev/null 2>&1; then
+    if ! setup_run_noninteractive_git ls-remote -- "$repository_url" HEAD >/dev/null 2>&1; then
       if handle_access_failure "$strict"; then
         return 0
       fi
@@ -368,7 +363,7 @@ main() {
       mkdir -p "$repository_parent"
       temporary_clone_dir="$(mktemp -d "$repository_parent/.codex-custom-pets.clone.XXXXXX")"
 
-      if ! run_noninteractive_git clone --quiet --no-recurse-submodules -- \
+      if ! setup_run_noninteractive_git clone --quiet --no-recurse-submodules -- \
         "$repository_url" "$temporary_clone_dir"; then
         error 'Codex Custom Pets repository could not be cloned'
         return 1
@@ -394,7 +389,7 @@ main() {
   acquire_install_lock "$codex_root" "$pets_root_physical" || return
   verify_repository "$repository_dir" "$repository_url" || return
   verify_install_paths "$repository_dir" "$codex_root" || return
-  "$repository_dir/bin/install-pet" --all
+  install_repository_pets "$repository_dir"
 }
 
 main "$@"

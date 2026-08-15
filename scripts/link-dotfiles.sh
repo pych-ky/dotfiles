@@ -14,15 +14,21 @@ repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" # このスクリプ
 home_dir="${HOME:-}"                                        # 検証対象の HOME
 backup_root=                                                # HOME 検証後に初期化するバックアップルート
 backup_dir=                                                 # 最初の退避時に一意に確保する今回分のバックアップ先
-lock_path=                                                  # 同一 HOME への並行展開を防ぐ固定ロックパス
-lock_generation_dir=                                        # 所有者の公開前に保持するプロセス固有のロック世代
-lock_generation_name=                                       # 固定ロックのシンボリックリンクから参照する世代名
-lock_owner_start_identity=                                  # PID 再利用を識別するプロセス開始情報
-recovery_observation=                                       # 所有者不在の復旧ミューテックスの同一性確認用
-recovery_ownerless_attempts=0                               # 初期化中のミューテックスを誤回収しないための観測回数
 dry_run=0                                                   # 1 のとき実コマンドを実行せず内容のみ表示
 backup_created=0                                            # 退避が 1 件以上発生したかを示すフラグ
 backup_keep=5                                               # 保持するバックアップ世代数
+
+process_lock_library="$repo_dir/lib/process-lock.sh"
+if [[ ! -f "$process_lock_library" || -L "$process_lock_library" ]]; then
+  printf 'error: process lock library is missing or unsafe: %s\n' \
+    "$process_lock_library" >&2
+  exit 1
+fi
+source_working_dir="$PWD"
+cd "$repo_dir" || exit 1
+source lib/process-lock.sh
+cd "$source_working_dir" || exit 1
+unset source_working_dir
 
 # 使い方を標準出力に表示
 usage() {
@@ -73,397 +79,6 @@ run() {
   else
     "$@"
   fi
-}
-
-# ============================================================================
-# 排他制御
-# ============================================================================
-
-# symlink(2) で競合ディレクトリ配下への誤作成を防ぐ
-create_symlink_exclusive() {
-  perl -MErrno=EEXIST -e '
-    if (symlink($ARGV[0], $ARGV[1])) {
-      exit 0;
-    }
-    exit($! == EEXIST ? 1 : 2);
-  ' "$1" "$2"
-}
-
-# 固定ロックから参照できる、自スクリプトの一意な世代名だけを許可
-is_lock_generation_name() {
-  [[ "$1" != */* && "$1" == .link-dotfiles.lock.generation.?????? ]]
-}
-
-# PID と開始時刻を組み合わせ、PID 再利用後の別プロセスを所有者と誤認しない
-process_start_identity() {
-  local identity
-
-  identity="$(LC_ALL=C TZ=UTC /bin/ps -o lstart= -o command= -p "$1" 2>/dev/null)" ||
-    return 1
-  identity="${identity#"${identity%%[![:space:]]*}"}"
-  identity="${identity%"${identity##*[![:space:]]}"}"
-  [[ -n "$identity" ]] || return 1
-  printf '%s\n' "$identity"
-}
-
-# 連続観測するディレクトリの同一性を識別
-path_identity() {
-  local identity
-
-  identity="$(stat -f '%d:%i' "$1" 2>/dev/null)" ||
-    identity="$(stat -c '%d:%i' "$1" 2>/dev/null)" || return 1
-  printf '%s\n' "$identity"
-}
-
-write_owner_identity() {
-  printf '%s\n%s\n' "$2" "$3" >"$1"
-}
-
-# FIFO やシンボリックリンクを読まず、通常ファイルの所有者情報だけを取得
-read_owner_identity() {
-  local owner_file="$1"
-
-  OWNER_IDENTITY_PID=
-  OWNER_IDENTITY_START=
-  if [[ -f "$owner_file" && ! -L "$owner_file" ]]; then
-    {
-      IFS= read -r OWNER_IDENTITY_PID || true
-      IFS= read -r OWNER_IDENTITY_START || true
-    } <"$owner_file"
-  fi
-}
-
-is_complete_owner_identity() {
-  [[ "$1" =~ ^[0-9]+$ && -n "$2" ]] || return 1
-  ((10#$1 > 1))
-}
-
-is_live_owner_identity() {
-  local current_start
-
-  is_complete_owner_identity "$1" "$2" || return 1
-  current_start="$(process_start_identity "$1")" || return 1
-  [[ "$current_start" == "$2" ]]
-}
-
-is_live_legacy_owner_pid() {
-  [[ "$1" =~ ^[0-9]+$ ]] && ((10#$1 > 1)) && kill -0 "$1" 2>/dev/null
-}
-
-read_lock_owner() {
-  local generation_dir="$1"
-
-  read_owner_identity "$generation_dir/owner"
-  LOCK_OWNER="$OWNER_IDENTITY_PID"
-  LOCK_OWNER_START="$OWNER_IDENTITY_START"
-}
-
-# 固定ロックのシンボリックリンクが指定世代を参照しているかを判定
-lock_points_to_generation() {
-  local expected_generation="$1"
-  local current_generation=
-
-  [[ -L "$lock_path" ]] || return 1
-  current_generation="$(readlink "$lock_path")" || return 1
-  [[ "$current_generation" == "$expected_generation" ]]
-}
-
-# 復旧ミューテックスを取得し、放棄済みなら回収
-acquire_recovery_mutex() {
-  local generation_dir="$1"
-  local recovery_dir="$generation_dir/recovery"
-  local owner_file="$recovery_dir/owner"
-  local owner_pid=
-  local owner_start=
-  local observation
-
-  if mkdir "$recovery_dir" 2>/dev/null; then
-    if write_owner_identity "$owner_file" "$$" "$lock_owner_start_identity"; then
-      recovery_observation=
-      recovery_ownerless_attempts=0
-      return 0
-    fi
-    rmdir "$recovery_dir" 2>/dev/null || true
-    return 1
-  fi
-
-  [[ -d "$recovery_dir" && ! -L "$recovery_dir" ]] || return 1
-  read_owner_identity "$owner_file"
-  owner_pid="$OWNER_IDENTITY_PID"
-  owner_start="$OWNER_IDENTITY_START"
-  if is_live_owner_identity "$owner_pid" "$owner_start" ||
-    { [[ -z "$owner_start" ]] && is_live_legacy_owner_pid "$owner_pid"; }; then
-    recovery_observation=
-    recovery_ownerless_attempts=0
-    return 1
-  fi
-
-  observation="$recovery_dir|$owner_pid|$owner_start"
-  if [[ "$observation" != "$recovery_observation" ]]; then
-    recovery_observation="$observation"
-    recovery_ownerless_attempts=0
-  fi
-  if ! is_complete_owner_identity "$owner_pid" "$owner_start" &&
-    [[ ! "$owner_pid" =~ ^[0-9]+$ ]]; then
-    recovery_ownerless_attempts=$((recovery_ownerless_attempts + 1))
-    ((recovery_ownerless_attempts >= 10)) || return 1
-  fi
-
-  # 所有者が終了済み、または連続して不在のミューテックスだけを回収
-  rm -f "$owner_file" 2>/dev/null || return 1
-  rmdir "$recovery_dir" 2>/dev/null || return 1
-  recovery_observation=
-  recovery_ownerless_attempts=0
-
-  mkdir "$recovery_dir" 2>/dev/null || return 1
-  if ! write_owner_identity "$owner_file" "$$" "$lock_owner_start_identity"; then
-    rmdir "$recovery_dir" 2>/dev/null || true
-    return 1
-  fi
-}
-
-release_recovery_mutex() {
-  local generation_dir="$1"
-  local recovery_dir="$generation_dir/recovery"
-  local owner_file="$recovery_dir/owner"
-  local owner_pid=
-  local owner_start=
-
-  read_owner_identity "$owner_file"
-  owner_pid="$OWNER_IDENTITY_PID"
-  owner_start="$OWNER_IDENTITY_START"
-  [[ "$owner_pid" == "$$" && "$owner_start" == "$lock_owner_start_identity" ]] || return 1
-  rm -f "$owner_file" 2>/dev/null || return 1
-  rmdir "$recovery_dir" 2>/dev/null
-}
-
-# 自プロセスの世代だけを、固定ロックとの対応を再確認して解放・後始末
-release_lock() {
-  local owner_pid
-  local owner_start
-  local remove_generation=0
-
-  if [[ -z "$lock_generation_dir" || ! -d "$lock_generation_dir" ||
-    -L "$lock_generation_dir" ]]; then
-    return 0
-  fi
-
-  if acquire_recovery_mutex "$lock_generation_dir"; then
-    read_lock_owner "$lock_generation_dir"
-    owner_pid="$LOCK_OWNER"
-    owner_start="$LOCK_OWNER_START"
-
-    if [[ "$owner_pid" == "$$" && "$owner_start" == "$lock_owner_start_identity" ]]; then
-      if lock_points_to_generation "$lock_generation_name"; then
-        # 同じ世代を参照している間だけ固定ロックを外す
-        if rm "$lock_path" 2>/dev/null; then
-          remove_generation=1
-        fi
-      else
-        # 公開前、または固定ロックが既に別世代なら自世代だけを片付ける
-        remove_generation=1
-      fi
-    fi
-
-    if ((remove_generation)); then
-      rm -f "$lock_generation_dir/owner" 2>/dev/null || true
-    fi
-    release_recovery_mutex "$lock_generation_dir" 2>/dev/null || true
-    if ((remove_generation)); then
-      rmdir "$lock_generation_dir" 2>/dev/null || true
-    fi
-  fi
-}
-
-# 固定リンクと所有者の終了を再確認して放棄済みロックを回収
-recover_abandoned_lock() {
-  local expected_generation="$1"
-  local expected_owner="$2"
-  local expected_owner_start="$3"
-  local generation_dir="$backup_root/$expected_generation"
-  local current_owner
-  local current_owner_start
-
-  is_lock_generation_name "$expected_generation" || return 1
-  [[ -d "$generation_dir" && ! -L "$generation_dir" ]] || return 1
-  acquire_recovery_mutex "$generation_dir" || return 1
-
-  read_lock_owner "$generation_dir"
-  current_owner="$LOCK_OWNER"
-  current_owner_start="$LOCK_OWNER_START"
-  if ! lock_points_to_generation "$expected_generation" ||
-    [[ "$current_owner" != "$expected_owner" ]] ||
-    [[ "$current_owner_start" != "$expected_owner_start" ]] ||
-    is_live_owner_identity "$current_owner" "$current_owner_start" ||
-    { [[ -z "$current_owner_start" ]] &&
-      is_live_legacy_owner_pid "$current_owner"; }; then
-    release_recovery_mutex "$generation_dir" 2>/dev/null || true
-    return 1
-  fi
-
-  # 固定リンクを先に外し、次世代の公開後に旧世代を誤削除しないようにする
-  rm "$lock_path" 2>/dev/null || {
-    release_recovery_mutex "$generation_dir" 2>/dev/null || true
-    return 1
-  }
-  rm -f "$generation_dir/owner" 2>/dev/null || true
-  release_recovery_mutex "$generation_dir" 2>/dev/null || true
-  rmdir "$generation_dir" 2>/dev/null || true
-}
-
-# PID だけを記録する放棄済みディレクトリロックを回収
-recover_legacy_abandoned_lock() {
-  local expected_owner="$1"
-  local expected_identity="$2"
-  local current_owner=
-
-  [[ -n "$expected_identity" ]] || return 1
-  [[ -d "$lock_path" && ! -L "$lock_path" ]] || return 1
-  [[ "$(path_identity "$lock_path" 2>/dev/null || true)" == "$expected_identity" ]] || return 1
-  acquire_recovery_mutex "$lock_path" || return 1
-  if [[ -f "$lock_path/owner" && ! -L "$lock_path/owner" ]]; then
-    IFS= read -r current_owner <"$lock_path/owner" || true
-  fi
-
-  if [[ "$(path_identity "$lock_path" 2>/dev/null || true)" != "$expected_identity" ]] ||
-    [[ "$current_owner" != "$expected_owner" ]] ||
-    { [[ "$current_owner" =~ ^[0-9]+$ ]] && kill -0 "$current_owner" 2>/dev/null; }; then
-    release_recovery_mutex "$lock_path" 2>/dev/null || true
-    return 1
-  fi
-
-  rm -f "$lock_path/owner" 2>/dev/null || true
-  release_recovery_mutex "$lock_path" 2>/dev/null || return 1
-  rmdir "$lock_path" 2>/dev/null
-}
-
-# 初期化済み世代への固定リンクを排他的に公開し、同一 HOME への処理を直列化
-acquire_lock() {
-  local attempts=0
-  local max_attempts=300
-  local ownerless_attempts=0
-  local observed_lock_state=
-  local current_lock_state=
-  local current_lock_identity=
-  local current_generation=
-  local current_generation_dir=
-  local legacy_lock=0
-  local publish_status
-  local owner_pid
-  local owner_start
-  local owner_is_live=0
-
-  ((dry_run)) && return 0
-
-  if ! command -v perl >/dev/null 2>&1; then
-    printf 'error: perl is required for atomic dotfiles link locking\n' >&2
-    return 1
-  fi
-
-  mkdir -p "$backup_root" || return
-  lock_path="$backup_root/.link-dotfiles.lock"
-
-  lock_generation_dir="$(mktemp -d "$backup_root/.link-dotfiles.lock.generation.XXXXXX")" ||
-    return
-  lock_generation_name="${lock_generation_dir##*/}"
-  lock_owner_start_identity="$(process_start_identity "$$")" || {
-    rmdir "$lock_generation_dir" 2>/dev/null || true
-    return 1
-  }
-  if ! is_lock_generation_name "$lock_generation_name" ||
-    ! write_owner_identity "$lock_generation_dir/owner" "$$" "$lock_owner_start_identity"; then
-    rm -f "$lock_generation_dir/owner" 2>/dev/null || true
-    rmdir "$lock_generation_dir" 2>/dev/null || true
-    lock_generation_dir=
-    lock_generation_name=
-    return 1
-  fi
-  # 公開前の通常終了やシグナルでも、外から参照されない自世代だけを清掃
-  trap 'release_lock' EXIT
-
-  while true; do
-    # 所有者を含む世代を作り終えた後、固定パスへシンボリックリンクを原子的に公開
-    publish_status=0
-    create_symlink_exclusive "$lock_generation_name" "$lock_path" 2>/dev/null ||
-      publish_status=$?
-    if ((publish_status == 0)); then
-      if lock_points_to_generation "$lock_generation_name"; then
-        return 0
-      fi
-    elif ((publish_status != 1)); then
-      printf 'error: failed to publish dotfiles link lock: %s\n' "$lock_path" >&2
-      return 1
-    fi
-
-    owner_pid=
-    owner_start=
-    current_generation=
-    current_lock_identity=
-    legacy_lock=0
-    if [[ -L "$lock_path" ]]; then
-      current_generation="$(readlink "$lock_path" 2>/dev/null || true)"
-      if is_lock_generation_name "$current_generation"; then
-        current_generation_dir="$backup_root/$current_generation"
-        if [[ -d "$current_generation_dir" && ! -L "$current_generation_dir" ]]; then
-          read_lock_owner "$current_generation_dir"
-          owner_pid="$LOCK_OWNER"
-          owner_start="$LOCK_OWNER_START"
-        fi
-      fi
-    elif [[ -d "$lock_path" && ! -L "$lock_path" ]]; then
-      legacy_lock=1
-      current_lock_identity="$(path_identity "$lock_path" 2>/dev/null || true)"
-      if [[ -f "$lock_path/owner" && ! -L "$lock_path/owner" ]]; then
-        IFS= read -r owner_pid <"$lock_path/owner" || true
-      fi
-    fi
-
-    current_lock_state="$current_generation|$legacy_lock|$current_lock_identity|$owner_pid|$owner_start"
-    if [[ "$current_lock_state" != "$observed_lock_state" ]]; then
-      ownerless_attempts=0
-      observed_lock_state="$current_lock_state"
-    fi
-
-    # ミューテックス内で世代と所有者の終了を再確認して回収
-    owner_is_live=0
-    if [[ -n "$current_generation" ]]; then
-      if is_live_owner_identity "$owner_pid" "$owner_start" ||
-        { [[ -z "$owner_start" ]] && is_live_legacy_owner_pid "$owner_pid"; }; then
-        owner_is_live=1
-      fi
-    elif ((legacy_lock)) && is_live_legacy_owner_pid "$owner_pid"; then
-      # PID だけの所有者情報でも稼働中プロセスを保護
-      owner_is_live=1
-    fi
-
-    if [[ -n "$current_generation" && "$owner_pid" =~ ^[0-9]+$ ]] &&
-      ((owner_is_live == 0)); then
-      recover_abandoned_lock "$current_generation" "$owner_pid" "$owner_start" && continue
-    elif ((legacy_lock)) && [[ "$owner_pid" =~ ^[0-9]+$ ]] &&
-      ((owner_is_live == 0)); then
-      recover_legacy_abandoned_lock "$owner_pid" "$current_lock_identity" && continue
-    elif { [[ -n "$current_generation" ]] && [[ ! "$owner_pid" =~ ^[0-9]+$ ]]; } ||
-      { ((legacy_lock)) && [[ ! "$owner_pid" =~ ^[0-9]+$ ]]; }; then
-      ownerless_attempts=$((ownerless_attempts + 1))
-      if ((ownerless_attempts >= 10)); then
-        if [[ -n "$current_generation" ]]; then
-          recover_abandoned_lock "$current_generation" "$owner_pid" "$owner_start" && continue
-        else
-          recover_legacy_abandoned_lock "$owner_pid" "$current_lock_identity" && continue
-        fi
-        ownerless_attempts=0
-      fi
-    else
-      ownerless_attempts=0
-    fi
-
-    if ((attempts >= max_attempts)); then
-      printf 'error: timed out waiting for dotfiles link lock: %s\n' "$lock_path" >&2
-      return 1
-    fi
-    attempts=$((attempts + 1))
-    sleep 0.1
-  done
 }
 
 # ============================================================================
@@ -562,9 +177,10 @@ remove_obsolete_symlink() {
 
 # repo_dir の relative を $HOME 配下にシンボリックリンクとして作成し、既存の実体は退避
 link_file() {
-  local relative="$1"
-  local source="$repo_dir/$relative"
-  local target="$HOME/$relative"
+  local source_relative="$1"
+  local target_relative="${2:-$1}"
+  local source="$repo_dir/$source_relative"
+  local target="$HOME/$target_relative"
 
   # -L も見るのは壊れたシンボリックリンクを source として扱うため (-e は壊れたリンクで false)
   if [[ ! -e "$source" && ! -L "$source" ]]; then
@@ -670,7 +286,15 @@ main() {
 
   validate_environment || return
   backup_root="$home_dir/.dotfiles-backup"
-  acquire_lock || return
+  if ((!dry_run)); then
+    mkdir -p "$backup_root" || return
+    process_lock_acquire \
+      "$backup_root/.link-dotfiles.lock" \
+      '.link-dotfiles.lock.generation.??????' \
+      'dotfiles link' \
+      30 || return
+    trap 'process_lock_release' EXIT
+  fi
 
   # 管理対象ファイル一覧、リポジトリ相対パスと $HOME 相対パスは同一 (順序は挙動に影響なし)
   local files=(
@@ -688,11 +312,11 @@ main() {
     ".config/karabiner"
     # AI エージェント
     ".config/agents/AGENTS.md"
-    ".codex/AGENTS.md"
     ".codex/browser/config.toml"
     ".claude/CLAUDE.md"
     ".claude/settings.json"
     ".claude/hooks/inject-guidelines-context.sh"
+    ".claude/hooks/pre-bash-guard.py"
     ".claude/hooks/pre-bash-guard.sh"
     ".claude/hooks/statusline.sh"
     # AWS プロファイル復元
@@ -714,6 +338,11 @@ main() {
       failed_items+=("$file")
     fi
   done
+
+  # 共通ルールの正本を Codex の参照先にもリンク
+  if ! link_file ".config/agents/AGENTS.md" ".codex/AGENTS.md"; then
+    failed_items+=(".codex/AGENTS.md")
+  fi
 
   # Codex ベース設定 (/etc/codex/config.toml) を sudo でリンク
   warn_legacy_codex_managed_config
