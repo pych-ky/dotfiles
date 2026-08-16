@@ -61,8 +61,9 @@ git clone <このリポジトリ> && cd dotfiles
 - 同じ `HOME` への並行実行は排他ロックで直列化する
 - 既存のシンボリックリンクはリンク先が異なる場合のみ張り替える
 - Karabiner が変更を検知できるよう、`.config/karabiner` はディレクトリごとリンクする
+- 共通エージェントルールは `.config/agents/AGENTS.md` を正本とし、`~/.config/agents/AGENTS.md` と `~/.codex/AGENTS.md` から参照する
 - Codex の基本設定を `sudo` で `/etc/codex/config.toml` にリンクし、端末固有の `~/.codex/config.toml` で上書き可能にする
-- 管理対象の正確な一覧は `scripts/link-dotfiles.sh` の `files` 配列を参照する
+- 管理対象の正確な一覧は `scripts/link-dotfiles.sh` を参照する
 
 ### Git 共通設定
 
@@ -122,7 +123,8 @@ brew bundle cleanup --file=macos/Brewfile             # Brewfile にないパッ
 ```
 
 未取得の場合は、非公開リポジトリを一時ディレクトリにクローンします。
-リポジトリルート、`origin`、インストーラを検証して `$HOME/src/pych/codex-custom-pets` に配置し、`bin/install-pet --all` を実行します。
+リポジトリルート、`origin`、インストーラを検証して `$HOME/src/pych/codex-custom-pets` に配置します。
+一括インストール対応版では `bin/install-pet --all` を実行し、未対応の旧版では収録ペットを個別にインストールします。
 
 Git、jq、macOS 標準の `lockf` が必要です。
 `sudo` は使いません。
@@ -142,7 +144,6 @@ Git、jq、macOS 標準の `lockf` が必要です。
 #### 更新
 
 既存のチェックアウトは自動更新しません。
-`bin/install-pet --all` がない場合は、コミット `422d80e` 以降へ更新してから再実行してください。
 
 ```sh
 cd "${CODEX_CUSTOM_PETS_REPO_DIR:-$HOME/src/pych/codex-custom-pets}"
@@ -167,7 +168,7 @@ git pull --ff-only
 リポジトリルート、`origin`、管理 CLI を検証して `$HOME/src/pych/agent-skills` に配置し、公開コマンド `bin/agent-skills sync` を実行します。
 
 Codex と Claude Code への初回インストール、既存設定の再同期、詳細な検証、`doctor` は `agent-skills` 側で行います。
-Git と Python 3.9 以降が必要です。
+Git、Python 3.9 以降、macOS 標準の `lockf` が必要です。
 `sudo` は使いません。
 
 #### 設定
