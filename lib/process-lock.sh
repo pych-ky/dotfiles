@@ -287,6 +287,7 @@ process_lock_acquire() {
   local timeout_seconds="${4:-30}"
   local backend
   local path_identity
+  local descriptor_identity
 
   ((PROCESS_LOCK_HELD == 0)) || return 1
   [[ -d "$(dirname "$lock_path")" ]] || {
@@ -310,13 +311,27 @@ process_lock_acquire() {
     exec 9>&-
     return 1
   }
-  if [[ ! "$lock_path" -ef "/dev/fd/$PROCESS_LOCK_FD" ]]; then
+  backend="$(uname -s)"
+  case "$backend" in
+  Darwin)
+    descriptor_identity="$(stat -f '%d:%i' <&"$PROCESS_LOCK_FD" 2>/dev/null)" || {
+      exec 9>&-
+      return 1
+    }
+    ;;
+  *)
+    descriptor_identity="$(process_lock_file_identity "/dev/fd/$PROCESS_LOCK_FD")" || {
+      exec 9>&-
+      return 1
+    }
+    ;;
+  esac
+  if [[ "$path_identity" != "$descriptor_identity" ]]; then
     exec 9>&-
     printf 'error: %s lock changed while opening: %s\n' "$label" "$lock_path" >&2
     return 1
   fi
 
-  backend="$(uname -s)"
   case "$backend" in
   Darwin)
     if [[ ! -x /usr/bin/lockf ]] ||
