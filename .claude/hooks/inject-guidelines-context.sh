@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # ============================================================================
-# AGENTS.md と Cursor ルールを注入する UserPromptSubmit フックスクリプト
+# AGENTS.md を注入する UserPromptSubmit フックスクリプト
 # ============================================================================
 
 set -euo pipefail
@@ -9,7 +9,6 @@ set -euo pipefail
 # CLI 実行時は CLAUDE_PROJECT_DIR が無いので $PWD にフォールバック
 project_root="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 agents_file="${AGENTS_GLOBAL_FILE:-$HOME/.config/agents/AGENTS.md}"
-rules_dir="$project_root/.cursor/rules"
 
 # ファイル先頭にパス見出しを付けて中身を出力、読めなければ黙って無視
 print_file() {
@@ -22,51 +21,11 @@ print_file() {
   printf '\n'
 }
 
-# プロジェクト別の既定 glob、必要になったら case を追加
-default_rules_globs() {
-  case "$(basename "$project_root")" in
-  one-platform)
-    printf '%s\n' 'overview.mdc:*_guidelines.mdc'
-    ;;
-  *)
-    printf '%s\n' '*.mdc'
-    ;;
-  esac
-}
-
-# 注入する Cursor ルール (.cursor/rules 配下の .mdc) を列挙
-# INJECT_RULES_GLOBS (":" 区切りの glob) で絞り込み、未指定時はプロジェクト別の既定パターンを使う
-find_rule_files() {
-  [[ -d "$rules_dir" ]] || return 0
-
-  local globs_spec="${INJECT_RULES_GLOBS:-$(default_rules_globs)}"
-  local -a globs=() name_args=()
-  local glob
-  IFS=':' read -r -a globs <<<"$globs_spec"
-
-  # 各パターンのいずれかに一致するよう find の検索条件を組み立て
-  for glob in "${globs[@]}"; do
-    [[ -n "$glob" ]] || continue
-    ((${#name_args[@]})) && name_args+=(-o)
-    name_args+=(-name "$glob")
-  done
-  ((${#name_args[@]})) || name_args=(-name '*.mdc')
-
-  find "$rules_dir" -type f \( "${name_args[@]}" \) -print0 2>/dev/null
-}
-
-# 注入するコンテキスト (AGENTS.md + 対象ルール) を一時ファイルへ集約
+# 注入するコンテキストを一時ファイルへ集約
 context_file="$(mktemp)"
 trap 'rm -f "$context_file"' EXIT
 
-{
-  # 1. グローバル指示 (AGENTS.md) の読み込み
-  print_file "$agents_file"
-  # 2. プロジェクトの Cursor ルールの読み込み
-  while IFS= read -r -d '' file; do
-    print_file "$file"
-  done < <(find_rule_files)
-} >"$context_file"
+print_file "$agents_file" >"$context_file"
 
 # Claude Code 経由のパイプなら JSON、手動実行の端末なら生テキストで返却
 if [ -t 1 ]; then
