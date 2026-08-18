@@ -28,6 +28,7 @@ brew "git"
 brew "git-lfs"
 brew "gibo"
 brew "gh"
+brew "gitleaks"
 
 # ランタイム / パッケージツール
 brew "node"
