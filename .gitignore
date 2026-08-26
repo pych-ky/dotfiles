@@ -6,10 +6,14 @@
 .config/codex/tmp/
 
 ## Claude Code
-.claude/.cc-writes/
-.claude/plans/
-.claude/projects/
-.claude/todos/
+# このリポジトリは Claude Code の作業ディレクトリにもなるため、
+# 端末固有の権限 (settings.local.json) やプロンプト履歴 (history.jsonl) などが
+# .claude/ 配下に生成される。公開リポジトリなので、
+# 個別に除外するのではなく「追跡するものだけを許可する」方式にする
+.claude/*
+!.claude/CLAUDE.md
+!.claude/settings.json
+!.claude/hooks/
 
 ## Karabiner-Elements
 .config/karabiner/assets/
@@ -30,6 +34,12 @@
 *.tmp
 .tmp/
 work/
+
+# 検証用スクリプト
+# 遮断対象のコマンドを列挙したファイルを公開すると、何を塞いでいないかの
+# 手がかりになるため、このリポジトリでは管理しない。
+# 意図して追加する場合はこの行を外す
+/tests/
 
 # 認証情報・秘密鍵 (誤追加防止)
 

@@ -21,6 +21,13 @@ fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# ログイン時に開くアプリ (システム設定 > 一般 > ログイン項目と拡張機能)
+login_item_apps=(
+  /Applications/Rectangle.app
+  /Applications/Typeless.app
+  /Applications/logioptionsplus.app
+)
+
 # Rectangle の終了待機は 0.2 秒間隔で最大 10 秒とする
 rectangle_shutdown_max_attempts=50
 rectangle_shutdown_interval=0.2
@@ -65,6 +72,52 @@ restore_rectangle_on_exit() {
   fi
 
   exit "$status"
+}
+
+# デスクトップのアイコンの並べ方を設定
+# (DesktopViewSettings は入れ子の辞書で、defaults write では同じ辞書にある
+#  アイコンサイズなどの表示設定ごと置き換わるため、現在の設定を書き出して
+#  該当キーだけ差し替えてから読み込む)
+set_desktop_arrangement() {
+  local value="$1"
+  local keypath
+  local plist
+
+  plist="$(defaults export com.apple.finder -)"
+
+  # デスクトップの表示オプションを保存していない端末には入れ子の辞書が無い
+  for keypath in DesktopViewSettings DesktopViewSettings.IconViewSettings; do
+    if ! printf '%s' "$plist" |
+      plutil -extract "$keypath" xml1 -o /dev/null -- - >/dev/null 2>&1; then
+      plist="$(printf '%s' "$plist" | plutil -insert "$keypath" -json '{}' -o - -- -)"
+    fi
+  done
+
+  plist="$(
+    printf '%s' "$plist" |
+      plutil -replace DesktopViewSettings.IconViewSettings.arrangeBy \
+        -string "$value" -o - -- -
+  )"
+
+  printf '%s' "$plist" | defaults import com.apple.finder -
+}
+
+# 未登録のアプリだけをログイン項目に追加 (登録済みなら何もしない)
+add_login_item() {
+  local app_path="$1"
+
+  osascript - "$app_path" <<'APPLESCRIPT'
+on run argv
+  set targetPath to item 1 of argv
+  tell application "System Events"
+    set existingPaths to path of every login item
+    -- 末尾のスラッシュの有無で取りこぼして二重登録しないよう両方を照合する
+    if existingPaths contains targetPath then return
+    if existingPaths contains (targetPath & "/") then return
+    make new login item at end with properties {path:targetPath, hidden:false}
+  end tell
+end run
+APPLESCRIPT
 }
 
 # ============================================================================
@@ -150,12 +203,33 @@ defaults write com.apple.finder ShowPathbar -bool true
 # デフォルトの表示スタイルをリスト表示に
 defaults write com.apple.finder FXPreferredViewStyle -string Nlsv
 
+# デスクトップのアイコンをグリッドに沿って並べる
+set_desktop_arrangement grid
+
 # ============================================================================
 # メニューバー / コントロールセンター
 # ============================================================================
 
 # 音量アイコンをメニューバーに常時表示
 defaults write com.apple.controlcenter "NSStatusItem Visible Sound" -bool true
+
+# ============================================================================
+# ログイン項目 (System Events へのオートメーション許可が必要)
+# ============================================================================
+
+# ログイン時にアプリを開く。
+# Rectangle は自身の launchOnLogin でも同梱ヘルパーを登録するが、そちらは
+# 「バックグラウンドでの実行を許可」側なので、ここでの登録とは別枠になる
+for login_item_app in "${login_item_apps[@]}"; do
+  if [[ ! -d "$login_item_app" ]]; then
+    printf 'warning: skipped login item for missing %s\n' "$login_item_app" >&2
+    continue
+  fi
+
+  # オートメーションが未許可の端末では失敗するため、警告して続行する
+  add_login_item "$login_item_app" ||
+    printf 'warning: failed to add login item %s\n' "$login_item_app" >&2
+done
 
 # ============================================================================
 # Rectangle (ウィンドウ管理)

@@ -142,7 +142,7 @@ main() {
 
   if [[ ! -e "$repository_dir" && ! -L "$repository_dir" ]]; then
     clone_required=1
-    if ! setup_run_noninteractive_git ls-remote "$repository_url" HEAD >/dev/null 2>&1; then
+    if ! setup_run_noninteractive_git ls-remote -- "$repository_url" HEAD >/dev/null 2>&1; then
       if handle_access_failure "$strict"; then
         return 0
       fi
@@ -162,7 +162,7 @@ main() {
     temporary_clone_dir="$(mktemp -d "$repository_parent/.agent-skills.clone.XXXXXX")"
     trap 'cleanup' EXIT
 
-    if ! setup_run_noninteractive_git clone --quiet --no-recurse-submodules \
+    if ! setup_run_noninteractive_git clone --quiet --no-recurse-submodules -- \
       "$repository_url" "$temporary_clone_dir"; then
       error 'Agent Skills repository could not be cloned'
       return 1

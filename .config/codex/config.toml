@@ -29,7 +29,9 @@ personality = "pragmatic"  # 性格プリセット (none / friendly / pragmatic)
 web_search = "live"  # Web 検索モード (disabled / cached / live)
 
 # 認証情報の保管場所
-cli_auth_credentials_store = "keyring"  # CLI 認証情報の保存先 (auto / keyring / file)
+# macOS キーチェーンを AI ツールから利用しない方針のため file 保管とする。
+# ~/.codex/auth.json は Claude 側の読み取り禁止パス (denyRead) に登録済み
+cli_auth_credentials_store = "file"  # CLI 認証情報の保存先 (auto / keyring / file)
 
 
 ## ============================================================================
@@ -37,11 +39,23 @@ cli_auth_credentials_store = "keyring"  # CLI 認証情報の保存先 (auto / k
 ## ============================================================================
 
 approval_policy = "on-request"       # 操作の承認要否 (untrusted / on-request / never)
-sandbox_mode    = "workspace-write"  # サンドボックス制限 (read-only / workspace-write / danger-full-access)
+default_permissions = "hardened"     # 認証情報を読めない workspace 権限を既定にする
 
-# workspace-write サンドボックスの詳細挙動
-[sandbox_workspace_write]
-network_access = true  # サンドボックス内からのネットワークアクセスを許可
+
+## ============================================================================
+## 認証情報の読み取り禁止
+## ============================================================================
+#
+# :workspace の保護を継承しつつ、機密ファイル・ディレクトリだけを deny する。
+# 絶対パスと ~/path の双方で実際の読み取り拒否を確認済み (Codex 0.148.0)。
+# permission profile は旧 sandbox_mode / [sandbox_workspace_write] と併用しない。
+[permissions.hardened]
+description = "認証情報の読み取りを禁止する既定プロファイル"
+extends = ":workspace"
+filesystem = { "~/.ssh" = "deny", "~/.aws" = "deny", "~/.kube" = "deny", "~/.gnupg" = "deny", "~/.netrc" = "deny", "~/Library/Keychains" = "deny", "~/.codex/auth.json" = "deny", "~/.claude/.credentials.json" = "deny", "~/.claude.json" = "deny", "~/.claude/backups" = "deny", "~/.config/gh/hosts.yml" = "deny", "~/.docker/config.json" = "deny", "~/.terraform.d/credentials.tfrc.json" = "deny" }
+
+[permissions.hardened.network]
+enabled = true  # 従来の workspace-write と同様、コマンドのネットワークアクセスを許可
 
 
 ## ============================================================================
@@ -185,6 +199,10 @@ hotkey-window-projectless-default-enabled = true              # グローバル�
 
 # 実行中の follow-up
 followUpQueueMode = "steer"  # 実行中の follow-up で現在の turn を steer
+
+# Git 操作の指示
+git-commit-instructions = "コミットメッセージは過去の履歴に合わせ、プレフィックスを付けず、簡潔な日本語で記述してください。"
+git-pr-instructions     = "簡潔な日本語で記述してください。"
 
 # 表示
 conversationDetailMode    = "STEPS_COMMANDS"  # 会話詳細にステップとコマンドを表示

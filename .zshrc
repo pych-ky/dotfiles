@@ -11,8 +11,14 @@ path=(
   "$HOME/.local/bin"                                 # ユーザーローカルのバイナリ (常に追加)
   ${HOMEBREW_PREFIX:-/usr/local}/opt/git/bin(N-/)    # Homebrew 版 git (存在時のみ)
   ${HOMEBREW_PREFIX:-/usr/local}/opt/libpq/bin(N-/)  # keg-only の libpq (psql など、存在時のみ)
+  $HOME/.rd/bin(N-/)                                 # Rancher Desktop の CLI (docker / kubectl など、存在時のみ)
   $path
 )
+
+# mise: リポジトリごとに開発ツールのバージョンを切り替える
+if command -v mise >/dev/null 2>&1; then
+  eval "$(mise activate zsh)"
+fi
 
 # dumb ターミナル以外で starship プロンプトを初期化
 if [[ "$TERM" != "dumb" ]] && command -v starship >/dev/null 2>&1; then
@@ -26,14 +32,10 @@ command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init zsh)"
 for f in "$HOME"/.zsh/plugins/*/*.plugin.zsh(N); do
   . "$f"
 done
+unset f
 
 # Git worktree 共通関数の読み込み
 [[ -r "$HOME/.shell/functions/git-worktree.sh" ]] && . "$HOME/.shell/functions/git-worktree.sh"
 
-# 自作シェル関数の一括ロード
-for f in "$HOME"/.zsh/functions/*.zsh(N); do
-  # git-worktree.zsh はリンク先にかかわらず読み込まない
-  [[ "$f" == "$HOME/.zsh/functions/git-worktree.zsh" ]] && continue
-  [[ -r "$f" ]] && . "$f"
-done
-unset f
+# 端末ローカル設定の読み込み (組織固有の設定やツールの自動追記の受け皿、git 管理外)
+[[ -r "$HOME/.zshrc.local" ]] && . "$HOME/.zshrc.local"

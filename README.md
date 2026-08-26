@@ -29,11 +29,14 @@ git clone <このリポジトリ> && cd dotfiles
 4. Homebrew を導入する。
    未導入時は Xcode Command Line Tools も導入する
 5. `macos/Brewfile` に不足する CLI・GUI アプリをインストールする
-6. `scripts/setup-git.sh` で Git 共通設定を適用する
-7. `zsh-autosuggestions` と `fast-syntax-highlighting` を取得する
-8. 未導入の Claude Code CLI と Codex CLI を導入する
-9. アクセス可能な非公開 Codex Custom Pets を取得し、収録されている全ペットをインストールする
-10. アクセス可能な非公開 Agent Skills を取得し、管理 CLI で同期する
+6. `mise install` でグローバル開発ツール（node、go、terraform など）を導入する
+7. secretlint のグローバル Git フックを取得する
+8. `scripts/setup-git.sh` で Git 共通設定を適用する
+9. `zsh-autosuggestions` と `fast-syntax-highlighting` を取得する
+10. 未導入の Claude Code CLI と Codex CLI を導入する
+11. アクセス可能な非公開 Codex Custom Pets を取得し、収録されている全ペットをインストールする
+12. アクセス可能な非公開 Agent Skills を取得し、管理 CLI で同期する
+13. アクセス可能な非公開 dotfiles-private（組織固有・個人設定）を取得し、適用する
 
 終了後は「手動セットアップ」も行ってください。
 
@@ -43,6 +46,9 @@ git clone <このリポジトリ> && cd dotfiles
 
 - 実行環境の検証または最初の `sudo` 認証に失敗すると、その場で終了する
 - 独立した処理は失敗を記録して続行し、最後に一覧を表示して非ゼロで終了する
+- 前提が揃わず**実行しなかった**処理（mise 未導入、非公開リポジトリへアクセス不可など）は
+  「skipped steps」として一覧に出す。失敗ではないので終了状態は 0 だが、
+  1 件でもあれば「完了」とは表示しない（未実行を見落とさないため）
 - `sudo` のタイムスタンプはバックグラウンドで延長せず、終了時に無効化する
 - 各特権処理は有効なタイムスタンプを再利用し、失効時や Homebrew cask の要求時は再認証する
 - Homebrew、Claude Code、Codex のリモートインストーラは、取得後に実行する
@@ -57,6 +63,8 @@ git clone <このリポジトリ> && cd dotfiles
 ```
 
 - 既存の通常ファイルとディレクトリは `~/.dotfiles-backup/<timestamp>[-<sequence>]/` に退避する
+- 退避したファイルがリポジトリ版と内容が異なる場合は、実行末尾に警告を表示する。
+  端末ローカルの変更はリポジトリか `~/.zshrc.local` などへ統合してから再リンクする
 - 同じ秒の再実行は連番で別世代にし、スクリプトが生成した最新 5 世代だけを保持する
 - 同じ `HOME` への並行実行は排他ロックで直列化する
 - 既存のシンボリックリンクはリンク先が異なる場合のみ張り替える
@@ -73,11 +81,10 @@ Git 2.37 以上が必要です。
 ./scripts/setup-git.sh
 ```
 
-`~/.gitconfig` 全体は置き換えず、共通化する以下の 11 項目だけを設定します。
+`~/.gitconfig` 全体は置き換えず、共通化する以下の項目だけを設定します。
+`user.name` / `user.email` は公開リポジトリに個人情報を置かないため、ここでは設定せず `~/.gitconfig.local`（非公開側）で設定します。
 
-- `user.name`: コミットに表示する名前を `pych_ky` にする
-- `user.email`: GitHub の noreply メールを使う
-- `user.useConfigOnly`: 名前やメールの自動推測を無効にする
+- `user.useConfigOnly`: 名前やメールの自動推測を無効にする（identity は `~/.gitconfig.local` で明示的に設定する）
 - `fetch.prune`: `git fetch` 時に削除済みリモートブランチの追跡参照を削除する
 - `init.defaultBranch`: 新しいリポジトリの最初のブランチ名を `main` にする
 - `branch.autoSetupMerge`: 同名のリモートブランチだけを自動追跡する
@@ -86,6 +93,47 @@ Git 2.37 以上が必要です。
 - `transfer.credentialsInUrl`: `<protocol>://<user>:<password>@...` 形式の URL を拒否する（`remote.*.pushurl` とユーザー名部分だけに指定したトークンは対象外）
 - `pull.ff`: 履歴の分岐時は自動マージせず停止する
 - `merge.conflictStyle`: 競合時に変更前・自分・相手を表示する
+- `credential.https://github.com.helper`: GitHub の認証を `gh auth git-credential` に委譲する
+- `credential.https://github.com.useHttpPath`: 認証時にリポジトリパスを helper へ渡す
+- `include.path`: 組織固有設定の受け皿として `~/.gitconfig.local` を読み込む（存在しない間は無視される）
+- `core.hooksPath`: `~/.local/share/dotfiles/git-hooks` を指定する（下記「グローバルフック」を参照）
+- Git LFS が導入済みの場合は `git lfs install --skip-repo` でグローバルフィルタを有効化する
+
+`transfer.credentialsInUrl` は `remote.*.pushurl` を対象にしないため、push URL を含め、URL にトークンやパスワードを埋め込まないでください（Git credential helper か `gh auth setup-git` を使います）。
+
+### グローバルフック
+
+`core.hooksPath` を設定すると、Git は各リポジトリの `.git/hooks` を参照しなくなります。
+secretlint のフックだけを直接指定すると、リポジトリ固有フックと Git LFS のフックが動かなくなるため、`scripts/setup-git.sh` が振り分け用のディレクトリ `~/.local/share/dotfiles/git-hooks` を作り、そこを参照させます。
+
+| フック | 実行内容 |
+| --- | --- |
+| `pre-commit` | secretlint のフック（`git-hooks/_local-hook-exec` 経由で denylist 検査とリポジトリ固有フックも実行） |
+| その他 | `git-hooks/dispatch`（denylist 検査 → リポジトリ固有フック → Git LFS のフック） |
+
+- リポジトリ固有フックが失敗した場合は、その終了状態を伝播してコミットや push を中断する。
+  上流の `_local-hook-exec` は終了状態を捨てるため、`git-hooks/_local-hook-exec` で置き換えている
+- Git LFS が扱うフック（`pre-push`、`post-checkout`、`post-commit`、`post-merge`）は `git lfs <フック名>` を呼ぶ。
+  そのため各リポジトリでの `git lfs install` は不要
+- `pre-push` と `post-rewrite` は標準入力で情報を受け取るため、内容を保持して各実行先へ渡す
+- 特定のリポジトリでグローバルな検査（secretlint と下記の denylist）を止める場合は、`~/.local/share/dotfiles/IGNORE_GLOBAL_HOOKS` にそのリポジトリのパスを記載する（上流と同じ仕組み）。
+  リポジトリ固有フックと Git LFS のフックは、そのリポジトリの動作そのものに必要なため止めない
+
+#### 公開リポジトリへの混入防止（denylist）
+
+`git-hooks/deny-private-strings` が、組織固有の識別子や過去の所属先の情報を公開リポジトリへコミット・push させないように止めます。
+**判定パターンはこのリポジトリに置きません。**書いた時点で漏洩になるため、非公開側が以下へ配置します。
+
+| ファイル | 内容 |
+| --- | --- |
+| `~/.config/dotfiles/denylist.txt` | 1 行 1 パターン。固定文字列として扱い、大文字小文字は区別しない。行頭 `#` と空行は無視する |
+| `~/.config/dotfiles/work-remotes.txt` | 1 行 1 部分文字列。remote URL が**すべて**一致するリポジトリは組織のものとみなして検査しない |
+
+- `denylist.txt` が無い端末では何もしません（公開リポジトリ単体でも動きます）
+- `pre-commit` はステージ済みのパス名と、その index 上の**内容全体**を見ます。今回の差分だけでなく既存行の混入も止まります
+- `pre-push` は push 対象コミットを**1 件ずつ**見ます。範囲の net diff ではないため、「あるコミットで追加し、後のコミットで消した」内容も検出します
+- remote が 1 つも無いリポジトリは検査対象です
+- 回避は `git commit --no-verify` / `git push --no-verify` のみです
 
 ### Homebrew パッケージ
 
@@ -99,6 +147,10 @@ brew bundle cleanup --file=macos/Brewfile             # Brewfile にないパッ
 - `bootstrap.sh` は `formula` と `cask` を一括アップグレードしない。
   不足パッケージの依存関係は更新される場合がある
 - Homebrew 本体とパッケージ情報は自動更新される
+- 一部の GUI アプリ（ブラウザ、エディタ、コミュニケーションツールなど）は、別の手段で導入する端末があるため既定ではコメントアウトしてある。
+  個人用端末など brew で導入したい場合はコメントアウトを外して `brew bundle` を再実行してよい
+- `cleanup` は Brewfile の追加・削除を反映した後に、まず `--force` なしで削除候補を確認してから実行する（稼働中のツールを誤って削除しないため）
+- secretlint のグローバルフックは Docker で実行されるため、コミット時は Rancher Desktop の起動が必要
 
 ### macOS 設定
 
@@ -109,6 +161,10 @@ brew bundle cleanup --file=macos/Brewfile             # Brewfile にないパッ
 - macOS の既定値から意図的に変える項目だけを `defaults write` で適用する。
   対象はキーボードのリピート速度、Dock、Finder、日本語入力など
 - Rectangle の設定は、エクスポート済みの `macos/rectangle.plist` を読み込んで適用する
+- ログイン時に開くアプリ（Rectangle、Typeless、Logi Options+）をログイン項目に登録する。
+  初回は System Events へのオートメーション許可を求められる。許可しない端末では警告を出して続行する
+- デスクトップのアイコンの並べ方のように入れ子の辞書に含まれる項目は、
+  現在の設定を書き出して該当キーだけ差し替えてから読み込む（同じ辞書にある他の表示設定を失わないため）
 - 電源管理（`pmset`）の変更は、認証済みの `sudo`（`sudo -n`）で実行する
 - 日本語入力、外観（ダークモード）、ファンクションキーの設定は再ログイン後に反映される
 
@@ -199,20 +255,21 @@ cd "$HOME/src/pych/agent-skills"
 ./bin/agent-skills sync
 ```
 
-push URL を含め、URL にトークンやパスワードを埋め込まず、Git credential helper または `gh auth setup-git` を使用してください。
-
 ## 手動セットアップ
 
 ### システムとアプリ
 
 - システム設定
   - プライバシーとセキュリティ > フルディスクアクセス / アクセシビリティ（Claude など必要なものだけ）
-  - 一般 > ログイン項目と拡張機能
+  - 一般 > ログイン項目と拡張機能 > 拡張機能（ログイン項目は `macos/defaults.sh` が登録する）
   - サウンド > 入出力デバイスの指定
   - キーボード > テキスト入力 > テキスト置換（ユーザー辞書）
     - `しかく` → `■` / `やじるし` → `→` / `かっこ` → `「」`
 - Finder > 設定 > サイドバー > ホームにチェック
-- VS Code: Settings Sync にサインイン（設定と拡張はこのリポジトリでは管理しない）
+- Brewfile でコメントアウトしているアプリ（ブラウザ、エディタなど）を、端末に応じた方法で導入
+- Rancher Desktop: Preferences > Application > PATH を Manual にする（`~/.rd/bin` の PATH は `.zshrc` / `.bashrc` 側で管理し、rc ファイルへの自動追記を防ぐ）
+- VS Code: Settings Sync にサインイン（設定と拡張はこのリポジトリでは管理しない）。
+  コマンドパレットから「Shell Command: Install 'code' command in PATH」を実行
 - 各種アカウントにサインイン（1Password、Slack、Notion など）
 - 個別インストーラからプリンタドライバを導入
 
@@ -229,12 +286,41 @@ claude mcp add-json -s user serena '{"type":"stdio","command":"uvx","args":["-p"
 - 初回起動は `uvx` の依存取得で接続がタイムアウトする場合がある。
   キャッシュ形成後に再起動する
 
+## 非公開設定（dotfiles-private）
+
+**このリポジトリは公開リポジトリです。** 所属組織に固有の設定と個人情報は置きません。
+
+組織固有の設定（組織名を含む Git の `includeIf`、認証ヘルパー、組織専用のシェル関数）と、公開したくない個人情報（Git の `user.name` / `user.email`）は、非公開の `dotfiles-private` リポジトリで管理します。
+公開側は「その名前のファイルがあれば読む」という受け皿だけを持ち、非公開側のファイル名や内容を参照しません。
+
+- 受け皿: `.zshrc` / `.bashrc` が末尾で `~/.zshrc.local` / `~/.bashrc.local` を読み込み、`scripts/setup-git.sh` が `include.path` に `~/.gitconfig.local` を設定する
+- 受け皿: `git-hooks/deny-private-strings` が `~/.config/dotfiles/denylist.txt` と `~/.config/dotfiles/work-remotes.txt` を読み、公開リポジトリへの混入を止める（「[公開リポジトリへの混入防止（denylist）](#公開リポジトリへの混入防止denylist)」を参照）
+- `$HOME` へのリンクは `dotfiles-private` 側の `setup.sh` が行う
+- `bootstrap.sh` はアクセス可能な場合のみ `dotfiles-private` を取得し、その `setup.sh` を実行する
+- 認証情報そのもの（トークン・秘密鍵）は `dotfiles-private` にも置かない
+- 以下の環境変数で動作を変更できる
+  - `DOTFILES_PRIVATE_SKIP=1`: 導入をスキップする
+  - `DOTFILES_PRIVATE_REPO_URL`: クローン元を上書きする
+  - `DOTFILES_PRIVATE_DIR`: 保存先を絶対パスで上書きする
+
+## AI エージェントからの機密情報遮断
+
+AI エージェント（Claude Code / Codex）にパスワードやクレデンシャルを渡さないための多層防御を設定しています。設計と判断の記録は [SECURITY.md](SECURITY.md) を参照してください。
+
+- `.claude/settings.json`: キーチェーン・トークン取得コマンド（`security`、`gh auth token`、`op`、`ghtkn`、`vault`、`gcloud auth print-*-token`、`az account get-access-token`、`kubectl get secret` など）の deny と、認証情報ファイルの読み取り禁止（サンドボックスの `denyRead` を含む）
+- `.claude/hooks/pre-bash-guard.py`: 同等の遮断を Bash 実行前フックでも強制し、さらに検査の迂回経路（設定注入・インタプリタ経由の実行・コンテナへの受け渡し）と、認証情報ファイルを引数に取る操作を拒否する
+- `.config/codex/config.toml` / `.codex/browser/config.toml`: `:workspace` を継承した権限プロファイルで認証情報の読み取りを拒否し、`AWS_*` などの環境変数除外とブラウザ操作の常時承認を設定
+- `aws-env`（実クレデンシャルを環境変数へ展開するシェル関数）は deny とフックの両方で拒否する
+
 ## このリポジトリで管理しないもの
 
-- Git の共通設定 11 項目以外（Git LFS、認証情報など）と gh（GitHub CLI）: 端末ごとに個別設定する
-- Codex のローカルユーザー設定（`~/.codex/config.toml`）: 端末ごとに個別設定する
+- Git の共通設定以外（認証情報など）と gh（GitHub CLI）: 端末ごとに個別設定する
+- 組織固有・個人の設定（`~/.gitconfig.local`、`~/.zshrc.local` など）: 非公開の dotfiles-private で管理する
+- Codex のローカルユーザー設定（`~/.codex/config.toml`）: 端末ごとに個別設定する（旧 `sandbox_mode` は置かず、公開側の `default_permissions` を継承する）
 - Claude Code のユーザースコープ MCP 登録（`~/.claude.json`）: 「手動セットアップ」の手順で端末ごとに登録する
+- Brewfile でコメントアウトしているアプリ: 導入手段を端末ごとに選ぶ
 - 非公開 Agent Skills の内容: 非公開リポジトリで管理する
 - 非公開 Codex Custom Pets の内容: 非公開リポジトリで管理する
 - 認証情報（`~/.ssh`、`~/.aws` のクレデンシャル、gh のトークンなど）: 1Password などで別途移行する
+- 機密または端末固有のディレクトリ（`~/.kube`、`~/.docker`、`~/.terraform.d`、`~/.rd`）
 - VS Code の設定と拡張: VS Code Settings Sync で同期する

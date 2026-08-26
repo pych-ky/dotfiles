@@ -18,6 +18,332 @@ HASH_REBIND_REASON = "hash -p によるコマンドパスの再束縛は許可�
 PIPE_SHELL_REASON = "curl / wget ... | sh / bash 形式のコマンドは許可していません。"
 SHELL_STDIN_REASON = "内容を安全に検証できない標準入力を shell script として実行できません。"
 PARSE_REASON = "Bash コマンドを安全に解析できませんでした。"
+KEYCHAIN_REASON = "security コマンド (macOS キーチェーン) の実行は許可していません。"
+CREDENTIAL_TOOL_REASON = (
+    "認証情報を扱うコマンド (op / ghtkn / aws-env / docker-credential-*) の"
+    "実行は許可していません。"
+)
+GH_TOKEN_REASON = "gh auth token によるトークンの取得は許可していません。"
+AWS_EXPORT_REASON = (
+    "AWS の認証情報・機密値を標準出力へ返すコマンドの実行は許可していません。"
+)
+DOCKER_MOUNT_REASON = (
+    "認証情報を含むパスを docker のボリュームとしてマウントすることは許可していません。"
+)
+MONITORED_LITERAL_REASON = (
+    "認証情報を取得するコマンドの文字列をコマンドラインに含めることは、"
+    "実行しない場合でも許可していません。"
+    "対象の文字列を扱う必要がある場合は、コマンドの引数ではなくファイルへ置き、"
+    "そのファイルを読む形にしてください。"
+)
+
+# 実行の有無にかかわらず、コマンドラインに現れること自体を許可しない文字列。
+# プロセスのコマンドラインは監査対象であり、データとして載せただけでも
+# 認証情報へのアクセスとして扱われるため。
+# 誤検知を避けるため、他の用途では現れない具体的な字句だけを対象とする。
+MONITORED_LITERALS = (
+    # macOS キーチェーン
+    "dump-keychain",
+    "find-generic-password",
+    "find-internet-password",
+    "find-certificate",
+    "unlock-keychain",
+    # GitHub / git
+    "gh auth token",
+    "auth git-credential",
+    "credential fill",
+    "credential-osxkeychain",
+    "credential-libsecret",
+    "--show-token",
+    # AWS
+    "export-credentials",
+    "get-session-token",
+    "get-federation-token",
+    "get-login-password",
+    "get-secret-value",
+    "create-access-key",
+    "generate-db-auth-token",
+    "get-role-credentials",
+    "sso-oidc create-token",
+    "sts assume-role",
+    "eks get-token",
+    "kms decrypt",
+    "--with-decryption",
+    # コンテナ / 1Password
+    "docker-credential-",
+    "op://",
+    "op read",
+    "signin --raw",
+    # その他のシークレット管理
+    "print-access-token",
+    "print-identity-token",
+    "get-access-token",
+    "vault kv get",
+    "vault read",
+    "kubectl get secret",
+    "config view --raw",
+)
+ENV_DUMP_REASON = "printenv / env による環境変数の一括出力は許可していません。"
+
+# 機密情報 (キーチェーン・トークン) に到達しうるコマンドの basename。
+# aws-env は .shell/functions/aws.sh のシェル関数で、実クレデンシャルを
+# AWS_ACCESS_KEY_ID などへ export する (aws-use は AWS_PROFILE だけなので対象外)
+CREDENTIAL_COMMANDS = {"ghtkn", "op", "aws-env"}
+
+# サブコマンド判定のために「次の語を値として消費する」グローバルオプション。
+# これらを消費してから位置引数 (サブコマンド語) の並びを見ることで、
+# 値がサブコマンドを押し出すことによる誤検知・すり抜けの両方を防ぐ。
+GH_VALUE_OPTIONS = {"--repo", "-R", "--hostname"}
+AWS_VALUE_OPTIONS = {
+    "--profile",
+    "--region",
+    "--output",
+    "--endpoint-url",
+    "--query",
+    "--ca-bundle",
+    "--cli-read-timeout",
+    "--cli-connect-timeout",
+    "--color",
+}
+GIT_VALUE_OPTIONS = {
+    "-C",
+    "-c",
+    "--git-dir",
+    "--work-tree",
+    "--namespace",
+    "--super-prefix",
+    "--exec-path",
+}
+# 環境変数の一括出力になりうる組み込みコマンドと、その出力オプション
+ENV_DUMP_COMMANDS = {"printenv", "set", "export", "declare", "typeset"}
+
+# 認証情報や復号済みの機密値を標準出力へ返す AWS のサブコマンド
+AWS_CREDENTIAL_SUBCOMMANDS = {
+    ("configure", "export-credentials"),
+    ("sts", "get-session-token"),
+    ("sts", "assume-role"),
+    ("sts", "assume-role-with-web-identity"),
+    ("sts", "assume-role-with-saml"),
+    ("sts", "get-federation-token"),
+    ("ecr", "get-login-password"),
+    ("ecr-public", "get-login-password"),
+    ("secretsmanager", "get-secret-value"),
+    ("iam", "create-access-key"),
+    ("iam", "create-login-profile"),
+    ("iam", "update-login-profile"),
+    ("eks", "get-token"),
+    ("rds", "generate-db-auth-token"),
+    ("kms", "decrypt"),
+    ("sso", "get-role-credentials"),
+    ("sso", "get-access-token"),
+    ("sso-oidc", "create-token"),
+}
+
+SECRET_TOOL_REASON = (
+    "認証情報や復号済みの値を標準出力へ返すコマンドの実行は許可していません。"
+)
+
+# 認証情報を標準出力へ返すコマンドとサブコマンドの対応。
+# {コマンド: (値を取るグローバルオプション, {サブコマンド語の並び, ...})}
+# サブコマンド語は先頭からの一致で判定する
+SECRET_TOOL_SUBCOMMANDS = {
+    "vault": (
+        {"-address", "-namespace", "-format", "-field", "-mount", "-ca-cert"},
+        {
+            ("kv", "get"),
+            ("read",),
+            ("login",),
+            ("token", "create"),
+            ("token", "lookup"),
+            ("print", "token"),
+        },
+    ),
+    "gcloud": (
+        {
+            "--project",
+            "--account",
+            "--format",
+            "--configuration",
+            "--impersonate-service-account",
+        },
+        {
+            ("auth", "print-access-token"),
+            ("auth", "print-identity-token"),
+            ("secrets", "versions", "access"),
+            ("iam", "service-accounts", "keys", "create"),
+        },
+    ),
+    "az": (
+        {
+            "--subscription",
+            "--output",
+            "-o",
+            "--query",
+            "--resource-group",
+            "-g",
+            "--vault-name",
+            "--name",
+            "-n",
+        },
+        {
+            ("account", "get-access-token"),
+            ("keyvault", "secret", "show"),
+            ("keyvault", "secret", "download"),
+            ("ad", "sp", "credential", "reset"),
+        },
+    ),
+}
+
+# kubectl は他と形が違うため個別に扱う
+KUBECTL_VALUE_OPTIONS = {
+    "-n",
+    "--namespace",
+    "-o",
+    "--output",
+    "--context",
+    "--kubeconfig",
+    "--cluster",
+    "--user",
+    "-l",
+    "--selector",
+    "--server",
+    "--token",
+    "--as",
+    "--as-group",
+}
+
+# サンドボックス外で実行される docker から、マウント経由での参照を禁止するパス
+SENSITIVE_MOUNT_PATHS = (
+    ".aws",
+    ".ssh",
+    ".kube",
+    ".docker",
+    ".gnupg",
+    ".codex",
+    ".claude",
+    ".config/gh",
+    ".netrc",
+    ".terraform.d",
+    "Library/Keychains",
+)
+CREDENTIAL_FILE_REASON = (
+    "認証情報ファイルを引数に取るコマンドの実行は許可していません。"
+)
+# ホーム基準の相対パスで表した認証情報の格納場所。
+# .aws/load-active-profile.sh のような同じディレクトリ配下の無害なファイルまで
+# 拒否しないよう、ディレクトリ全体ではなく実際の格納先だけを列挙する
+CREDENTIAL_FILE_COMPONENTS = (
+    ".aws/credentials",
+    ".aws/config",
+    ".aws/sso",
+    ".ssh",
+    ".gnupg",
+    ".docker/config.json",
+    ".config/gh/hosts.yml",
+    ".kube/config",
+    ".codex/auth.json",
+    ".claude/.credentials.json",
+    ".claude.json",
+    ".terraform.d/credentials.tfrc.json",
+    "Library/Keychains",
+)
+# パスの位置に関係なく認証情報とみなすファイル名
+CREDENTIAL_FILE_NAMES = (
+    ".git-credentials",
+    ".netrc",
+    ".pgpass",
+    ".npmrc",
+    "id_rsa",
+    "id_dsa",
+    "id_ecdsa",
+    "id_ed25519",
+)
+# 秘密鍵・証明書ストアの拡張子
+CREDENTIAL_FILE_SUFFIXES = (".pem", ".p12", ".pfx", ".key", ".keystore", ".jks")
+
+DOCKER_VALUE_OPTIONS = {"-H", "--host", "--context", "--config", "--log-level"}
+DOCKER_MOUNT_OPTIONS = {"-v", "--volume", "--mount"}
+# ファイルの内容をそのままコンテナへ渡すオプション。マウントと同じ経路になる
+DOCKER_FILE_OPTIONS = {"--env-file", "--label-file"}
+CONTAINER_COMMANDS = {"docker", "podman", "nerdctl"}
+
+# git に渡すと外部コマンドを起動する設定キー。
+# git -c <key>=<コマンド> は、ここまでの検査をすべて迂回して任意の実行体を起こせる
+GIT_EXEC_CONFIG_KEYS = {
+    "core.pager",
+    "core.editor",
+    "core.sshcommand",
+    "core.fsmonitor",
+    "core.hookspath",
+    "core.askpass",
+    "core.gitproxy",
+    "sequence.editor",
+    "diff.external",
+    "credential.helper",
+    "gpg.program",
+    "gpg.openpgp.program",
+    "ssh.variant",
+    "filter.lfs.process",
+    "filter.lfs.clean",
+    "filter.lfs.smudge",
+    "uploadpack.packobjectshook",
+}
+# 同じ効果を持つ環境変数 (代入形式で前置される)
+GIT_EXEC_ENV_VARS = {
+    "GIT_PAGER",
+    "PAGER",
+    "GIT_EDITOR",
+    "GIT_SEQUENCE_EDITOR",
+    "GIT_SSH",
+    "GIT_SSH_COMMAND",
+    "GIT_EXTERNAL_DIFF",
+    "GIT_ASKPASS",
+    "SSH_ASKPASS",
+    "LESSOPEN",
+    "LESSCLOSE",
+    "GIT_PROXY_COMMAND",
+}
+GIT_EXEC_INJECTION_REASON = (
+    "外部コマンドを起動させる git の設定 (core.pager など) や "
+    "同等の環境変数の指定は許可していません "
+    "(検査を迂回して任意のコマンドを起動できるため)。"
+)
+
+# インタプリタへコードを直接渡すオプション。
+# 渡された中身はシェルとして解析できないため、静的検査が及ばない。
+# awk は第 1 位置引数がコード本体になる点が他と異なる
+INTERPRETER_CODE_OPTIONS = {
+    "awk": {"-e", "--source"},
+    "gawk": {"-e", "--source"},
+    "perl": {"-e", "-E"},
+    "python": {"-c"},
+    "python3": {"-c"},
+    "ruby": {"-e"},
+    "node": {"-e", "-p", "--eval", "--print"},
+    "php": {"-r"},
+}
+# コード本体が第 1 位置引数になるインタプリタ
+INTERPRETER_POSITIONAL_CODE = {"awk", "gawk"}
+# 渡されたコードの中で外部コマンドを起動する構成要素
+INTERPRETER_EXEC_TOKENS = (
+    "system",
+    "exec",
+    "popen",
+    "spawn",
+    "subprocess",
+    "child_process",
+    "shell_exec",
+    "passthru",
+    "proc_open",
+    "`",
+    "%x",
+    "qx",
+    "open3",
+)
+INTERPRETER_EXEC_REASON = (
+    "インタプリタへ直接渡したコードから外部コマンドを起動する操作は"
+    "許可していません (コードの内容を静的に検査できないため)。"
+)
 
 PUNCTUATION = ";&|()<>\n"
 LITERAL_PUNCTUATION_ENCODE = {
@@ -109,6 +435,341 @@ def add_reason(reasons, reason):
 
 def command_basename(word):
     return os.path.basename(word.rstrip("/")) if "/" in word else word
+
+
+def subcommand_words(arguments, value_options):
+    """オプションとその値を除いた位置引数 (サブコマンド語) を順に返す。
+
+    `value_options` に含まれるオプションは次の語を値として消費する。
+    `--opt=value` 形式や `--` 以降の扱いも考慮する。
+    """
+    words = []
+    skip_next = False
+    end_of_options = False
+    for argument in arguments:
+        if end_of_options:
+            words.append(argument)
+            continue
+        if skip_next:
+            skip_next = False
+            continue
+        if argument == "--":
+            end_of_options = True
+            continue
+        if argument.startswith("-") and argument != "-":
+            option = argument.split("=", 1)[0]
+            if "=" not in argument and option in value_options:
+                skip_next = True
+            continue
+        words.append(argument)
+    return words
+
+
+def mount_sources(arguments):
+    """docker run / create のボリューム指定から、ホスト側のパスを取り出す。
+
+    -v /host:/container、--volume=/host:/container、
+    --mount type=bind,source=/host,target=/c の 3 形式に対応する。
+    """
+    sources = []
+    pending = False
+    for argument in arguments:
+        if pending:
+            value = argument
+            pending = False
+        elif argument in DOCKER_MOUNT_OPTIONS:
+            pending = True
+            continue
+        elif "=" in argument and argument.split("=", 1)[0] in DOCKER_MOUNT_OPTIONS:
+            value = argument.split("=", 1)[1]
+        else:
+            continue
+
+        if "," in value or value.startswith("type="):
+            # --mount 形式: source= / src= のキーを探す
+            for field in value.split(","):
+                key, _, field_value = field.partition("=")
+                if key.strip() in {"source", "src"} and field_value:
+                    sources.append(field_value)
+        else:
+            # -v 形式: ホスト側は最初の : より前 (Windows ドライブ表記は扱わない)
+            host = value.split(":", 1)[0]
+            if host:
+                sources.append(host)
+    return sources
+
+
+def path_contains_expansion(path):
+    """パスに解決できない展開 (変数・コマンド置換など) が残っているかを返す。
+
+    呼び出し時点では $VAR や $(...) はマーカー文字列に置換されているため、
+    生の `$` ではなくマーカーの有無で判定する。
+    """
+    if "$" in path or "`" in path:
+        return True
+    return any(marker in path for marker in DYNAMIC_COMMAND_MARKERS)
+
+
+def mount_is_sensitive(source):
+    """マウント元が認証情報を含むパスを指しているかを判定する。
+
+    `~` と `$HOME` は展開先が一意なので解決してから判定する。それ以外の展開
+    ($PWD など) は解決できないため、機密パスの構成要素を含む場合だけ拒否する
+    (解決できない全てを拒否すると、正当なマウントまで妨げてしまう)。
+    """
+    home = os.path.expanduser("~")
+
+    path = source
+    for prefix in ("${HOME}", "$HOME", "~"):
+        if path == prefix:
+            path = home
+            break
+        if path.startswith(prefix + "/"):
+            path = home + path[len(prefix) :]
+            break
+
+    if os.path.isabs(path):
+        path = os.path.normpath(path)
+        # ルートやホーム全体のマウントは、機密パスを丸ごと含むため拒否する
+        if path in {"/", "/Users", "/home", home}:
+            return True
+        for relative in SENSITIVE_MOUNT_PATHS:
+            sensitive = os.path.normpath(os.path.join(home, relative))
+            if path == sensitive or path.startswith(sensitive + os.sep):
+                return True
+        return False
+
+    # 展開を含まない相対パスは、先頭の構成要素だけを見る。
+    # 部分一致で判定すると ./.env.docker のような無関係なパスまで拒否してしまう。
+    # cwd が $HOME のときに .ssh/... を指せるため、先頭一致は拒否する。
+    #
+    # この時点で $VAR や $(...) はマーカーへ置換済みなので、`$` ではなく
+    # マーカーの有無で「解決できない展開を含むか」を判定する
+    if not path_contains_expansion(path):
+        parts = [part for part in path.split(os.sep) if part not in ("", ".")]
+        if parts and ".." not in parts:
+            for relative in SENSITIVE_MOUNT_PATHS:
+                if parts[0] == relative.split("/")[0]:
+                    return True
+            return False
+
+    # 解決できない展開や .. を含む場合は、機密パスの構成要素の有無で判定する
+    for relative in SENSITIVE_MOUNT_PATHS:
+        if relative in path:
+            return True
+    return False
+
+
+def argument_is_credential_path(argument):
+    """引数が認証情報ファイルを指しているかを判定する。
+
+    `~` と `$HOME` は展開先が一意なので解決してから判定する。相対パスは作業
+    ディレクトリが不明なため、ホーム基準でも突き合わせる (cwd が $HOME の場合に
+    `.ssh/id_rsa` のような指定で到達できるため)。
+    """
+    home = os.path.expanduser("~")
+
+    path = argument
+    for prefix in ("${HOME}", "$HOME", "~"):
+        if path == prefix:
+            # ホームそのものは対象外 (ls ~ を拒否しない)
+            return False
+        if path.startswith(prefix + "/"):
+            path = home + path[len(prefix) :]
+            break
+
+    basename = os.path.basename(path.rstrip("/"))
+    if basename in CREDENTIAL_FILE_NAMES:
+        return True
+    for suffix in CREDENTIAL_FILE_SUFFIXES:
+        if basename.casefold().endswith(suffix):
+            return True
+
+    if path_contains_expansion(path):
+        # 解決できない展開が残る場合は構成要素の有無で判定する
+        return any(
+            component in path for component in CREDENTIAL_FILE_COMPONENTS
+        )
+
+    normalized = os.path.normpath(path)
+    if os.path.isabs(normalized):
+        candidates = (normalized,)
+    else:
+        candidates = (os.path.normpath(os.path.join(home, normalized)),)
+
+    for candidate in candidates:
+        for component in CREDENTIAL_FILE_COMPONENTS:
+            sensitive = os.path.normpath(os.path.join(home, component))
+            if candidate == sensitive or candidate.startswith(sensitive + os.sep):
+                return True
+    return False
+
+
+def secret_tool_invocation(command, arguments):
+    """認証情報を出力するサブコマンドの呼び出しかどうかを判定する。"""
+    entry = SECRET_TOOL_SUBCOMMANDS.get(command)
+    if entry is not None:
+        value_options, subcommands = entry
+        words = subcommand_words(arguments, value_options)
+        for expected in subcommands:
+            if tuple(words[: len(expected)]) == expected:
+                return True
+        return False
+
+    if command != "kubectl":
+        return False
+
+    words = subcommand_words(arguments, KUBECTL_VALUE_OPTIONS)
+    # config view --raw は認証トークンを平文で出力する
+    if words[:2] == ["config", "view"] and "--raw" in arguments:
+        return True
+    # get secret / get secrets / get secret/<name>
+    if words[:1] == ["get"] and len(words) > 1 and words[1].startswith("secret"):
+        return True
+    return False
+
+
+def file_option_values(arguments, options):
+    """`--opt VALUE` と `--opt=VALUE` の両形式から値を取り出す。"""
+    values = []
+    pending = False
+    for argument in arguments:
+        if pending:
+            values.append(argument)
+            pending = False
+            continue
+        if argument in options:
+            pending = True
+            continue
+        if "=" in argument and argument.split("=", 1)[0] in options:
+            values.append(argument.split("=", 1)[1])
+    return values
+
+
+def git_injects_command(arguments, assignments):
+    """git へ外部コマンドを仕込む指定が含まれるかを判定する。
+
+    `-c <key>=<command>` と、同じ効果を持つ環境変数の前置代入の両方を見る。
+    キーの比較は git と同じく大文字小文字を区別しない。
+    """
+    for name in assignments:
+        if name.upper() in GIT_EXEC_ENV_VARS:
+            return True
+
+    pending = False
+    for argument in arguments:
+        if pending:
+            pending = False
+            key = argument.split("=", 1)[0].strip().casefold()
+            if key in GIT_EXEC_CONFIG_KEYS or key.startswith("alias."):
+                return True
+            continue
+        if argument == "-c":
+            pending = True
+            continue
+        # -c<key>=<value> / --config-env=<key>=<value> の連結形式
+        for prefix in ("-c", "--config-env="):
+            if argument.startswith(prefix) and len(argument) > len(prefix):
+                key = argument[len(prefix) :].split("=", 1)[0].strip().casefold()
+                if key in GIT_EXEC_CONFIG_KEYS or key.startswith("alias."):
+                    return True
+    return False
+
+
+def interpreter_code_arguments(command, arguments):
+    """インタプリタへ直接渡されたコード本体を取り出す。"""
+    options = INTERPRETER_CODE_OPTIONS.get(command)
+    if not options:
+        return []
+
+    code = []
+    pending = False
+    for argument in arguments:
+        if pending:
+            code.append(argument)
+            pending = False
+            continue
+        if argument in options:
+            pending = True
+            continue
+        # -e'CODE' のように区切りなしで連結された形式
+        for option in options:
+            if (
+                option.startswith("-")
+                and not option.startswith("--")
+                and argument.startswith(option)
+                and len(argument) > len(option)
+            ):
+                code.append(argument[len(option) :])
+                break
+
+    if command in INTERPRETER_POSITIONAL_CODE and not code:
+        # awk はコード本体が第 1 位置引数。-f はファイル指定なので対象外
+        if "-f" not in arguments and not any(
+            argument.startswith("-f") for argument in arguments
+        ):
+            for argument in arguments:
+                if not argument.startswith("-"):
+                    code.append(argument)
+                    break
+    return code
+
+
+def code_starts_process(code_arguments):
+    """渡されたコードが外部コマンドを起動する形かどうかを判定する。"""
+    for code in code_arguments:
+        lowered = code.casefold()
+        for token in INTERPRETER_EXEC_TOKENS:
+            if token in lowered:
+                return True
+    return False
+
+
+def env_dump_arguments(command, arguments):
+    """環境変数の値を出力する形の呼び出しかどうかを判定する。
+
+    printenv は常に値を出力する。set / export / declare / typeset は、
+    代入や名前指定を伴わない一覧形式 (または -p) のときだけ値を出力する。
+    """
+    if command == "printenv":
+        return True
+    options = [
+        argument
+        for argument in arguments
+        if argument.startswith("-") and argument != "-"
+    ]
+    positional = [
+        argument
+        for argument in arguments
+        if not (argument.startswith("-") and argument != "-")
+    ]
+    if command == "set":
+        return not arguments
+    if command in {"export", "declare", "typeset"}:
+        return "-p" in options or not positional
+    return False
+
+
+def strip_launcher_options(arguments, value_options):
+    """先頭のオプション (と値) を飛ばし、実行コマンド以降の argv を返す。
+
+    arch / caffeinate のように「オプションの後に実行コマンド」を取る
+    ランチャーを unwrap するために使う。
+    """
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        if argument == "--":
+            return arguments[index + 1 :]
+        if argument.startswith("-") and argument != "-":
+            option = argument.split("=", 1)[0]
+            if "=" not in argument and option in value_options:
+                index += 2
+            else:
+                index += 1
+            continue
+        break
+    return arguments[index:]
 
 
 def arithmetic_expression_marker(expression):
@@ -3010,10 +3671,15 @@ class CommandScanner:
             )
             return None
         self.validate_assignments(leading_assignments, persist=False)
+        # このコマンドに前置された代入だけを別に覚えておく。
+        # 既存のエクスポート済み環境まで含めると、無害な PAGER=less などで
+        # 誤検知してしまうため
+        prefixed_assignments = set()
         for assignment in leading_assignments:
             name, value = assignment.split("=", 1)
             if "[" not in name:
                 effective_environment[name] = value
+                prefixed_assignments.add(name)
 
         if ARITHMETIC_COMMAND_MARKER_RE.fullmatch(argv[0]):
             return None
@@ -3022,6 +3688,9 @@ class CommandScanner:
             if command_word_is_dynamic(argv[0]):
                 raise ShellScanError("dynamic command name")
             command = command_basename(argv[0])
+            # ファイル由来のランチャーは大文字表記でも実体に解決されるため casefold する
+            # (command / builtin / exec はシェル組み込みで大小文字を区別するため対象外)
+            command_cf = command.casefold()
             arguments = argv[1:]
 
             if command == "command":
@@ -3030,23 +3699,32 @@ class CommandScanner:
                 argv = unwrap_builtin_options(arguments)
             elif command == "exec":
                 argv = unwrap_exec_options(arguments)
-            elif command == "env":
+            elif command_cf == "env":
                 env_assignments = effective_environment.copy()
                 argv = unwrap_env(arguments, environment=env_assignments)
                 effective_environment = env_assignments
-            elif command == "nohup":
-                argv = (
-                    arguments[1:]
-                    if arguments and arguments[0] == "--"
-                    else arguments
-                )
-            elif command == "nice":
+                # 実行コマンドを伴わない env は環境変数の一括出力になる
+                if not any(
+                    not ASSIGNMENT_RE.match(argument) for argument in argv
+                ):
+                    add_reason(self.reasons, ENV_DUMP_REASON)
+            elif command_cf in {"nohup", "arch", "caffeinate"}:
+                # arch / caffeinate はオプションの後に実行コマンドを取る
+                # (値を取るオプションはスキップ済みなので、先頭の非オプション語まで進める)
+                if command_cf in {"arch", "caffeinate"}:
+                    launcher_values = (
+                        {"-t"} if command_cf == "caffeinate" else {"-arch"}
+                    )
+                    argv = strip_launcher_options(arguments, launcher_values)
+                else:
+                    argv = arguments[1:] if arguments and arguments[0] == "--" else arguments
+            elif command_cf == "nice":
                 argv = unwrap_nice(arguments)
-            elif command == "time":
+            elif command_cf == "time":
                 argv = unwrap_time(arguments)
-            elif command == "timeout":
+            elif command_cf == "timeout":
                 argv = unwrap_timeout(arguments)
-            elif command == "xargs":
+            elif command_cf == "xargs":
                 argv = unwrap_xargs(arguments)
             else:
                 break
@@ -3065,12 +3743,99 @@ class CommandScanner:
                 name, value = assignment.split("=", 1)
                 if "[" not in name:
                     effective_environment[name] = value
+                    prefixed_assignments.add(name)
 
         command = command_basename(argv[0])
         arguments = argv[1:]
-        if command == "sudo":
+        # macOS は大文字小文字を区別しないファイルシステムのため、/usr/bin/SECURITY
+        # のような表記でも実体に解決される。ファイル由来コマンドの判定は casefold する
+        command_cf = command.casefold()
+
+        if command_cf == "security":
+            add_reason(self.reasons, KEYCHAIN_REASON)
+        elif (
+            command_cf in CREDENTIAL_COMMANDS
+            or command_cf.startswith("docker-credential-")
+            or command_cf.startswith("git-credential-")
+        ):
+            add_reason(self.reasons, CREDENTIAL_TOOL_REASON)
+        elif command_cf in ENV_DUMP_COMMANDS and env_dump_arguments(
+            command_cf, arguments
+        ):
+            add_reason(self.reasons, ENV_DUMP_REASON)
+        elif command_cf == "gh":
+            # 値を取るオプションを消費してから、位置引数 (サブコマンド) の並びを見る
+            words = subcommand_words(arguments, GH_VALUE_OPTIONS)
+            shows_token = any(
+                option in {"--show-token", "-t"} for option in arguments
+            )
+            if (
+                words[:2] == ["auth", "token"]
+                or words[:2] == ["auth", "git-credential"]
+                or (words[:2] == ["auth", "status"] and shows_token)
+                or (words[:2] == ["config", "get"] and "oauth_token" in words)
+            ):
+                add_reason(self.reasons, GH_TOKEN_REASON)
+        elif command_cf == "aws":
+            words = subcommand_words(arguments, AWS_VALUE_OPTIONS)
+            pair = tuple(words[:2])
+            decrypts_parameter = (
+                pair[:1] == ("ssm",)
+                and any(word.startswith("get-parameter") for word in words[1:2])
+                and "--with-decryption" in arguments
+            )
+            if pair in AWS_CREDENTIAL_SUBCOMMANDS or decrypts_parameter:
+                add_reason(self.reasons, AWS_EXPORT_REASON)
+        elif command_cf == "git":
+            # git credential fill はヘルパー経由でトークンを標準出力へ出す
+            # (内部利用の git push / git fetch は helper を呼ぶだけなので対象外)
+            words = subcommand_words(arguments, GIT_VALUE_OPTIONS)
+            if words[:2] == ["credential", "fill"] or (
+                words and words[0].startswith("credential-")
+            ):
+                add_reason(self.reasons, GH_TOKEN_REASON)
+            # git -c core.pager=<コマンド> のように、git 自身に外部コマンドを
+            # 起動させる指定は、ここまでの検査をすべて迂回できる
+            if git_injects_command(arguments, prefixed_assignments):
+                add_reason(self.reasons, GIT_EXEC_INJECTION_REASON)
+        elif command_cf in CONTAINER_COMMANDS:
+            # docker はサンドボックス外で実行されるため、denyRead が効かない。
+            # 認証情報を含むパスのマウントはここで拒否する
+            words = subcommand_words(arguments, DOCKER_VALUE_OPTIONS)
+            if words[:1] in (["run"], ["create"]) or words[:2] in (
+                ["container", "run"],
+                ["container", "create"],
+            ):
+                references = list(mount_sources(arguments))
+                # --env-file / --label-file もファイルの内容を渡す経路になる
+                references += file_option_values(arguments, DOCKER_FILE_OPTIONS)
+                for source in references:
+                    if mount_is_sensitive(source):
+                        add_reason(self.reasons, DOCKER_MOUNT_REASON)
+                        break
+
+        # インタプリタへ直接渡したコードは解析できないため、
+        # そこから外部コマンドを起動する形は拒否する
+        if command_cf in INTERPRETER_CODE_OPTIONS and code_starts_process(
+            interpreter_code_arguments(command_cf, arguments)
+        ):
+            add_reason(self.reasons, INTERPRETER_EXEC_REASON)
+
+        # vault / gcloud / az / kubectl など、認証情報を標準出力へ返すコマンド
+        if secret_tool_invocation(command_cf, arguments):
+            add_reason(self.reasons, SECRET_TOOL_REASON)
+
+        # 認証情報ファイルを引数に取る操作は、コマンドの種類を問わず拒否する。
+        # excludedCommands のコマンドはサンドボックスを迂回し denyRead が
+        # 効かないため、ここが唯一の防御になる
+        for argument in arguments:
+            if argument_is_credential_path(argument):
+                add_reason(self.reasons, CREDENTIAL_FILE_REASON)
+                break
+
+        if command_cf == "sudo":
             add_reason(self.reasons, SUDO_REASON)
-        elif command == "rm":
+        elif command_cf == "rm":
             for argument in arguments:
                 if argument == "--":
                     break
@@ -3307,6 +4072,15 @@ def main():
         return fail_closed("Bash hook input does not contain a string command")
     command = tool_input["command"].strip()
     if not command:
+        return 0
+
+    # 実行されるかどうかに関係なく、コマンドラインに載せること自体を許可しない
+    # 文字列を先に弾く (解析結果ではなく元のコマンド全文を対象にする)
+    monitored = [
+        literal for literal in MONITORED_LITERALS if literal in command
+    ]
+    if monitored:
+        print_block_json(command, [MONITORED_LITERAL_REASON])
         return 0
 
     scanner = CommandScanner()

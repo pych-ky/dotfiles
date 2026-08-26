@@ -1,0 +1,234 @@
+#!/usr/bin/env bash
+#
+# ============================================================================
+# 非公開 denylist に一致する文字列のコミット・push を止めるフック
+# ============================================================================
+#
+# 公開リポジトリへ、組織固有の識別子や過去の所属先の情報を混入させないための
+# 機械的な歯止め。判定パターンは公開リポジトリに置かず、非公開側が
+# 以下へ配置する。パターンが無い端末では何もしない (公開リポジトリ単体でも動く)。
+#
+#   ${XDG_CONFIG_HOME:-~/.config}/dotfiles/denylist.txt
+#     1 行 1 パターン。固定文字列として扱い、大文字小文字は区別しない。
+#     行頭が # の行と空行は無視する。
+#
+#   ${XDG_CONFIG_HOME:-~/.config}/dotfiles/work-remotes.txt
+#     1 行 1 部分文字列。リポジトリの remote URL が「すべて」ここに一致する場合、
+#     そのリポジトリは組織のものとみなして検査しない
+#     (組織のリポジトリでは組織名を書いてよいため)。
+#     remote が 1 つも無いリポジトリは検査対象とする。
+#
+# 使い方:
+#   deny-private-strings pre-commit
+#   deny-private-strings pre-push    (標準入力から push 対象 ref の一覧を受け取る)
+#
+# 検査対象:
+#   pre-commit  ステージ済みファイルのパス名と、その index 上の内容全体。
+#               「今回の差分」ではなく内容全体を見るので、既存行の混入も止まる。
+#   pre-push    push 対象コミットを 1 件ずつ見て、コミットメッセージと差分。
+#               コミット単位で見るため「追加して後で消した」履歴も検出できる。
+#
+# 混入を見つけたら終了状態 1 で中断する。回避は git の --no-verify のみ。
+
+set -uo pipefail
+
+mode="${1:-}"
+remote_name="${2:-}"
+if [[ "$mode" != pre-commit && "$mode" != pre-push ]]; then
+  printf 'usage: %s (pre-commit|pre-push)\n' "$(basename "$0")" >&2
+  exit 2
+fi
+
+config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/dotfiles"
+denylist_file="$config_dir/denylist.txt"
+work_remotes_file="$config_dir/work-remotes.txt"
+
+# パターン定義が無い端末では何もしない
+[[ -r "$denylist_file" ]] || exit 0
+
+# 行頭 # のコメント行と空行を除き、前後の空白を落として 1 行 1 パターンで出力する。
+# 空行を残すと grep -F がすべての行に一致してしまうため、除去は必須
+strip_pattern_file() {
+  sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -- "$1" |
+    grep -v -e '^#' -e '^$' || true
+}
+
+# パターンを一時ファイルに書き出さず、プロセス置換でだけ渡す
+# (非公開のパターンをディスクへ残さないため)
+patterns() {
+  strip_pattern_file "$denylist_file"
+}
+
+if [[ -z "$(patterns)" ]]; then
+  exit 0
+fi
+
+# denylist を保管しているリポジトリ自身では検査しない。
+# denylist.txt は全パターンを定義上必ず含むため、自己検査すると初回コミットを
+# 含めて常に拒否してしまう。symlink を解決した配置元と現在の Git ルートを比較し、
+# denylist だけを除外する (secretlint など他のグローバルフックは継続する)。
+resolve_path() {
+  local path="$1"
+  local target dir
+
+  while [[ -L "$path" ]]; do
+    target="$(readlink "$path")" || return 1
+    if [[ "$target" == /* ]]; then
+      path="$target"
+    else
+      path="$(dirname "$path")/$target"
+    fi
+  done
+
+  dir="$(cd -P -- "$(dirname "$path")" 2>/dev/null && pwd)" || return 1
+  printf '%s/%s\n' "$dir" "$(basename "$path")"
+}
+
+denylist_source="$(resolve_path "$denylist_file" 2>/dev/null || true)"
+current_repo="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+denylist_repo=
+if [[ -n "$denylist_source" ]]; then
+  denylist_repo="$(
+    git -C "$(dirname "$denylist_source")" rev-parse --show-toplevel 2>/dev/null ||
+      true
+  )"
+fi
+if [[ -n "$current_repo" && -n "$denylist_repo" ]]; then
+  current_repo="$(cd -P -- "$current_repo" 2>/dev/null && pwd)"
+  denylist_repo="$(cd -P -- "$denylist_repo" 2>/dev/null && pwd)"
+  [[ "$current_repo" == "$denylist_repo" ]] && exit 0
+fi
+
+# remote URL がすべて work-remotes.txt に一致するなら、組織のリポジトリとみなす
+is_work_repository() {
+  local url total=0 matched=0
+
+  [[ -r "$work_remotes_file" ]] || return 1
+  [[ -n "$(strip_pattern_file "$work_remotes_file")" ]] || return 1
+
+  while IFS= read -r url; do
+    [[ -n "$url" ]] || continue
+    total=$((total + 1))
+    if printf '%s\n' "$url" |
+      grep -qiF -f <(strip_pattern_file "$work_remotes_file"); then
+      matched=$((matched + 1))
+    fi
+  done < <(git remote -v 2>/dev/null | awk '{ print $2 }' | sort -u)
+
+  ((total > 0 && matched == total))
+}
+
+if is_work_repository; then
+  exit 0
+fi
+
+found=0
+
+# 一致箇所を字下げして表示する。長い行は切り詰める
+report() {
+  local heading="$1"
+  local line
+
+  printf 'denylist: %s\n' "$heading" >&2
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    if ((${#line} > 200)); then
+      line="${line:0:200}..."
+    fi
+    printf '  %s\n' "$line" >&2
+  done
+  found=1
+}
+
+scan_pre_commit() {
+  local -a paths=()
+  local path hit
+
+  while IFS= read -r -d '' path; do
+    paths+=("$path")
+  done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+
+  ((${#paths[@]} > 0)) || return 0
+
+  # パス名自体の検査 (ファイル名に組織名が入っている場合)
+  hit="$(
+    printf '%s\n' "${paths[@]}" | grep -iF -f <(patterns) || true
+  )"
+  [[ -n "$hit" ]] && report 'ステージ済みのパス名が一致しました' <<<"$hit"
+
+  # index 上の内容の検査 (-I でバイナリを除外)
+  hit="$(
+    git grep --cached --no-color -I -n -i -F -f <(patterns) -- "${paths[@]}" ||
+      true
+  )"
+  [[ -n "$hit" ]] && report 'ステージ済みの内容が一致しました' <<<"$hit"
+
+  return 0
+}
+
+scan_pre_push() {
+  local local_ref local_sha remote_ref remote_sha
+  local -a range remote_tips
+  local commit hit count
+
+  while read -r local_ref local_sha remote_ref remote_sha; do
+    [[ -n "${local_sha:-}" ]] || continue
+    # ref の削除は検査対象外
+    [[ "$local_sha" =~ ^0+$ ]] && continue
+
+    if [[ "${remote_sha:-}" =~ ^0+$ ]]; then
+      # 新規 ref。送信先 remote に既にあるコミットだけを除いて範囲を絞る。
+      # --remotes (全 remote) を使うと、private remote にだけあるコミットを
+      # public remote へ初回 push する際に検査を飛ばしてしまうため使わない。
+      remote_tips=()
+      if [[ -n "$remote_name" ]]; then
+        while IFS= read -r commit; do
+          [[ -n "$commit" ]] && remote_tips+=("$commit")
+        done < <(
+          git for-each-ref --format='%(objectname)' \
+            "refs/remotes/$remote_name/" 2>/dev/null || true
+        )
+      fi
+      range=("$local_sha")
+      ((${#remote_tips[@]} == 0)) || range+=(--not "${remote_tips[@]}")
+    else
+      range=("$remote_sha..$local_sha")
+    fi
+
+    count="$(git rev-list --count "${range[@]}" 2>/dev/null || printf '0')"
+    if ((count > 1000)); then
+      printf 'denylist: %s 件のコミットを検査します (時間がかかります)\n' \
+        "$count" >&2
+    fi
+
+    # コミット単位で見る。範囲の net diff ではなく各コミットの差分を見るため、
+    # 「あるコミットで追加し、後のコミットで消した」内容も検出できる
+    while IFS= read -r commit; do
+      [[ -n "$commit" ]] || continue
+      hit="$(
+        git show --format='%B' -U0 --no-color --no-ext-diff --no-textconv \
+          "$commit" -- |
+          grep -iF -f <(patterns) || true
+      )"
+      [[ -n "$hit" ]] &&
+        report "コミット ${commit:0:12} の内容が一致しました" <<<"$hit"
+    done < <(git rev-list "${range[@]}" 2>/dev/null || true)
+  done
+
+  return 0
+}
+
+case "$mode" in
+pre-commit) scan_pre_commit ;;
+pre-push) scan_pre_push ;;
+esac
+
+if ((found)); then
+  printf '\n' >&2
+  printf 'このリポジトリへ入れてはいけない文字列が含まれています。\n' >&2
+  printf '判定パターンは %s で確認できます。\n' "$denylist_file" >&2
+  printf '意図した内容であれば、パターン側を見直してください。\n' >&2
+  exit 1
+fi
+
+exit 0

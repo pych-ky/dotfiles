@@ -3,8 +3,16 @@
   "language": "日本語",
   "theme": "dark",
   "tui": "fullscreen",
-  "model": "claude-fable-5[1m]",
+  "model": "opus[1m]",
   "effortLevel": "xhigh",
+  "modelSettings": {
+    "claude-fable-5": {
+      "effortLevel": "xhigh"
+    },
+    "claude-opus-5": {
+      "effortLevel": "xhigh"
+    }
+  },
   "alwaysThinkingEnabled": true,
   "autoMemoryEnabled": false,
   "showThinkingSummaries": true,
@@ -18,16 +26,17 @@
     "commit": ""
   },
   "env": {
-    "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1"
+    "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
+    "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB": "1"
   },
   "enabledPlugins": {
     "serena@claude-plugins-official": false,
     "context7@claude-plugins-official": true,
     "superpowers@claude-plugins-official": false
   },
-  "skipDangerousModePermissionPrompt": true,
+  "skipWorkflowUsageWarning": true,
   "permissions": {
-    "defaultMode": "bypassPermissions",
+    "defaultMode": "auto",
     "allow": [
       "Bash(ls *)",
       "Bash(cat *)",
@@ -114,6 +123,47 @@
       "Bash(git submodule rm *)",
       "Bash(gh auth login)",
       "Bash(gh auth logout)",
+      "Bash(gh auth token)",
+      "Bash(gh auth token *)",
+      "Bash(gh auth status --show-token*)",
+      "Bash(security *)",
+      "Bash(op *)",
+      "Bash(ghtkn *)",
+      "Bash(docker-credential-*)",
+      "Bash(aws-env)",
+      "Bash(aws-env *)",
+      "Bash(aws configure export-credentials*)",
+      "Bash(aws sts get-session-token*)",
+      "Bash(aws sts assume-role*)",
+      "Bash(aws sts get-federation-token*)",
+      "Bash(aws ecr get-login-password*)",
+      "Bash(aws secretsmanager get-secret-value*)",
+      "Bash(aws iam create-access-key*)",
+      "Bash(aws eks get-token*)",
+      "Bash(aws rds generate-db-auth-token*)",
+      "Bash(aws kms decrypt*)",
+      "Bash(aws sso get-role-credentials*)",
+      "Bash(aws sso get-access-token*)",
+      "Bash(aws sso-oidc create-token*)",
+      "Bash(vault kv get*)",
+      "Bash(vault read*)",
+      "Bash(vault login*)",
+      "Bash(vault token create*)",
+      "Bash(gcloud auth print-access-token*)",
+      "Bash(gcloud auth print-identity-token*)",
+      "Bash(gcloud secrets versions access*)",
+      "Bash(gcloud iam service-accounts keys create*)",
+      "Bash(az account get-access-token*)",
+      "Bash(az keyvault secret show*)",
+      "Bash(az keyvault secret download*)",
+      "Bash(kubectl get secret*)",
+      "Bash(kubectl config view*)",
+      "Bash(git credential fill*)",
+      "Bash(git credential-*)",
+      "Bash(gh auth git-credential*)",
+      "Bash(printenv)",
+      "Bash(printenv *)",
+      "Bash(env)",
       "Bash(docker rm *)",
       "Bash(docker rmi *)",
       "Bash(docker volume rm *)",
@@ -147,32 +197,72 @@
       "Read(./.env.*)",
       "Read(./secrets/**)",
       "Read(~/.ssh/**)",
-      "Read(~/.aws/credentials)",
-      "Read(~/.aws/config)",
+      "Read(~/.aws/**)",
+      "Read(~/.codex/auth.json)",
+      "Read(~/.claude/.credentials.json)",
+      "Read(~/.claude.json)",
+      "Read(~/.claude.json.backup)",
+      "Read(~/.claude/backups/**)",
+      "Read(~/.config/gh/hosts.yml)",
+      "Read(~/.kube/**)",
+      "Read(~/.docker/config.json)",
+      "Read(~/.terraform.d/credentials.tfrc.json)",
+      "Read(~/.netrc)",
+      "Read(~/.git-credentials)",
+      "Read(~/.pgpass)",
+      "Read(~/.npmrc)",
+      "Read(~/Library/Keychains/**)",
+      "Read(~/.gnupg/**)",
       "Read(**/*.pem)",
       "Read(**/*.key)",
       "Read(**/*.p12)",
+      "Read(**/*.pfx)",
       "Read(**/id_rsa)",
       "Read(**/id_rsa.pub)",
       "Read(**/id_ed25519*)",
+      "Read(**/id_ecdsa*)",
       "mcp__serena__execute_shell_command"
     ]
   },
   "sandbox": {
     "enabled": true,
-    "allowUnsandboxedCommands": true,
-    "failIfUnavailable": false,
+    "allowUnsandboxedCommands": false,
+    "failIfUnavailable": true,
     "excludedCommands": [
       "terraform *",
       "terragrunt *",
       "docker *",
       "gh *"
     ],
+    "credentials": {
+      "envVars": [
+        { "name": "GH_TOKEN", "mode": "deny" },
+        { "name": "GITHUB_TOKEN", "mode": "deny" },
+        { "name": "AWS_ACCESS_KEY_ID", "mode": "deny" },
+        { "name": "AWS_SECRET_ACCESS_KEY", "mode": "deny" },
+        { "name": "AWS_SESSION_TOKEN", "mode": "deny" },
+        { "name": "NPM_TOKEN", "mode": "deny" },
+        { "name": "ANTHROPIC_API_KEY", "mode": "deny" }
+      ]
+    },
     "filesystem": {
       "denyRead": [
-        "~/.aws/credentials",
-        "~/.aws/config",
-        "~/.ssh"
+        "~/.aws",
+        "~/.ssh",
+        "~/.codex/auth.json",
+        "~/.claude/.credentials.json",
+        "~/.claude.json",
+        "~/.claude.json.backup",
+        "~/.claude/backups",
+        "~/.config/gh/hosts.yml",
+        "~/.kube",
+        "~/.docker/config.json",
+        "~/.terraform.d/credentials.tfrc.json",
+        "~/.netrc",
+        "~/.git-credentials",
+        "~/.pgpass",
+        "~/Library/Keychains",
+        "~/.gnupg"
       ]
     },
     "network": {
@@ -188,6 +278,7 @@
         "*.npmjs.org",
         "pypi.org",
         "*.pypi.org",
+        "files.pythonhosted.org",
         "docs.anthropic.com",
         "code.claude.com",
         "*.amazonaws.com"

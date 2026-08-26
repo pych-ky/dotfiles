@@ -17,6 +17,10 @@ backup_dir=                                                 # 最初の退避時
 dry_run=0                                                   # 1 のとき実コマンドを実行せず内容のみ表示
 backup_created=0                                            # 退避が 1 件以上発生したかを示すフラグ
 backup_keep=5                                               # 保持するバックアップ世代数
+backup_diffs=()                                             # リポジトリ版と内容が異なるまま退避したファイルの一覧
+managed_targets=()                                          # ツールが自動追記した痕跡がある退避先の一覧
+# Rancher Desktop などが rc ファイルへ自動追記するときの目印
+MANAGED_BLOCK_MARKER='MANAGED BY RANCHER DESKTOP'
 
 process_lock_library="$repo_dir/lib/process-lock.sh"
 if [[ ! -f "$process_lock_library" || -L "$process_lock_library" ]]; then
@@ -209,6 +213,25 @@ link_file() {
       return 1
     fi
     backup_created=1
+    # 端末ローカルの変更が黙って消えないよう、内容差分のある退避を記録。
+    # -r でディレクトリ (.config/karabiner など) も再帰的に比較する。
+    #
+    # dry-run では退避を実行していないので、まだ元の場所にある target と比較する。
+    # ここを飛ばすと --dry-run による事前確認で上書き消失が一切見えず、
+    # 事前確認の意味がなくなる
+    local compare_target="$backup"
+    ((dry_run)) && compare_target="$target"
+    if [[ -e "$compare_target" && -e "$source" ]] &&
+      ! diff -rq "$compare_target" "$source" >/dev/null 2>&1; then
+      backup_diffs+=("$target (backup: $backup)")
+    fi
+
+    # ツールが rc ファイルへ自動追記する設定のままリンクすると、
+    # 追記先がリポジトリの追跡ファイルになり、リポジトリが書き換えられる
+    if [[ -f "$compare_target" ]] &&
+      grep -qF "$MANAGED_BLOCK_MARKER" "$compare_target" 2>/dev/null; then
+      managed_targets+=("$target")
+    fi
   fi
 
   # -h で競合するディレクトリリンクを辿らず、配下への誤作成を防ぐ
@@ -310,12 +333,13 @@ main() {
     ".config/starship.toml"
     # keyboard (karabiner.json 単体の symlink では Karabiner が設定変更を検知できないためディレクトリごとリンク)
     ".config/karabiner"
+    # 開発ツールのバージョン管理
+    ".config/mise/config.toml"
     # AI エージェント
     ".config/agents/AGENTS.md"
     ".codex/browser/config.toml"
     ".claude/CLAUDE.md"
     ".claude/settings.json"
-    ".claude/hooks/inject-guidelines-context.sh"
     ".claude/hooks/pre-bash-guard.py"
     ".claude/hooks/pre-bash-guard.sh"
     ".claude/hooks/statusline.sh"
@@ -333,6 +357,11 @@ main() {
     failed_items+=(".zsh/functions/git-worktree.zsh (obsolete symlink)")
   fi
 
+  # 廃止した注入フックのリンクを、自リポジトリ由来の場合だけ除去
+  if ! remove_obsolete_symlink ".claude/hooks/inject-guidelines-context.sh"; then
+    failed_items+=(".claude/hooks/inject-guidelines-context.sh (obsolete symlink)")
+  fi
+
   for file in "${files[@]}"; do
     if ! link_file "$file"; then
       failed_items+=("$file")
@@ -343,6 +372,7 @@ main() {
   if ! link_file ".config/agents/AGENTS.md" ".codex/AGENTS.md"; then
     failed_items+=(".codex/AGENTS.md")
   fi
+
 
   # Codex ベース設定 (/etc/codex/config.toml) を sudo でリンク
   warn_legacy_codex_managed_config
@@ -364,6 +394,22 @@ main() {
       prune_backups
       printf 'kept latest %d backup generations\n' "$backup_keep"
     fi
+  fi
+
+  # リポジトリ版と異なる内容を退避した場合は、統合漏れの可能性を警告
+  if ((${#backup_diffs[@]} > 0)); then
+    printf 'warning: replaced files differed from the repository version:\n' >&2
+    printf '  %s\n' "${backup_diffs[@]}" >&2
+    printf '         merge local changes into the repository or ~/.zshrc.local, then relink\n' >&2
+  fi
+
+  # 自動追記の設定が残っていると、リンク後は追記先がリポジトリの追跡ファイルになる
+  if ((${#managed_targets[@]} > 0)); then
+    printf 'warning: these files contain a tool-managed block (%s):\n' \
+      "$MANAGED_BLOCK_MARKER" >&2
+    printf '  %s\n' "${managed_targets[@]}" >&2
+    printf '         after linking, the tool would write into the repository itself\n' >&2
+    printf '         switch the tool to manual PATH management before relinking\n' >&2
   fi
 
   # 失敗があれば一覧を stderr に出して非ゼロ終了

@@ -1,6 +1,13 @@
 # ============================================================================
 # Homebrew パッケージマニフェスト (brew bundle --file=macos/Brewfile で一括導入)
 # ============================================================================
+#
+# 運用ルール:
+# - 端末によって要否や導入手段が分かれる GUI アプリは、コメントアウトで
+#   無効化してある。brew で導入したい端末ではコメントアウトを外して
+#   brew bundle を再実行する
+# - バージョン切り替えが必要な開発ランタイムは mise (.config/mise/config.toml)
+#   で管理し、OS グローバルでよい CLI と GUI アプリだけをここで管理する
 
 # ----------------------------------------------------------------------------
 # サードパーティ tap
@@ -18,8 +25,10 @@ brew "fzf"
 brew "zoxide"
 
 # 基本ユーティリティ
+brew "ripgrep"
 brew "tree"
 brew "jq"
+brew "yq"
 brew "shfmt"
 brew "duti"
 
@@ -31,16 +40,15 @@ brew "gh"
 brew "gitleaks"
 
 # ランタイム / パッケージツール
-brew "node"
+# node などのバージョン切り替えが必要なランタイムは mise 側で管理する
+brew "mise"
 brew "uv"
 
 # クラウド / IaC / ポリシー / Kubernetes
-brew "awscli"
-brew "tfenv"
-brew "terragrunt"
+# aws / terraform / terragrunt は mise (.config/mise/config.toml) が持ち主。
+# ここでも宣言すると mise の shim が PATH 先頭に入って二重管理になるため置かない。
+# kubectl / helm は Rancher Desktop 同梱 (~/.rd/bin) を使う
 brew "opa"
-brew "helm"
-brew "kubernetes-cli", link: false
 brew "openshift-cli"
 brew "rosa-cli"
 brew "trivy"
@@ -54,17 +62,18 @@ brew "libpq"
 # ----------------------------------------------------------------------------
 
 # ブラウザ
-cask "google-chrome"
+# cask "google-chrome"
 
 # ターミナル
 cask "wezterm"
 
 # 開発エディタ / AI ツール
-cask "visual-studio-code" # 設定・拡張は VS Code Settings Sync 側で管理
-cask "claude"
+# cask "visual-studio-code" # 設定・拡張は VS Code Settings Sync 側で管理
+# cask "claude"
+cask "chatgpt"
 
 # コミュニケーション / コラボレーション
-cask "slack"
+# cask "slack"
 cask "notion"
 
 # 入力 / ウィンドウ管理
@@ -78,10 +87,12 @@ cask "licecap"
 cask "logi-options+"
 
 # セキュリティ / パスワード管理
-cask "1password"
+# cask "1password"
 
-# コンテナ / 仮想化
-cask "docker-desktop"
+# コンテナ / 仮想化 (docker / kubectl / helm の CLI は ~/.rd/bin 同梱)
+cask "rancher"
+# Rancher Desktop と競合するため、使う場合はどちらか一方にする
+# cask "docker-desktop"
 
 # IaC linter (cask 配布)
 cask "terraform-linters/tap/tflint", trusted: true

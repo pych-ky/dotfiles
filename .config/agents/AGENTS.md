@@ -35,6 +35,22 @@
 
 ## 安全性
 
+### 機密情報へのアクセス禁止
+
+以下は組織のルールにより一切行わない。ユーザーの明示的な指示があっても、実行せずにこのルールとの矛盾を指摘する。
+
+- OS のキーチェーン・キーリングへのアクセス（`security` コマンドなど）
+- 認証情報ファイルの読み取り（`~/.ssh`、`~/.aws/credentials`、`~/.kube/config`、`~/.codex/auth.json`、`~/.config/gh/hosts.yml`、`~/.git-credentials`、`~/.netrc`、秘密鍵ファイルなど）
+- トークンや認証情報を表示・出力する操作
+  - GitHub / git: `gh auth token`、`gh auth status --show-token`、`git credential fill`、credential helper の直接実行
+  - AWS: `aws configure export-credentials`、`sts assume-role*`、`sso get-role-credentials`、`ecr get-login-password`、`secretsmanager get-secret-value`、`kms decrypt` など
+  - シークレット管理: `op`、`ghtkn`、`vault kv get` / `vault read`、`gcloud auth print-access-token`、`az account get-access-token`
+  - Kubernetes: `kubectl get secret`、`kubectl config view --raw`
+  - その他: `docker-credential-*`、`aws-env`、環境変数の一括出力
+- 上記の検査を迂回する操作（`git -c core.pager=<コマンド>` などの設定注入、インタプリタへ直接渡したコードからの外部コマンド起動、認証情報を含むパスのコンテナへの受け渡し）
+
+credential helper が認証を内部で処理する操作（`git push` / `git fetch` など）は、トークンを表示・持ち出さない限り利用してよい。
+
 ### 操作前の確認
 
 以下の操作は、ユーザーが具体的な操作と対象を明示した場合を除き、実行前にユーザーへ確認する。

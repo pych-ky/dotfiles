@@ -1,0 +1,23 @@
+# ============================================================================
+# mise が管理するグローバル開発ツール (~/.config/mise/config.toml として配置)
+# ============================================================================
+#
+# バージョン切り替えが必要な開発ツールはここが単一の持ち主。
+# macos/Brewfile と二重に宣言すると mise の shim が PATH 先頭に入り、
+# Brewfile 側の実体と各リポジトリの version file の両方が無視されるため、
+# 同じツールを両方へ書かないこと。
+#
+# リポジトリごとに版を変える場合は、そのリポジトリの mise 設定で上書きする。
+
+[tools]
+"aqua:suzuki-shunsuke/ghtkn" = "latest"
+"aqua:gruntwork-io/terragrunt" = "latest"
+"aqua:suzuki-shunsuke/tfcmt" = "latest"
+aws-cli = { version = "latest", symlink_bins = "true" }
+deno = "latest"
+go = "latest"
+golangci-lint = "latest"
+node = "lts"
+npm = "11"  # node 同梱版を上書きする。メジャーは固定し、意図せず上がらないようにする
+pnpm = "latest"
+terraform = "latest"
