@@ -26,8 +26,7 @@
     "commit": ""
   },
   "env": {
-    "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
-    "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB": "1"
+    "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1"
   },
   "enabledPlugins": {
     "context7@claude-plugins-official": true,
