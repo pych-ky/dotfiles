@@ -273,19 +273,6 @@ cd "$HOME/src/pych/agent-skills"
 - 各種アカウントにサインイン（1Password、Slack、Notion など）
 - 個別インストーラからプリンタドライバを導入
 
-### Claude Code の Serena MCP
-
-`bootstrap.sh` の直後は `claude` が `PATH` にないため、新しいシェルでユーザースコープへ登録します。
-
-```sh
-claude mcp add-json -s user serena '{"type":"stdio","command":"uvx","args":["-p","3.13","--from","git+https://github.com/oraios/serena","serena","start-mcp-server","--project-from-cwd","--context","claude-code","--open-web-dashboard","false"]}'
-```
-
-- 公式プラグイン版は起動引数が不足し、ツールの重複公開と手動アクティベーションが発生するため、`settings.json` で無効化している
-- `claude mcp add` の `--` 区切り形式は、`-p` などの短いオプションを含むと現行 CLI の引数解析に失敗するため、`add-json` 形式を使う
-- 初回起動は `uvx` の依存取得で接続がタイムアウトする場合がある。
-  キャッシュ形成後に再起動する
-
 ## 非公開設定（dotfiles-private）
 
 **このリポジトリは公開リポジトリです。** 所属組織に固有の設定と個人情報は置きません。
@@ -317,7 +304,7 @@ AI エージェント（Claude Code / Codex）にパスワードやクレデン�
 - Git の共通設定以外（認証情報など）と gh（GitHub CLI）: 端末ごとに個別設定する
 - 組織固有・個人の設定（`~/.gitconfig.local`、`~/.zshrc.local` など）: 非公開の dotfiles-private で管理する
 - Codex のローカルユーザー設定（`~/.codex/config.toml`）: 端末ごとに個別設定する（旧 `sandbox_mode` は置かず、公開側の `default_permissions` を継承する）
-- Claude Code のユーザースコープ MCP 登録（`~/.claude.json`）: 「手動セットアップ」の手順で端末ごとに登録する
+- Claude Code のユーザースコープ MCP 登録（`~/.claude.json`）: 端末ごとに個別設定する
 - Brewfile でコメントアウトしているアプリ: 導入手段を端末ごとに選ぶ
 - 非公開 Agent Skills の内容: 非公開リポジトリで管理する
 - 非公開 Codex Custom Pets の内容: 非公開リポジトリで管理する

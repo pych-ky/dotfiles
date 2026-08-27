@@ -108,24 +108,6 @@ prevent_idle_sleep = true  # アイドル時のスリープを防止
 ## MCP サーバー
 ## ============================================================================
 
-# Serena
-[mcp_servers.serena]
-command = "uvx"
-args = [
-  "-p",
-  "3.13",
-  "--from",
-  "git+https://github.com/oraios/serena",
-  "serena",
-  "start-mcp-server",
-  "--project-from-cwd",
-  "--context",
-  "codex",
-  "--open-web-dashboard",
-  "false",
-]
-startup_timeout_sec = 60.0  # 初回起動時は依存取得に時間がかかるため余裕を確保
-
 # Context7
 [mcp_servers.context7]
 command = "npx"

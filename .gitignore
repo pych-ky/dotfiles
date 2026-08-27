@@ -19,9 +19,6 @@
 .config/karabiner/assets/
 .config/karabiner/automatic_backups/
 
-## Serena MCP
-.serena/
-
 # エディタ・OS メタデータ
 .DS_Store
 .idea/
