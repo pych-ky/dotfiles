@@ -30,7 +30,6 @@
     "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB": "1"
   },
   "enabledPlugins": {
-    "serena@claude-plugins-official": false,
     "context7@claude-plugins-official": true,
     "superpowers@claude-plugins-official": false
   },
@@ -98,7 +97,6 @@
       "WebFetch(domain:www.radix-ui.com)",
       "WebFetch(domain:registry.terraform.io)",
       "WebFetch(domain:releases.hashicorp.com)",
-      "mcp__serena",
       "mcp__plugin_context7_context7"
     ],
     "deny": [
@@ -220,8 +218,7 @@
       "Read(**/id_rsa)",
       "Read(**/id_rsa.pub)",
       "Read(**/id_ed25519*)",
-      "Read(**/id_ecdsa*)",
-      "mcp__serena__execute_shell_command"
+      "Read(**/id_ecdsa*)"
     ]
   },
   "sandbox": {
@@ -236,13 +233,34 @@
     ],
     "credentials": {
       "envVars": [
-        { "name": "GH_TOKEN", "mode": "deny" },
-        { "name": "GITHUB_TOKEN", "mode": "deny" },
-        { "name": "AWS_ACCESS_KEY_ID", "mode": "deny" },
-        { "name": "AWS_SECRET_ACCESS_KEY", "mode": "deny" },
-        { "name": "AWS_SESSION_TOKEN", "mode": "deny" },
-        { "name": "NPM_TOKEN", "mode": "deny" },
-        { "name": "ANTHROPIC_API_KEY", "mode": "deny" }
+        {
+          "name": "GH_TOKEN",
+          "mode": "deny"
+        },
+        {
+          "name": "GITHUB_TOKEN",
+          "mode": "deny"
+        },
+        {
+          "name": "AWS_ACCESS_KEY_ID",
+          "mode": "deny"
+        },
+        {
+          "name": "AWS_SECRET_ACCESS_KEY",
+          "mode": "deny"
+        },
+        {
+          "name": "AWS_SESSION_TOKEN",
+          "mode": "deny"
+        },
+        {
+          "name": "NPM_TOKEN",
+          "mode": "deny"
+        },
+        {
+          "name": "ANTHROPIC_API_KEY",
+          "mode": "deny"
+        }
       ]
     },
     "filesystem": {
