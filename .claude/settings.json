@@ -229,7 +229,9 @@
       "terraform *",
       "terragrunt *",
       "docker *",
-      "gh *"
+      "gh *",
+      "git commit *",
+      "git push *"
     ],
     "credentials": {
       "envVars": [
