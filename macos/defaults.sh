@@ -254,9 +254,6 @@ defaults import com.knollsoft.Rectangle "$script_dir/rectangle.plist"
 # 電源アダプタ接続時は自動スリープさせない
 sudo -n pmset -c sleep 0 2>/dev/null || printf 'warning: skipped pmset sleep setting\n' >&2
 
-# ディスプレイを自動的にオフにしない (好みに応じて分数を調整)
-sudo -n pmset -a displaysleep 0 2>/dev/null || printf 'warning: skipped pmset displaysleep setting\n' >&2
-
 # ============================================================================
 # 反映
 # ============================================================================

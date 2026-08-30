@@ -373,7 +373,6 @@ main() {
     failed_items+=(".codex/AGENTS.md")
   fi
 
-
   # Codex ベース設定 (/etc/codex/config.toml) を sudo でリンク
   warn_legacy_codex_managed_config
   if ! link_codex_system_config; then

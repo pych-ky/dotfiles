@@ -11,13 +11,12 @@
 #   4. Homebrew の導入 (未導入時、Xcode Command Line Tools も同時に導入される)
 #   5. macos/Brewfile に基づく不足パッケージのインストール
 #   6. mise によるグローバル開発ツールの導入
-#   7. secretlint のグローバル Git フックの取得
-#   8. scripts/setup-git.sh による Git の共通設定
-#   9. zsh プラグインの取得
-#  10. Claude Code CLI / Codex CLI の導入 (未導入時)
-#  11. private Codex Custom Pets の取得と一括インストール (アクセス可能な場合)
-#  12. private Agent Skills の取得と同期 (アクセス可能な場合)
-#  13. private dotfiles-private (非公開設定) の取得と適用 (アクセス可能な場合)
+#   7. scripts/setup-git.sh による Git の共通設定
+#   8. zsh プラグインの取得
+#   9. Claude Code CLI / Codex CLI の導入 (未導入時)
+#  10. private Codex Custom Pets の取得と一括インストール (アクセス可能な場合)
+#  11. private Agent Skills の取得と同期 (アクセス可能な場合)
+#  12. private dotfiles-private (非公開設定) の取得と適用 (アクセス可能な場合)
 #
 # 終了後に手動で行う設定は README.md の「手動セットアップ」を参照。
 
@@ -280,45 +279,6 @@ elif [[ ! -r "$mise_config" ]]; then
   record_failure 'mise install (設定が無い)' 1
 else
   run_and_record 'mise install' mise install
-fi
-
-# ============================================================================
-# secretlint のグローバル Git フック (setup-git.sh が core.hooksPath を設定する)
-# ============================================================================
-
-step 'secretlint git hooks'
-secretlint_dir="$HOME/.local/share/secretlint/git-hooks"
-secretlint_url='https://github.com/secretlint/git-hooks.git'
-# 取得内容を固定する (供給元の変更をそのまま取り込まないため)。
-# 更新する場合は上流を確認したうえでこのコミットを更新する
-secretlint_commit='c3f73e4cddb935a31b083562292433b7feea77d0'
-
-# 取得済みチェックアウトを固定コミットへ合わせる
-sync_secretlint_hooks() {
-  local current
-  current="$(git -C "$secretlint_dir" rev-parse HEAD 2>/dev/null || true)"
-  if [[ "$current" == "$secretlint_commit" ]]; then
-    printf 'ok: %s\n' "$secretlint_dir"
-    return 0
-  fi
-
-  setup_run_noninteractive_git -C "$secretlint_dir" fetch --quiet origin \
-    "$secretlint_commit" || return
-  git -C "$secretlint_dir" checkout --quiet "$secretlint_commit" || return
-  printf 'pinned: %s -> %s\n' "$secretlint_dir" "$secretlint_commit"
-}
-
-if [[ -d "$secretlint_dir/.git" ]]; then
-  run_and_record 'secretlint git hooks' sync_secretlint_hooks
-elif [[ -e "$secretlint_dir" || -L "$secretlint_dir" ]]; then
-  printf 'error: incomplete secretlint checkout: %s\n' "$secretlint_dir" >&2
-  printf '       move or remove the directory, then rerun ./bootstrap.sh\n' >&2
-  record_failure 'secretlint git hooks' 1
-elif setup_run_noninteractive_git clone --quiet -- \
-  "$secretlint_url" "$secretlint_dir"; then
-  run_and_record 'secretlint git hooks' sync_secretlint_hooks
-else
-  record_failure 'secretlint git hooks clone' 1
 fi
 
 # ============================================================================

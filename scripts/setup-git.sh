@@ -85,13 +85,21 @@ else
     "$gitconfig_local" >&2
 fi
 
-# GitHub の認証は gh の credential helper に委譲する。
-# system 設定 (osxkeychain など) が継承されるため、空 helper で一度リセットしてから
-# gh helper を追加し、github.com ではキーチェーンではなく gh を使わせる
+# GitHub の通常の認証は gh の credential helper に委譲する。
+# 組織固有の URL 限定 ghtkn helper は非公開側 (~/.gitconfig.local) で設定する。
+# 認証そのもの (gh auth login) は利用者が明示的に実行する。
+#
+# system 設定 (osxkeychain など) や旧 ghtkn helper が継承されるため、空 helper で
+# 一度リセットしてから gh helper だけを追加する (helper の二重登録を避ける)
 git config --global --replace-all 'credential.https://github.com.helper' ''
 git config --global --add \
   'credential.https://github.com.helper' '!gh auth git-credential'
 git config --global --replace-all 'credential.https://github.com.useHttpPath' true
+
+if ! command -v gh >/dev/null 2>&1; then
+  printf 'warning: gh is not installed; default GitHub HTTPS authentication will not work\n' >&2
+  printf '         install it, then run `gh auth login` yourself (do not let an agent run it)\n' >&2
+fi
 
 # 組織固有の Git 設定 (includeIf や credential helper の上書きなど) の受け皿。
 # 端末固有の他の include を消さないよう、未登録のときだけ追加する。
@@ -106,20 +114,17 @@ fi
 # ----------------------------------------------------------------------------
 #
 # core.hooksPath を設定すると Git は各リポジトリの .git/hooks を参照しなくなるため、
-# secretlint のフックだけを直接指定すると、リポジトリ固有フックと Git LFS のフックが
+# 個別のフックを直接指定すると、リポジトリ固有フックと Git LFS のフックが
 # 動かなくなる。そこで振り分け用のディレクトリを作り、そこを参照させる。
 #
-#   pre-commit           -> secretlint のフック
-#                           (git-hooks/_local-hook-exec 経由でリポジトリ固有フックも実行)
-#   その他のフック        -> git-hooks/dispatch
-#                           (リポジトリ固有フック + Git LFS のフックを実行)
+#   すべてのフック -> git-hooks/dispatch
+#                     (gitleaks + denylist 検査 -> リポジトリ固有フック -> Git LFS)
 #
-# どちらの経路からも git-hooks/deny-private-strings を呼べるよう、同じ
-# ディレクトリへ配置する (各フックは dirname $0 を基準に参照する)。
+# dispatch から git-hooks/deny-private-strings を呼べるよう、同じディレクトリへ
+# 配置する (各フックは dirname $0 を基準に参照する)。
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 hooks_dir="$HOME/.local/share/dotfiles/git-hooks"
-secretlint_hook="$HOME/.local/share/secretlint/git-hooks/hooks/pre-commit"
 
 # 対象を指すシンボリックリンクを作成する (既存の異なるリンクや実体は置き換える)。
 #
@@ -145,21 +150,20 @@ link_hook() {
 }
 
 if mkdir -p "$hooks_dir"; then
-  link_hook "$repo_dir/git-hooks/_local-hook-exec" '_local-hook-exec'
   link_hook "$repo_dir/git-hooks/deny-private-strings" 'deny-private-strings'
 
-  # secretlint が未導入なら pre-commit も dispatch に任せる (壊れたリンクを作らない)
-  if [[ -x "$secretlint_hook" ]]; then
-    link_hook "$secretlint_hook" 'pre-commit'
-  else
-    printf 'warning: secretlint hook is unavailable: %s\n' "$secretlint_hook" >&2
-    link_hook "$repo_dir/git-hooks/dispatch" 'pre-commit'
-  fi
-
-  for hook in prepare-commit-msg commit-msg post-commit pre-push post-checkout \
-    post-merge pre-rebase post-rewrite pre-merge-commit; do
+  for hook in pre-commit prepare-commit-msg commit-msg post-commit pre-push \
+    post-checkout post-merge pre-rebase post-rewrite pre-merge-commit; do
     link_hook "$repo_dir/git-hooks/dispatch" "$hook"
   done
+
+  # secretlint の pre-commit を経由していた頃のリンクを片付ける。
+  # 参照先が消えると、Git は壊れたリンクのフックを警告なしに飛ばす
+  obsolete_hook="$hooks_dir/_local-hook-exec"
+  if [[ -L "$obsolete_hook" ]]; then
+    rm -- "$obsolete_hook"
+    printf 'removed obsolete hook link: %s\n' "$obsolete_hook"
+  fi
 
   git config --global --replace-all core.hooksPath "$hooks_dir"
 else
