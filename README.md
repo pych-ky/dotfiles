@@ -28,13 +28,13 @@ git clone <このリポジトリ> && cd dotfiles
 3. `scripts/link-dotfiles.sh` でシンボリックリンクを展開する
 4. Homebrew を導入する。
    未導入時は Xcode Command Line Tools も導入する
-5. `macos/Brewfile` に不足する CLI・GUI アプリをインストールする
+5. 不足する CLI・GUI アプリをインストールし、ログイン項目を登録する
 6. `mise install` でグローバル開発ツール（node、go、terraform など）を導入する
 7. `scripts/setup-git.sh` で Git 共通設定を適用する
 8. `zsh-autosuggestions` と `fast-syntax-highlighting` を取得する
 9. 未導入の Claude Code CLI と Codex CLI を導入する
 10. アクセス可能な非公開 Codex Custom Pets を取得し、収録されている全ペットをインストールする
-11. アクセス可能な非公開 Agent Skills を取得し、管理 CLI で同期する
+11. アクセス可能な非公開 Agent Skills を取得し、リポジトリ直下の `setup.sh` で symlink を配置する
 12. アクセス可能な非公開 dotfiles-private（組織固有・個人設定）を取得し、適用する
 
 終了後は「手動セットアップ」も行ってください。
@@ -198,8 +198,6 @@ brew bundle cleanup --file=macos/Brewfile             # Brewfile にないパッ
 - macOS の既定値から意図的に変える項目だけを `defaults write` で適用する。
   対象はキーボードのリピート速度、Dock、Finder、日本語入力など
 - Rectangle の設定は、エクスポート済みの `macos/rectangle.plist` を読み込んで適用する
-- ログイン時に開くアプリ（Rectangle、Typeless、Logi Options+）をログイン項目に登録する。
-  初回は System Events へのオートメーション許可を求められる。許可しない端末では警告を出して続行する
 - デスクトップのアイコンの並べ方のように入れ子の辞書に含まれる項目は、
   現在の設定を書き出して該当キーだけ差し替えてから読み込む（同じ辞書にある他の表示設定を失わないため）
 - 電源管理（`pmset`）の変更は、認証済みの `sudo`（`sudo -n`）で実行する
@@ -249,20 +247,14 @@ git pull --ff-only
 
 ### 非公開 Agent Skills
 
-#### 実行と動作
+`bootstrap.sh` は、未取得の Agent Skills リポジトリを `$HOME/src/pych/agent-skills` にクローンし、リポジトリ直下の `setup.sh` を実行します。
+`setup.sh` は `$HOME/.agents/skills` と `$HOME/.claude/skills` に symlink を配置します。同名の未管理オブジェクトは上書きしません。
 
-`bootstrap.sh` から呼び出されますが、単独でも実行できます。
+Agent Skills のセットアップだけを実行する場合:
 
 ```sh
 ./skills/setup.sh
 ```
-
-未取得の場合だけ、非公開リポジトリを一時ディレクトリにクローンします。
-リポジトリルート、`origin`、管理 CLI を検証して `$HOME/src/pych/agent-skills` に配置し、公開コマンド `bin/agent-skills sync` を実行します。
-
-Codex と Claude Code への初回インストール、既存設定の再同期、詳細な検証、`doctor` は `agent-skills` 側で行います。
-Git、Python 3.9 以降、macOS 標準の `lockf` が必要です。
-`sudo` は使いません。
 
 #### 設定
 
@@ -274,22 +266,22 @@ Git、Python 3.9 以降、macOS 標準の `lockf` が必要です。
 - `AGENT_SKILLS_REPO_URL`: クローン元を上書きする
 - `AGENT_SKILLS_REPO_DIR`: 保存先を絶対パスで上書きする
 
-#### 更新と初期導入
+#### 更新と単体導入
 
-既存のチェックアウトは `bootstrap.sh` から自動更新しません。
-更新と再同期には、チェックアウト内で Agent Skills 自身のコマンドを実行します。
+既存のチェックアウトは自動更新しません。更新する場合は次を実行します。
 
 ```sh
-cd "$HOME/src/pych/agent-skills"
-./bin/agent-skills update
+repository_dir="${AGENT_SKILLS_REPO_DIR:-$HOME/src/pych/agent-skills}"
+git -C "$repository_dir" pull --ff-only
+"$repository_dir/setup.sh"
 ```
 
-Agent Skills リポジトリは dotfiles に依存せず、単体でも初期導入できます。
+dotfiles を使わず単体で導入する場合:
 
 ```sh
 git clone https://github.com/pych-ky/agent-skills.git "$HOME/src/pych/agent-skills"
 cd "$HOME/src/pych/agent-skills"
-./bin/agent-skills sync
+./setup.sh
 ```
 
 ## 手動セットアップ
@@ -298,13 +290,15 @@ cd "$HOME/src/pych/agent-skills"
 
 - システム設定
   - プライバシーとセキュリティ > フルディスクアクセス / アクセシビリティ（Claude など必要なものだけ）
-  - 一般 > ログイン項目と拡張機能 > 拡張機能（ログイン項目は `macos/defaults.sh` が登録する）
+  - プライバシーとセキュリティ > オートメーション（ログイン項目の登録時に System Events を許可）
+  - 一般 > ログイン項目と拡張機能 > 拡張機能
   - サウンド > 入出力デバイスの指定
   - キーボード > テキスト入力 > テキスト置換（ユーザー辞書）
     - `しかく` → `■` / `やじるし` → `→` / `かっこ` → `「」`
 - Finder > 設定 > サイドバー > ホームにチェック
 - Brewfile でコメントアウトしているアプリ（ブラウザ、エディタなど）を、端末に応じた方法で導入
-- Rancher Desktop: Preferences > Application > PATH を Manual にする（`~/.rd/bin` の PATH は `.zshrc` / `.bashrc` 側で管理し、rc ファイルへの自動追記を防ぐ）
+- Rancher Desktop: Preferences > Application > Environment > Configure PATH を Manual にする
+- Typeless: サインインし、案内に従って必要な権限を許可する
 - VS Code: Settings Sync にサインイン（設定と拡張はこのリポジトリでは管理しない）。
   コマンドパレットから「Shell Command: Install 'code' command in PATH」を実行
 - 各種アカウントにサインイン（1Password、Slack、Notion など）
@@ -365,7 +359,7 @@ codex
 
 ## このリポジトリで管理しないもの
 
-- Git の共通設定以外（認証情報など）と gh（GitHub CLI）: 端末ごとに個別設定する
+- Git と GitHub CLI の認証: 端末ごとに設定する
 - 組織固有・個人の設定（`~/.gitconfig.local`、`~/.zshrc.local` など）: 非公開の dotfiles-private で管理する
 - Codex のローカルユーザー設定（`~/.codex/config.toml`）: 端末ごとに個別設定する（旧 `sandbox_mode` は置かず、公開側の `default_permissions` を継承する）
 - Claude Code のユーザースコープ MCP 登録（`~/.claude.json`）: 端末ごとに個別設定する

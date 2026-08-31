@@ -18,7 +18,7 @@ review_model = "gpt-5.6-sol"  # コードレビュー用モデル
 # 推論関連
 model_reasoning_effort   = "xhigh"   # 推論の深さ (low / medium / high / xhigh)
 model_reasoning_summary  = "auto"    # 推論要約の形式 (auto / concise / detailed / none)
-model_verbosity          = "medium"  # 応答の詳細度 (low / medium / high)
+model_verbosity          = "low"     # 応答の詳細度 (low / medium / high)
 hide_agent_reasoning     = true      # エージェント推論過程を非表示
 show_raw_agent_reasoning = false     # 生の推論データを非表示
 

@@ -9,7 +9,7 @@
 #   2. macos/defaults.sh による macOS 設定の適用
 #   3. scripts/link-dotfiles.sh による dotfiles のシンボリックリンク展開
 #   4. Homebrew の導入 (未導入時、Xcode Command Line Tools も同時に導入される)
-#   5. macos/Brewfile に基づく不足パッケージのインストール
+#   5. macos/Brewfile に基づく不足パッケージのインストールとログイン項目の登録
 #   6. mise によるグローバル開発ツールの導入
 #   7. scripts/setup-git.sh による Git の共通設定
 #   8. zsh プラグインの取得
@@ -262,6 +262,32 @@ fi
 # 以降は管理者権限を使わないため、ここで timestamp を無効化する
 sudo -k 2>/dev/null || true
 trap - EXIT
+
+step 'login items'
+for login_item_app in \
+  /Applications/Rectangle.app \
+  /Applications/Typeless.app \
+  /Applications/logioptionsplus.app; do
+  if [[ ! -d "$login_item_app" ]]; then
+    printf 'warning: skipped login item for missing %s\n' "$login_item_app" >&2
+    continue
+  fi
+
+  if ! osascript - "$login_item_app" <<'APPLESCRIPT'
+on run argv
+  set targetPath to item 1 of argv
+  tell application "System Events"
+    set existingPaths to path of every login item
+    if existingPaths contains targetPath then return
+    if existingPaths contains (targetPath & "/") then return
+    make new login item at end with properties {path:targetPath, hidden:false}
+  end tell
+end run
+APPLESCRIPT
+  then
+    printf 'warning: failed to add login item %s\n' "$login_item_app" >&2
+  fi
+done
 
 # ============================================================================
 # mise によるグローバル開発ツール (.config/mise/config.toml が管理する)

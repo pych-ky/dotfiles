@@ -331,6 +331,8 @@ main() {
     # terminal
     ".wezterm.lua"
     ".config/starship.toml"
+    ".config/git/ignore"
+    ".config/gh/config.yml"
     # keyboard (karabiner.json 単体の symlink では Karabiner が設定変更を検知できないためディレクトリごとリンク)
     ".config/karabiner"
     # 開発ツールのバージョン管理

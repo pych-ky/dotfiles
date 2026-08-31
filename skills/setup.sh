@@ -1,12 +1,7 @@
 #!/usr/bin/env bash
-#
-# private Agent Skills の checkout を用意し、repository 側の管理 CLI へ処理を委譲する。
+# private Agent Skills の checkout を用意し、repository 側の setup.sh に配置を委譲する。
 
 set -euo pipefail
-
-# ============================================================================
-# グローバル設定
-# ============================================================================
 
 temporary_clone_dir=
 
@@ -25,10 +20,6 @@ source lib/setup-common.sh
 source lib/process-lock.sh
 cd "$source_working_dir" || exit 1
 unset source_working_dir
-
-# ============================================================================
-# ユーティリティ
-# ============================================================================
 
 error() {
   printf 'error: %s\n' "$1" >&2
@@ -51,11 +42,7 @@ cleanup() {
   process_lock_release 2>/dev/null || true
 }
 
-# ============================================================================
-# リポジトリ検証
-# ============================================================================
-
-# 保存先の repository root と origin、管理 CLI の実行権を確認
+# 保存先の repository root と origin、setup.sh の実行権を確認
 verify_repository() {
   local repository_dir="$1"
   local expected_url="$2"
@@ -67,16 +54,12 @@ verify_repository() {
     'Agent Skills' \
     'AGENT_SKILLS_REPO_DIR' \
     'AGENT_SKILLS_REPO_URL' \
-    'bin/agent-skills' \
-    'Agent Skills management CLI is missing or not executable')"; then
+    'setup.sh' \
+    'Agent Skills setup script is missing or not executable')"; then
     error "$repository_error"
     return 1
   fi
 }
-
-# ============================================================================
-# エントリポイント
-# ============================================================================
 
 main() {
   local skip="${AGENT_SKILLS_SKIP:-0}"
@@ -150,12 +133,6 @@ main() {
     fi
   fi
 
-  if ! command -v python3 >/dev/null 2>&1 ||
-    ! python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 9))'; then
-    error 'Python 3.9 or newer is required for Agent Skills setup'
-    return 1
-  fi
-
   if ((clone_required)); then
     repository_parent="$(dirname "$repository_dir")"
     mkdir -p "$repository_parent"
@@ -184,7 +161,7 @@ main() {
     verify_repository "$repository_dir" "$repository_url" || return
   fi
 
-  "$repository_dir/bin/agent-skills" sync
+  "$repository_dir/setup.sh"
 }
 
 main "$@"
