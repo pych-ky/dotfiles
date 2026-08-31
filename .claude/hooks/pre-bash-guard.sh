@@ -30,7 +30,7 @@ command -v python3 >/dev/null 2>&1 || {
   exit 2
 }
 
-python3 "$scanner" "$@" || {
+python3 -I "$scanner" "$@" || {
   scanner_status=$?
   if ((scanner_status != 2)); then
     printf 'pre-bash-guard.sh: scanner failed with status %s\n' \

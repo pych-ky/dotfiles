@@ -7,13 +7,13 @@
 # core.hooksPath を設定すると、Git は各リポジトリの .git/hooks を参照しなくなる。
 # そのため、このスクリプトがフック名ごとに以下を順に実行し、失敗を伝播する。
 #
-#   1. 非公開 denylist の検査 (pre-commit / pre-push のみ)
-#   2. リポジトリ固有フック (.git/hooks/<フック名>)
-#   3. Git LFS のフック (git-lfs 導入済みかつ LFS が扱うフック名の場合)
+#   1. gitleaks による秘密情報の検査 (pre-commit のみ)
+#   2. 非公開 denylist の検査 (pre-commit / pre-push のみ)
+#   3. リポジトリ固有フック (.git/hooks/<フック名>)
+#   4. Git LFS のフック (git-lfs 導入済みかつ LFS が扱うフック名の場合)
 #
-# フック名は $0 のファイル名から決まるため、pre-push などの名前でこのスクリプトへ
-# シンボリックリンクを張って使う。pre-commit は secretlint のフックへ直接リンクし、
-# そこから git-hooks/_local-hook-exec 経由で 1. が実行される。
+# フック名は $0 のファイル名から決まるため、pre-commit などの名前でこのスクリプトへ
+# シンボリックリンクを張って使う。
 
 set -uo pipefail
 
@@ -52,7 +52,7 @@ run_with_stdin() {
 }
 
 # 上流互換: IGNORE_GLOBAL_HOOKS に列挙されたリポジトリでは、
-# グローバルに追加した検査 (denylist) を行わない。
+# グローバルに追加した検査 (gitleaks / denylist) を行わない。
 # リポジトリ固有フックと Git LFS のフックは、そのリポジトリの動作そのものに
 # 必要なため続行する (止めると LFS のファイルが壊れる)
 hooks_dir="$(cd "$(dirname "$0")" && pwd)"
@@ -66,9 +66,19 @@ if [[ -f "$ignore_file" && -n "$git_root" ]] &&
   skip_global_checks=1
 fi
 
-# 1. 非公開 denylist の検査。
-# pre-commit が secretlint のフックへ張られている場合はこちらを通らないため、
-# 同じ検査を git-hooks/_local-hook-exec 側にも置いてある (二重実行はしない)
+# 1. gitleaks による秘密情報の検査。
+# --redact を付け、見つかった値そのものを出力へ載せない。
+# 検査できない状態のまま通すと歯止めが無くなるため、未導入なら中断する
+if ((!skip_global_checks)) && [[ "$hook_name" == pre-commit ]]; then
+  if ! command -v gitleaks >/dev/null 2>&1; then
+    printf 'error: gitleaks が見つかりません\n' >&2
+    printf '       brew bundle --file=macos/Brewfile で導入してから、もう一度コミットしてください\n' >&2
+    exit 1
+  fi
+  gitleaks git --staged --redact --no-banner || exit $?
+fi
+
+# 2. 非公開 denylist の検査
 deny_private_strings="$(dirname "$0")/deny-private-strings"
 if ((!skip_global_checks)) &&
   [[ "$hook_name" == pre-commit || "$hook_name" == pre-push ]] &&
@@ -76,12 +86,12 @@ if ((!skip_global_checks)) &&
   run_with_stdin "$deny_private_strings" "$hook_name" "$@" || exit $?
 fi
 
-# 2. リポジトリ固有フック (失敗したらその終了状態で中断する)
+# 3. リポジトリ固有フック (失敗したらその終了状態で中断する)
 if [[ -x "$local_hook" ]]; then
   run_with_stdin "$local_hook" "$@" || exit $?
 fi
 
-# 3. Git LFS のフック
+# 4. Git LFS のフック
 if [[ "$lfs_hooks" == *" $hook_name "* ]] &&
   command -v git-lfs >/dev/null 2>&1; then
   run_with_stdin git lfs "$hook_name" "$@" || exit $?

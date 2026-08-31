@@ -1,6 +1,15 @@
 # ============================================================================
 # AWS SSO プロファイルを切り替えて永続化するシェル関数
 # ============================================================================
+#
+# 扱うのは AWS_PROFILE (プロファイル名) だけで、一時認証情報そのものは
+# シェルへ持ち込まない。解決は AWS SDK 側に任せる。
+#
+# 以前あった aws-env は aws configure export-credentials の結果を
+# AWS_ACCESS_KEY_ID などへ export していた。値がシェルの環境に載ると、
+# そこから起動する AI エージェントの子プロセスへそのまま渡るため廃止した。
+# AWS_PROFILE 非対応ツールは、最終的には外部の署名ブローカーか認証済みの
+# 隔離 runner 経由で扱う (未実装。SECURITY.md「未完了の対策」を参照)。
 
 # Claude Code のシェルスナップショットで除外されないよう __aws_* 名にする
 
@@ -30,11 +39,10 @@ __aws_credential_provider_variables() {
 # credential provider 環境変数の設定有無を判定
 __aws_has_credential_provider() {
   local variable
-  local value
 
   while IFS= read -r variable; do
-    eval "value=\${$variable-}"
-    [ -z "$value" ] || return 0
+    # 値そのものは展開せず、空でない変数だけを provider とみなす。
+    eval "[ \"\${$variable:+x}\" = x ]" && return 0
   done < <(__aws_credential_provider_variables)
 
   return 1
@@ -64,28 +72,6 @@ __aws_verify_profile_credentials() (
 
   __aws_clear_credentials || exit
   AWS_PROFILE="$profile" AWS_PAGER='' aws sts get-caller-identity
-)
-
-# export-credentials の候補を現在の shell へ設定
-__aws_set_env_credentials() {
-  local access_key_id="$1"
-  local secret_access_key="$2"
-  local session_token="$3"
-  local expiration="$4"
-
-  export AWS_ACCESS_KEY_ID="$access_key_id"
-  export AWS_SECRET_ACCESS_KEY="$secret_access_key"
-  export AWS_SESSION_TOKEN="$session_token"
-  if [ -n "$expiration" ]; then
-    export AWS_CREDENTIAL_EXPIRATION="$expiration"
-  fi
-}
-
-# 環境変数方式の候補だけを使って疎通を確認
-__aws_verify_env_credentials() (
-  __aws_clear_credentials || exit
-  __aws_set_env_credentials "$@"
-  AWS_PAGER='' aws sts get-caller-identity
 )
 
 # 指定プロファイルが AWS SSO 用に設定済みかを検証
@@ -124,106 +110,23 @@ __aws_persist_active_profile() {
   fi
 }
 
-# SSO 検証・ログイン・疎通確認・永続化の共通フロー
-__aws_login_sso_profile() {
-  local profile="${1:?usage: __aws_login_sso_profile <profile> <credential-mode>}"
-  local credential_mode="${2:?usage: __aws_login_sso_profile <profile> <credential-mode>}"
-  local credentials
-  local candidate_access_key_id=
-  local candidate_secret_access_key=
-  local candidate_session_token=
-  local candidate_expiration=
-  local line
+# 認証情報の解決を SDK 側に任せ、AWS_PROFILE 方式で SSO ログイン
+aws-use() {
+  local profile="${1:?usage: aws-use <profile>}"
 
   if ! command -v aws >/dev/null 2>&1; then
     printf 'aws: aws CLI not found\n' >&2
     return 127
   fi
 
-  case "$credential_mode" in
-  profile | env) ;;
-  *)
-    printf 'aws: unknown credential mode: %s\n' "$credential_mode" >&2
-    return 2
-    ;;
-  esac
-
   __aws_require_sso_profile "$profile" || return
   __aws_run_without_credentials aws sso login --profile "$profile" || return
 
-  case "$credential_mode" in
-  profile)
-    # 候補の疎通確認後に永続化し、現在の shell へ反映
-    __aws_verify_profile_credentials "$profile" || return
-    __aws_persist_active_profile "$profile" || return
-    __aws_clear_credentials || return
-    export AWS_PROFILE="$profile"
-    ;;
-  env)
-    credentials="$(__aws_run_without_credentials \
-      aws configure export-credentials --profile "$profile" --format env)" || return
-
-    # AWS CLI の既知の代入だけを受理し、eval しない
-    while IFS= read -r line; do
-      case "$line" in
-      'export AWS_ACCESS_KEY_ID='*)
-        candidate_access_key_id="${line#export AWS_ACCESS_KEY_ID=}"
-        ;;
-      'export AWS_SECRET_ACCESS_KEY='*)
-        candidate_secret_access_key="${line#export AWS_SECRET_ACCESS_KEY=}"
-        ;;
-      'export AWS_SESSION_TOKEN='*)
-        candidate_session_token="${line#export AWS_SESSION_TOKEN=}"
-        ;;
-      'export AWS_CREDENTIAL_EXPIRATION='*)
-        candidate_expiration="${line#export AWS_CREDENTIAL_EXPIRATION=}"
-        ;;
-      '') ;;
-      *)
-        printf 'aws: export-credentials returned unexpected output\n' >&2
-        return 1
-        ;;
-      esac
-    done <<EOF
-$credentials
-EOF
-
-    if [ -z "$candidate_access_key_id" ] ||
-      [ -z "$candidate_secret_access_key" ] ||
-      [ -z "$candidate_session_token" ]; then
-      printf 'aws: export-credentials returned incomplete credentials\n' >&2
-      return 1
-    fi
-
-    # 候補の疎通確認後に永続化し、現在の shell へ反映
-    __aws_verify_env_credentials \
-      "$candidate_access_key_id" \
-      "$candidate_secret_access_key" \
-      "$candidate_session_token" \
-      "$candidate_expiration" || return
-    __aws_persist_active_profile "$profile" || return
-    __aws_clear_credentials || return
-    __aws_set_env_credentials \
-      "$candidate_access_key_id" \
-      "$candidate_secret_access_key" \
-      "$candidate_session_token" \
-      "$candidate_expiration"
-    ;;
-  esac
-}
-
-# 認証情報の解決を SDK 側に任せ、AWS_PROFILE 方式で SSO ログイン
-aws-use() {
-  local profile="${1:?usage: aws-use <profile>}"
-
-  __aws_login_sso_profile "$profile" profile
-}
-
-# AWS_PROFILE 非対応ツール向けに環境変数方式で SSO ログイン
-aws-env() {
-  local profile="${1:?usage: aws-env <profile>}"
-
-  __aws_login_sso_profile "$profile" env
+  # 候補の疎通確認後に永続化し、現在の shell へ反映
+  __aws_verify_profile_credentials "$profile" || return
+  __aws_persist_active_profile "$profile" || return
+  __aws_clear_credentials || return
+  export AWS_PROFILE="$profile"
 }
 
 # 明示的な credential provider と永続化ファイルを削除

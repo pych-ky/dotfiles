@@ -18,7 +18,7 @@ review_model = "gpt-5.6-sol"  # コードレビュー用モデル
 # 推論関連
 model_reasoning_effort   = "xhigh"   # 推論の深さ (low / medium / high / xhigh)
 model_reasoning_summary  = "auto"    # 推論要約の形式 (auto / concise / detailed / none)
-model_verbosity          = "medium"  # 応答の詳細度 (low / medium / high)
+model_verbosity          = "low"     # 応答の詳細度 (low / medium / high)
 hide_agent_reasoning     = true      # エージェント推論過程を非表示
 show_raw_agent_reasoning = false     # 生の推論データを非表示
 
@@ -52,7 +52,7 @@ default_permissions = "hardened"     # 認証情報を読めない workspace 権
 [permissions.hardened]
 description = "認証情報の読み取りを禁止する既定プロファイル"
 extends = ":workspace"
-filesystem = { "~/.ssh" = "deny", "~/.aws" = "deny", "~/.kube" = "deny", "~/.gnupg" = "deny", "~/.netrc" = "deny", "~/Library/Keychains" = "deny", "~/.codex/auth.json" = "deny", "~/.claude/.credentials.json" = "deny", "~/.claude.json" = "deny", "~/.claude/backups" = "deny", "~/.config/gh/hosts.yml" = "deny", "~/.docker/config.json" = "deny", "~/.terraform.d/credentials.tfrc.json" = "deny" }
+filesystem = { glob_scan_max_depth = 8, ":workspace_roots" = { "**/.env" = "deny", "**/.env.*" = "deny", "**/secrets" = "deny", "**/secrets/**" = "deny", "**/credentials" = "deny", "**/credentials/**" = "deny", "**/.git-credentials" = "deny", "**/.netrc" = "deny", "**/.pgpass" = "deny", "**/.npmrc" = "deny", "**/.pypirc" = "deny", "**/.zsh_history" = "deny", "**/.bash_history" = "deny", "**/fish_history" = "deny", "**/gh/hosts.yml*" = "deny", "**/gcloud/credentials.db*" = "deny", "**/gcloud/access_tokens.db*" = "deny", "**/gcloud/application_default_credentials.json*" = "deny", "**/ocm/ocm.json*" = "deny", "**/helm/repositories.yaml*" = "deny", "**/helm/registry/config.json*" = "deny", "**/uv/credentials*" = "deny", "**/uv/credentials*/**" = "deny", "**/.aws/config" = "deny", "**/.docker/config.json" = "deny", "**/containers/auth.json" = "deny", "**/.ocm.json" = "deny", "**/.kube/config" = "deny", "**/.codex/auth.json" = "deny", "**/.claude/.credentials.json" = "deny", "**/.claude.json" = "deny", "**/.claude.json.backup" = "deny", "**/.terraform.d/credentials.tfrc.json" = "deny", "**/.terraformrc" = "deny", "**/.vault-token" = "deny", "**/.cargo/credentials.toml" = "deny", "**/cargo/credentials.toml" = "deny", "**/.curlrc" = "deny", "**/.wgetrc" = "deny", "**/.bundle/config" = "deny", "**/.composer/auth.json" = "deny", "**/composer/auth.json" = "deny", "**/pypoetry/auth.toml" = "deny", "**/.aws/sso" = "deny", "**/.aws/sso/**" = "deny", "**/.aws/cli" = "deny", "**/.aws/cli/**" = "deny", "**/.ssh" = "deny", "**/.ssh/**" = "deny", "**/.gnupg" = "deny", "**/.gnupg/**" = "deny", "**/.config/gcloud" = "deny", "**/.config/gcloud/**" = "deny", "**/.claude/backups" = "deny", "**/.claude/backups/**" = "deny", "**/.azure" = "deny", "**/.azure/**" = "deny", "**/.zsh_sessions" = "deny", "**/.zsh_sessions/**" = "deny", "**/.bash_sessions" = "deny", "**/.bash_sessions/**" = "deny", "**/Library/Keychains" = "deny", "**/Library/Keychains/**" = "deny", "**/.pg_service.conf" = "deny", "**/pg_service.conf" = "deny", "**/pip.conf" = "deny", "**/*.pem" = "deny", "**/*.key" = "deny", "**/*.p12" = "deny", "**/*.pfx" = "deny", "**/*.p8" = "deny", "**/*.der" = "deny", "**/*.ppk" = "deny", "**/*.jks" = "deny", "**/*.keystore" = "deny", "**/*.kdbx" = "deny", "**/*service-account*.json" = "deny", "**/*service_account*.json" = "deny", "**/*application_default_credentials*.json" = "deny", "**/*.tfstate*" = "deny", "**/id_rsa*" = "deny", "**/id_dsa*" = "deny", "**/id_ed25519*" = "deny", "**/id_ecdsa*" = "deny" }, "~/.ssh" = "deny", "~/.aws" = "deny", "~/.kube" = "deny", "~/.ocm.json" = "deny", "~/.config/ocm/ocm.json*" = "deny", "~/Library/Application Support/ocm/ocm.json*" = "deny", "~/.config/helm/repositories.yaml*" = "deny", "~/.config/helm/registry/config.json*" = "deny", "~/Library/Preferences/helm/repositories.yaml*" = "deny", "~/Library/Preferences/helm/registry/config.json*" = "deny", "~/.gnupg" = "deny", "~/.netrc" = "deny", "~/.git-credentials" = "deny", "~/.pgpass" = "deny", "~/.pg_service.conf" = "deny", "~/.npmrc" = "deny", "~/.pypirc" = "deny", "~/.curlrc" = "deny", "~/.wgetrc" = "deny", "~/.bundle/config" = "deny", "~/.config/composer/auth.json" = "deny", "~/.composer/auth.json" = "deny", "~/.config/pypoetry/auth.toml" = "deny", "~/Library/Application Support/pypoetry/auth.toml" = "deny", "~/.config/pip/pip.conf" = "deny", "~/.pip/pip.conf" = "deny", "~/Library/Application Support/pip/pip.conf" = "deny", "/etc/pip.conf" = "deny", "/Library/Application Support/pip/pip.conf" = "deny", "~/.zsh_history" = "deny", "~/.bash_history" = "deny", "~/.zsh_sessions" = "deny", "~/.bash_sessions" = "deny", "~/.local/share/fish/fish_history" = "deny", "~/.local/share/uv/credentials*" = "deny", "~/.local/share/uv/credentials*/**" = "deny", "~/.config/gcloud" = "deny", "~/Library/Keychains" = "deny", "/Library/Keychains" = "deny", "~/.codex/auth.json" = "deny", "~/.codex/history.jsonl" = "deny", "~/.codex/sessions" = "deny", "~/.codex/sessions/**" = "deny", "~/.codex/archived_sessions" = "deny", "~/.codex/archived_sessions/**" = "deny", "~/.codex/shell_snapshots" = "deny", "~/.codex/shell_snapshots/**" = "deny", "~/.claude/.credentials.json" = "deny", "~/.claude/history.jsonl" = "deny", "~/.claude/projects" = "deny", "~/.claude/projects/**" = "deny", "~/.claude/file-history" = "deny", "~/.claude/file-history/**" = "deny", "~/.claude/paste-cache" = "deny", "~/.claude/paste-cache/**" = "deny", "~/.claude/shell-snapshots" = "deny", "~/.claude/shell-snapshots/**" = "deny", "~/.claude.json" = "deny", "~/.claude.json.backup" = "deny", "~/.claude/backups" = "deny", "~/.config/gh/hosts.yml*" = "deny", "~/.docker/config.json" = "deny", "~/.terraform.d/credentials.tfrc.json" = "deny", "~/.terraformrc" = "deny", "~/.vault-token" = "deny", "~/.azure" = "deny", "~/.config/containers/auth.json" = "deny", "~/.cargo/credentials" = "deny", "~/.cargo/credentials.toml" = "deny" }
 
 [permissions.hardened.network]
 enabled = true  # 従来の workspace-write と同様、コマンドのネットワークアクセスを許可
@@ -63,10 +63,56 @@ enabled = true  # 従来の workspace-write と同様、コマンドのネット
 ## ============================================================================
 
 [shell_environment_policy]
-inherit                 = "core"                # 親シェルから環境変数を継承する範囲 (all / core / none)
-ignore_default_excludes = false                 # デフォルト除外リストを無視しない設定
-exclude                 = ["AWS_*", "AZURE_*"]  # 除外する環境変数パターン
-set                     = {}                    # 追加で設定する環境変数
+inherit                 = "core"  # 親シェルから環境変数を継承する範囲 (all / core / none)
+ignore_default_excludes = false   # *KEY* / *SECRET* / *TOKEN* の既定除外を有効にする
+set                     = { GIT_TERMINAL_PROMPT = "0" }  # Git の認証待ちを防ぐ
+
+# 除外パターンは正式なテーブル表記で書く。
+# 旧来の exclude / include_only 配列とは併用できない (Codex が読み込み時に弾く)。
+# filter 名は大文字小文字を区別しないため、同名の大小文字違いは重ねない。
+# エージェントは秘密を環境変数へ設定しない新しいターミナルから起動する前提とし、
+# ここは取りこぼしを拾う防御として置く
+[shell_environment_policy.filters]
+"AWS_ACCESS_KEY_ID"               = "exclude"
+"AWS_CONFIG_FILE"                 = "exclude"
+"AWS_CONTAINER_AUTHORIZATION_TOKEN" = "exclude"
+"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE" = "exclude"
+"AWS_CONTAINER_CREDENTIALS_FULL_URI" = "exclude"
+"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI" = "exclude"
+"AWS_SECRET_ACCESS_KEY"           = "exclude"
+"AWS_SECURITY_TOKEN"              = "exclude"
+"AWS_SESSION_TOKEN"               = "exclude"
+"AWS_SHARED_CREDENTIALS_FILE"     = "exclude"
+"AWS_WEB_IDENTITY_TOKEN_FILE"     = "exclude"
+"AZURE_*"                         = "exclude"
+"BUNDLE_USER_CONFIG"              = "exclude"
+"CARGO_HOME"                      = "exclude"
+"CLOUDSDK_CONFIG"                 = "exclude"
+"COMPOSER_AUTH"                   = "exclude"
+"COMPOSER_HOME"                   = "exclude"
+"DOCKER_CERT_PATH"                = "exclude"
+"DOCKER_CONFIG"                   = "exclude"
+"GH_CONFIG_DIR"                   = "exclude"
+"GNUPGHOME"                       = "exclude"
+"GOOGLE_APPLICATION_CREDENTIALS" = "exclude"
+"HELM_CONFIG_HOME"                = "exclude"
+"HELM_KUBETOKEN"                  = "exclude"
+"HELM_REGISTRY_CONFIG"            = "exclude"
+"HELM_REPOSITORY_CONFIG"          = "exclude"
+"KUBECONFIG"                      = "exclude"
+"NETRC"                           = "exclude"
+"NPM_CONFIG_USERCONFIG"           = "exclude"
+"OCM_CONFIG"                      = "exclude"
+"PGPASSFILE"                      = "exclude"
+"PGPASSWORD"                      = "exclude"
+"PGSERVICEFILE"                   = "exclude"
+"PGSSLKEY"                        = "exclude"
+"PGSYSCONFDIR"                    = "exclude"
+"PIP_CONFIG_FILE"                 = "exclude"
+"REGISTRY_AUTH_FILE"              = "exclude"
+"TF_CLI_CONFIG_FILE"              = "exclude"
+"UV_CREDENTIALS_DIR"              = "exclude"
+"WGETRC"                          = "exclude"
 
 
 ## ============================================================================
@@ -101,6 +147,7 @@ persistence = "save-all"  # 履歴の永続化 (none / save-all)
 ## ============================================================================
 
 [features]
+shell_snapshot     = false  # shell 状態や環境変数を平文ファイルへ保存しない
 prevent_idle_sleep = true  # アイドル時のスリープを防止
 
 

@@ -1,4 +1,4 @@
-# aws-use / aws-env / aws-clear の読み込み
+# aws-use / aws-clear の読み込み
 [ -r "$HOME/.shell/functions/aws.sh" ] && . "$HOME/.shell/functions/aws.sh"
 
 # 保存済み AWS プロファイルの読み込み

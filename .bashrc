@@ -21,7 +21,7 @@ if command -v mise >/dev/null 2>&1; then
   eval "$(mise activate bash)"
 fi
 
-# aws-use / aws-env / aws-clear の読み込み
+# aws-use / aws-clear の読み込み
 [ -r "$HOME/.shell/functions/aws.sh" ] && . "$HOME/.shell/functions/aws.sh"
 
 # Git worktree 関数の読み込み
