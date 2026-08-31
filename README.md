@@ -144,17 +144,38 @@ ghtkn auth   # デバイスフローで認証する
 
 | フック | 実行内容 |
 | --- | --- |
-| すべて | `git-hooks/dispatch`（gitleaks 検査 → denylist 検査 → リポジトリ固有フック → Git LFS のフック） |
+| すべて | `git-hooks/dispatch`（secretlint 検査 → denylist 検査 → リポジトリ固有フック → Git LFS のフック） |
 
-- `pre-commit` は `gitleaks git --staged --redact` でステージ内容を検査する。
-  `--redact` を付けるため、検出した値そのものは出力に載らない。
-  gitleaks が未導入の端末では、検査漏れのままコミットさせないようコミットを中断する
+- `pre-commit` は変更されたファイルの index 上の内容全体を secretlint に標準入力で渡す。
+  作業ツリーを読まないため部分ステージにも対応し、改名・型変更後の内容も検査する。
+  削除と submodule のコミット参照は除外し、symlink はリンク先ではなくリンク文字列を検査する
+- 推奨 preset（`@secretlint/secretlint-rule-preset-recommend`）をフック内の `--secretlintrcJSON` で明示する。
+  リポジトリの `.secretlintrc*`・`.secretlintignore`・`.gitignore` はこの共通検査には使わない
+- 秘密情報の検出、未導入、設定・ルール読み込み不備、index の取得・検査失敗はコミットを中断する。
+  空コミットや削除のみでも事前にツールと設定を検査する。
+  `--maskSecrets` を明示し、Git と secretlint の検査出力はエラー・デバッグ出力も含めて抑止する。
+  失敗時は秘密値やパスを含まない固定メッセージだけを表示する
 - リポジトリ固有フックが失敗した場合は、その終了状態を伝播してコミットや push を中断する
 - Git LFS が扱うフック（`pre-push`、`post-checkout`、`post-commit`、`post-merge`）は `git lfs <フック名>` を呼ぶ。
   そのため各リポジトリでの `git lfs install` は不要
 - `pre-push` と `post-rewrite` は標準入力で情報を受け取るため、内容を保持して各実行先へ渡す
-- 特定のリポジトリでグローバルな検査（gitleaks と下記の denylist）を止める場合は、`~/.local/share/dotfiles/IGNORE_GLOBAL_HOOKS` にそのリポジトリのパスを記載する（上流と同じ仕組み）。
+- 特定のリポジトリでグローバルな検査（secretlint と下記の denylist）を止める場合は、`~/.local/share/dotfiles/IGNORE_GLOBAL_HOOKS` にそのリポジトリのパスを記載する（上流と同じ仕組み）。
   リポジトリ固有フックと Git LFS のフックは、そのリポジトリの動作そのものに必要なため止めない
+
+secretlint は [公式の単一実行ファイル](https://github.com/secretlint/secretlint#using-single-executable-binary)を
+[mise の aqua backend](https://mise.jdx.dev/dev-tools/backends/aqua.html) で管理する（`.config/mise/config.toml`、13.0.5 固定）。
+推奨ルールを同梱しており、npm のグローバル導入や Homebrew への重複登録は行わない。
+`bootstrap.sh` が設定のリンク後に `mise install` を実行し、secretlint も一括導入する。
+bootstrap 全体を再実行せず、リンク済みの設定から secretlint だけ導入する場合は次を実行する。
+
+```sh
+mise install aqua:secretlint/secretlint
+```
+
+版とルールはこの dotfiles の既定であり、チーム標準を定義するものではない。
+チーム指定がある場合は別途確認し、組織固有設定は公開リポジトリに置かない。
+gitleaks の既定ルールと検出範囲は一致せず、汎用 API キーなどが同等に検出されるとは限らない。
+既存端末の gitleaks は自動削除しないため、secretlint の導入・動作確認後に利用者が削除を判断する。
 
 #### 公開リポジトリへの混入防止（denylist）
 
@@ -187,7 +208,6 @@ brew bundle cleanup --file=macos/Brewfile             # Brewfile にないパッ
 - 一部の GUI アプリ（ブラウザ、エディタ、コミュニケーションツールなど）は、別の手段で導入する端末があるため既定ではコメントアウトしてある。
   個人用端末など brew で導入したい場合はコメントアウトを外して `brew bundle` を再実行してよい
 - `cleanup` は Brewfile の追加・削除を反映した後に、まず `--force` なしで削除候補を確認してから実行する（稼働中のツールを誤って削除しないため）
-- グローバルの `pre-commit` は `gitleaks` を使うため、コミットする端末には gitleaks が必要
 
 ### macOS 設定
 

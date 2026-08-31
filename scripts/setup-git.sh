@@ -118,7 +118,7 @@ fi
 # 動かなくなる。そこで振り分け用のディレクトリを作り、そこを参照させる。
 #
 #   すべてのフック -> git-hooks/dispatch
-#                     (gitleaks + denylist 検査 -> リポジトリ固有フック -> Git LFS)
+#                     (secretlint + denylist 検査 -> リポジトリ固有フック -> Git LFS)
 #
 # dispatch から git-hooks/deny-private-strings を呼べるよう、同じディレクトリへ
 # 配置する (各フックは dirname $0 を基準に参照する)。
@@ -157,7 +157,7 @@ if mkdir -p "$hooks_dir"; then
     link_hook "$repo_dir/git-hooks/dispatch" "$hook"
   done
 
-  # secretlint の pre-commit を経由していた頃のリンクを片付ける。
+  # 使わなくなった中継フックへのリンクを片付ける。
   # 参照先が消えると、Git は壊れたリンクのフックを警告なしに飛ばす
   obsolete_hook="$hooks_dir/_local-hook-exec"
   if [[ -L "$obsolete_hook" ]]; then

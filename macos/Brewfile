@@ -37,7 +37,7 @@ brew "git"
 brew "git-lfs"
 brew "gibo"
 brew "gh"
-brew "gitleaks"
+# secretlint は公式バイナリを mise 側で管理する
 
 # ランタイム / パッケージツール
 # node などのバージョン切り替えが必要なランタイムは mise 側で管理する

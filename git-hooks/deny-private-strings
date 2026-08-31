@@ -66,7 +66,7 @@ fi
 # denylist を保管しているリポジトリ自身では検査しない。
 # denylist.txt は全パターンを定義上必ず含むため、自己検査すると初回コミットを
 # 含めて常に拒否してしまう。symlink を解決した配置元と現在の Git ルートを比較し、
-# denylist だけを除外する (gitleaks など他のグローバルフックは継続する)。
+# denylist だけを除外する (secretlint など他のグローバルフックは継続する)。
 resolve_path() {
   local path="$1"
   local target dir

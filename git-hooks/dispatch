@@ -7,7 +7,7 @@
 # core.hooksPath を設定すると、Git は各リポジトリの .git/hooks を参照しなくなる。
 # そのため、このスクリプトがフック名ごとに以下を順に実行し、失敗を伝播する。
 #
-#   1. gitleaks による秘密情報の検査 (pre-commit のみ)
+#   1. secretlint による秘密情報の検査 (pre-commit のみ)
 #   2. 非公開 denylist の検査 (pre-commit / pre-push のみ)
 #   3. リポジトリ固有フック (.git/hooks/<フック名>)
 #   4. Git LFS のフック (git-lfs 導入済みかつ LFS が扱うフック名の場合)
@@ -52,7 +52,7 @@ run_with_stdin() {
 }
 
 # 上流互換: IGNORE_GLOBAL_HOOKS に列挙されたリポジトリでは、
-# グローバルに追加した検査 (gitleaks / denylist) を行わない。
+# グローバルに追加した検査 (secretlint / denylist) を行わない。
 # リポジトリ固有フックと Git LFS のフックは、そのリポジトリの動作そのものに
 # 必要なため続行する (止めると LFS のファイルが壊れる)
 hooks_dir="$(cd "$(dirname "$0")" && pwd)"
@@ -66,16 +66,46 @@ if [[ -f "$ignore_file" && -n "$git_root" ]] &&
   skip_global_checks=1
 fi
 
-# 1. gitleaks による秘密情報の検査。
-# --redact を付け、見つかった値そのものを出力へ載せない。
-# 検査できない状態のまま通すと歯止めが無くなるため、未導入なら中断する
+# 1. index 上の blob を secretlint で検査する。
+# エラーやデバッグ出力にも内容を載せないよう、検査中の出力はすべて抑止する
 if ((!skip_global_checks)) && [[ "$hook_name" == pre-commit ]]; then
-  if ! command -v gitleaks >/dev/null 2>&1; then
-    printf 'error: gitleaks が見つかりません\n' >&2
-    printf '       brew bundle --file=macos/Brewfile で導入してから、もう一度コミットしてください\n' >&2
+  if ! command -v secretlint >/dev/null 2>&1; then
+    printf 'error: secretlint が見つかりません\n' >&2
+    printf '       mise install aqua:secretlint/secretlint で導入してから、もう一度コミットしてください\n' >&2
     exit 1
   fi
-  gitleaks git --staged --redact --no-banner || exit $?
+
+  secretlint_config='{"rules":[{"id":"@secretlint/secretlint-rule-preset-recommend"}]}'
+  # 空コミットや削除のみの変更でも、実行・設定・ルール読み込みの失敗を止める
+  if ! secretlint --secretlintrcJSON "$secretlint_config" --maskSecrets \
+    --stdinFileName=secretlint-preflight </dev/null >/dev/null 2>&1; then
+    printf 'error: secretlint を実行できません。導入状態とフック内の設定を確認してください\n' >&2
+    exit 1
+  fi
+
+  if ! {
+    # rename を追加と削除に分け、各レコードのパスを 1 個に揃える
+    git --no-replace-objects diff --cached --raw --no-abbrev --no-renames --diff-filter=d \
+      --no-ext-diff --no-textconv --no-color -z |
+      while IFS= read -r -d '' entry; do
+        IFS= read -r -d '' path || exit 1
+        IFS=' ' read -r old_mode new_mode old_oid new_oid change_type <<<"$entry" || exit 1
+        case "$new_mode" in
+        160000) continue ;; # submodule のコミット参照は blob ではない
+        100644 | 100755 | 120000) ;;
+        *) exit 1 ;;
+        esac
+
+        # symlink も blob の文字列だけを検査し、作業ツリーのリンク先は読まない
+        git --no-replace-objects cat-file blob "$new_oid" |
+          secretlint --secretlintrcJSON "$secretlint_config" --maskSecrets \
+            --stdinFileName="./$path" || exit $?
+      done
+  } >/dev/null 2>&1; then
+    printf 'error: ステージ済み内容で秘密情報を検出したか、読み出し・secretlint 検査に失敗しました\n' >&2
+    printf '       秘密値の漏出を防ぐため、検査の詳細出力は表示していません\n' >&2
+    exit 1
+  fi
 fi
 
 # 2. 非公開 denylist の検査
