@@ -10,6 +10,7 @@
 # リポジトリごとに版を変える場合は、そのリポジトリの mise 設定で上書きする。
 
 [tools]
+"aqua:secretlint/secretlint" = "13.0.5"
 "aqua:suzuki-shunsuke/ghtkn" = "latest"
 "aqua:gruntwork-io/terragrunt" = "latest"
 "aqua:suzuki-shunsuke/tfcmt" = "latest"
