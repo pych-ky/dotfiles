@@ -28,11 +28,11 @@ git clone <このリポジトリ> && cd dotfiles
 3. `scripts/link-dotfiles.sh` でシンボリックリンクを展開する
 4. Homebrew を導入する。
    未導入時は Xcode Command Line Tools も導入する
-5. 不足する CLI・GUI アプリをインストールし、ログイン項目を登録する
+5. 不足する CLI・GUI アプリをインストールし、ログイン項目を追加・削除する
 6. `mise install` でグローバル開発ツール（node、go、terraform など）を導入する
 7. `scripts/setup-git.sh` で Git 共通設定を適用する
 8. `zsh-autosuggestions` と `fast-syntax-highlighting` を取得する
-9. 未導入の Claude Code CLI と Codex CLI を導入する
+9. 未導入の Claude Code CLI と Codex CLI を導入し、公式 Claude Code プラグインを設定に合わせて整理する
 10. アクセス可能な非公開 Codex Custom Pets を取得し、収録されている全ペットをインストールする
 11. アクセス可能な非公開 Agent Skills を取得し、リポジトリ直下の `setup.sh` で symlink を配置する
 12. アクセス可能な非公開 dotfiles-private（組織固有・個人設定）を取得し、適用する
@@ -70,6 +70,7 @@ git clone <このリポジトリ> && cd dotfiles
 - Karabiner が変更を検知できるよう、`.config/karabiner` はディレクトリごとリンクする
 - 共通エージェントルールは `.config/agents/AGENTS.md` を正本とし、`~/.config/agents/AGENTS.md` と `~/.codex/AGENTS.md` から参照する
 - Codex の基本設定を `sudo` で `/etc/codex/config.toml` にリンクし、端末固有の `~/.codex/config.toml` で上書き可能にする
+- Codex の hooks / permissions は起動時に読み込まれるため、リンク後は Codex を終了して新しいセッションを開始する
 - 管理対象の正確な一覧は `scripts/link-dotfiles.sh` を参照する
 
 ### Git 共通設定
@@ -114,6 +115,8 @@ GitHub へは HTTPS で接続し、通常の認証は `gh auth git-credential` �
 gh auth login --hostname github.com --git-protocol https
 ```
 
+表示された URL を先に手動で開くと、後から Enter による CLI 自身のブラウザ起動が重なって同じ認証画面が別タブに開く。コードをコピーした後は URL をクリックせず Enter を押す。
+
 URL 限定の ghtkn helper を使う端末では、非公開側の設定に従って追加で認証します。
 
 ```sh
@@ -121,21 +124,21 @@ ghtkn init   # ~/.config/ghtkn/ghtkn.yaml を作成し、対象の GitHub App �
 ghtkn auth   # デバイスフローで認証する
 ```
 
+`ghtkn auth` も URL の手動クリック、Enter、10 秒後の自動起動を重ねない。手動で開く運用へ固定する場合だけ、端末固有設定で `open_browser.enable: false` にする。
+
 - `gh auth token` / `gh auth git-credential` / `ghtkn get` / `ghtkn exec` / `ghtkn git-credential` の直接実行はトークンの取り出しになるため、AI エージェントには許可しない
-- AI エージェントから使える範囲は、その操作がサンドボックスの外で走るかどうかで決まる
-  - `git commit` / `git push`: `excludedCommands` でサンドボックス外を走るため helper が働く
-  - `git fetch` / `git pull` / `git clone`: サンドボックス内で走り、helper がトークンの保管先（キーチェーン）へ到達できない。
-    公開リポジトリは認証なしで成功するが、**非公開リポジトリでは失敗する**。
-    待ち続けないよう `GIT_TERMINAL_PROMPT=0` を設定してあり、ハングはしない
-  - `gh`: `excludedCommands` でサンドボックス外を走り、gh 自身が保管先からトークンを読む。
+- `gh` を `ghtkn exec` で包む端末固有 wrapper は `auth` サブコマンドを対象外にする。`GH_TOKEN` が注入された状態では、`gh auth login` が通常の保存済み認証を更新できない
+- Git / `gh` / `aws` は個別の allow rule を使わず、ほかのコマンドと同じ既定 Allow の実行経路で動かす。
+  Codex は「保護付きフルアクセス」、Claude Code は `auto` の classifier を使い、filesystem sandbox を無効化して credential helper、CLI 設定、認証キャッシュを通常どおり利用できるようにする。Auto 以外のモードでは bare `Bash` allow が有効になる
+  - `gh` は gh 自身が保管先からトークンを読む。
     トークンはエージェントへ渡らないため、`gh pr list` などは通常どおり使える。
     ただしこれは `gh auth login` が保管した**別系統のトークン**であり、ghtkn 経由ではない。
     認証を ghtkn へ一本化するには `gh` 用の broker か wrapper が別途要る（未実装）
-- `gh` と `terraform` はサンドボックス外で走るため、任意コマンドの起動口を個別に塞いでいる。
-  `gh alias` / `gh extension` / `gh config`、`terraform console`、既知でないサブコマンド、
-  `--` 以降を git / ssh へ素通しする `gh repo clone` / `gh codespace ssh` は拒否する
-- `git fetch` などを `excludedCommands` へ足せば非公開リポジトリでも動くが、
-  サンドボックスを迂回できる範囲がその分広がる。限定した wrapper／ブローカーを用意するまでは足さない
+  - AI エージェントから AWS プロファイルを選ぶときは `aws --profile <name> ...` と明示する。`aws-use` は利用者の対話シェルでログインと既定プロファイルの永続化を行うための関数とする
+  - AWS の設定と認証キャッシュは AWS CLI 自身から読み書きできる。ログインや設定変更は認証・外部状態の変更として事前確認する
+- CodeCommit のプロファイル固有設定は公開側に置かない。AWS CLI 同梱の `codecommit credential-helper` は Git の子プロセスとして同じ認証経路を利用できるが、直接実行は認証情報の出力になるため拒否する。`git-remote-codecommit` はこのリポジトリでは導入していない
+- 共通の PreToolUse ガードは、認証ファイルの直接読み取り、秘密値の出力、既知の検査迂回を拒否する。
+  `terraform console` と、`--` 以降を git / ssh へ素通しする `gh repo clone` / `gh codespace ssh` は拒否するが、未知のサブコマンドを一律には拒否しない
 
 ### グローバルフック
 
@@ -218,6 +221,10 @@ brew bundle cleanup --file=macos/Brewfile             # Brewfile にないパッ
 - macOS の既定値から意図的に変える項目だけを `defaults write` で適用する。
   対象はキーボードのリピート速度、Dock、Finder、日本語入力など
 - Rectangle の設定は、エクスポート済みの `macos/rectangle.plist` を読み込んで適用する
+- `bootstrap.sh` は Rectangle と Typeless を「ログイン時に開く」へ登録し、Logi Options+ のメインアプリは同項目から除外する。
+  Logi Options+ の機能は開発元のバックグラウンドサービスを使用する
+- Karabiner のルール、メニューバー表示、Keychron K8 Pro のイベント変更は `.config/karabiner/karabiner.json` で管理する。
+  DriverKit、入力監視、アクセシビリティ、バックグラウンド実行の許可は端末ごとに行う
 - デスクトップのアイコンの並べ方のように入れ子の辞書に含まれる項目は、
   現在の設定を書き出して該当キーだけ差し替えてから読み込む（同じ辞書にある他の表示設定を失わないため）
 - 電源管理（`pmset`）の変更は、認証済みの `sudo`（`sudo -n`）で実行する
@@ -309,22 +316,34 @@ cd "$HOME/src/pych/agent-skills"
 ### システムとアプリ
 
 - システム設定
-  - プライバシーとセキュリティ > フルディスクアクセス / アクセシビリティ（Claude など必要なものだけ）
+  - プライバシーとセキュリティ > フルディスクアクセス / アクセシビリティ / 入力監視（Karabiner、Logi Options+、Claude など必要なものだけ）
   - プライバシーとセキュリティ > オートメーション（ログイン項目の登録時に System Events を許可）
-  - 一般 > ログイン項目と拡張機能 > 拡張機能
+  - 一般 > ログイン項目と拡張機能
+    - 「ログイン時に開く」: Rectangle と Typeless があり、Logi Options+ がないことを確認
+    - 「アプリのバックグラウンドでのアクティビティ」: Karabiner、Logi Options+、Logitech Inc をオン
+    - 拡張機能 > Driver Extensions: Karabiner DriverKit VirtualHIDDevice をオン
   - サウンド > 入出力デバイスの指定
   - キーボード > テキスト入力 > テキスト置換（ユーザー辞書）
     - `しかく` → `■` / `やじるし` → `→` / `かっこ` → `「」`
 - Finder > 設定 > サイドバー > ホームにチェック
 - Brewfile でコメントアウトしているアプリ（ブラウザ、エディタなど）を、端末に応じた方法で導入
 - Rancher Desktop: Preferences > Application > Environment > Configure PATH を Manual にする
-- Typeless: サインインし、案内に従って必要な権限を許可する
+- Typeless: サインインし、必要な権限を許可する。「ログイン時にアプリを起動」をオン、「ドックにアプリを表示」をオフにする
 - VS Code: Settings Sync にサインイン（設定と拡張はこのリポジトリでは管理しない）。
   コマンドパレットから「Shell Command: Install 'code' command in PATH」を実行
 - 各種アカウントにサインイン（1Password、Slack、Notion など）
 - GitHub の通常の認証を `gh auth login` で用意する。
   URL 限定の ghtkn helper を使う端末では、非公開側の設定に従って `ghtkn init` / `ghtkn auth` も実行する。AI エージェントから実行する場合は確認を経る
 - 個別インストーラからプリンタドライバを導入
+
+### AI エージェントの外部サービス
+
+- Claude.ai の Settings > Connectors で GitHub を接続する。この接続は、この環境では Claude Code の MCP として自動提供されない
+- Claude Code からの GitHub 操作には、キーチェーン経由で認証済みの `gh` CLI を使う。
+  `bootstrap.sh` は公式 GitHub プラグインも導入するが、PAT の環境変数を要求するため無効化したままにする
+- Claude Code の Linear と Microsoft Docs の公式プラグインは `bootstrap.sh` が導入して有効化する。Linear は端末ごとに OAuth 認証する
+- ChatGPT の Settings > Plugins で Linear と GitHub を Install し、それぞれ Connect する。
+  `.config/codex/config.toml` は両方の canonical plugin ID を有効化するが、アカウントへの導入と接続は行わない
 
 ## 非公開設定（dotfiles-private）
 
@@ -353,10 +372,12 @@ AI エージェント（Claude Code / Codex）に対する方針は次の一点�
 そのため、コマンド名だけで一律に拒否せず、秘密値を出力するサブコマンドとそうでないサブコマンドを分けています。
 
 - `.config/agents/AGENTS.md`: 共通の規約。行わないこと・行ってよいこと・確認してから行うことを分けて定義する
-- `.claude/settings.json`: 秘密値を出力する操作の deny と通常の開発操作の allow（`ask` は置かず allow / deny に二分する）、認証情報ファイルの読み取り禁止（`Read` の deny とサンドボックスの `denyRead`）
-- `.claude/hooks/pre-bash-guard.py`: 同じ判断を Bash 実行前フックでも強制し、さらに検査の迂回経路（設定注入・インタプリタ経由の実行・ラッパー経由の実行・コンテナへの受け渡し）と、認証情報ファイルを引数に取る操作を拒否する。
-  不可逆な操作とサンドボックス外の状態変更は、文字列規則では表記を網羅できないため、ここで `ask` を返して確認へ回す（`bypassPermissions` では deny になる）
-- `.config/codex/config.toml` / `.codex/browser/config.toml`: `:workspace` を継承した権限プロファイルで認証情報の読み取りを拒否し、環境変数の除外とブラウザ操作の常時承認を設定
+- `.claude/settings.json`: `auto` の利用、Auto 以外での Bash の既定 Allow、filesystem sandbox の無効化、秘密値を出力する操作の deny、ホーム以下にある既知名の認証情報ファイルに対する組み込み `Read` の禁止
+- `.claude/hooks/pre-bash-guard.py`: Claude Code と Codex の Bash 実行前に同じ判断を強制し、さらに検査の迂回経路（設定注入・インタプリタ経由の実行・ラッパー経由の実行・コンテナへの受け渡し）と、認証情報ファイルを引数に取る操作を拒否する。
+  不可逆な操作と外部・ホストの状態変更は、Claude Code では `ask` を返して確認へ回す（`bypassPermissions` では deny になる）。Codex の PreToolUse は `ask` 非対応のため、hard deny だけをフックで強制し、操作前の確認は共通規約に従う
+- `.config/codex/config.toml` / `.codex/browser/config.toml`: ルート全体の読み書きを既定 Allow とし、CLI が内部利用する設定・認証ストア、秘密鍵、keystore、service-account、環境ファイルは filesystem deny の対象外にする。Codex / Claude Code 自身の認証・履歴と shell 履歴だけを固定 deny にし、通常の CLI 設定環境変数を継承して秘密値だけを除外する。ブラウザ操作・履歴・ファイル転送は常時確認とし、CDP フルアクセスは無効にする
+  CLI 設定や認証ストアの直接取得は共通規約と PreToolUse で拒否する
+  ワークスペース内の任意階層にある認証情報は `.config/agents/AGENTS.md` の禁止規約で扱う
 
 ### AI エージェントの起動
 
@@ -372,7 +393,7 @@ codex
 - 認証情報を一時的に `export` したターミナルからは起動しない
 - 認証は credential helper・キーチェーン・認証エージェントへ委譲する
 - Codex の shell snapshot は無効化済み。Claude Code が内部利用する snapshot と、両エージェントの履歴・file history・paste cache はモデルから直接読めないよう保護する
-- Claude Code の `permissions.defaultMode` は `auto` のまま運用する。
+- Claude Code の `permissions.defaultMode` は `auto` のまま運用する。Auto では任意コード実行になる bare `Bash` allow が一時的に外れ、通常操作は classifier が承認する。Auto 以外のモードへ切り替えると bare `Bash` allow が再び有効になる。filesystem sandbox は CLI の設定・認証ストアの内部利用を妨げないよう、明示的に無効化する。
   `permissions.ask` は空とし、settings は allow / deny に二分する。確認が要る操作はフックが `ask` を返して扱う。
   `bypassPermissions` を明示的に選んだ場合もフックは hard deny を維持し、`ask` を返すはずだった操作は通常のインタプリタコードを除いて拒否する
   `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` は既定以外の permission mode と競合するため使わない
@@ -382,7 +403,7 @@ codex
 - Git と GitHub CLI の認証: 端末ごとに設定する
 - 組織固有・個人の設定（`~/.gitconfig.local`、`~/.zshrc.local` など）: 非公開の dotfiles-private で管理する
 - Codex のローカルユーザー設定（`~/.codex/config.toml`）: 端末ごとに個別設定する（旧 `sandbox_mode` は置かず、公開側の `default_permissions` を継承する）
-- Claude Code のユーザースコープ MCP 登録（`~/.claude.json`）: 端末ごとに個別設定する
+- Claude Code の生のユーザースコープ MCP 登録（`~/.claude.json`）と claude.ai コネクタ: 端末・アカウントごとに設定する。公式プラグインで安全に代替できる共通 MCP は `.claude/settings.json` の `enabledPlugins` で管理する
 - Brewfile でコメントアウトしているアプリ: 導入手段を端末ごとに選ぶ
 - 非公開 Agent Skills の内容: 非公開リポジトリで管理する
 - 非公開 Codex Custom Pets の内容: 非公開リポジトリで管理する

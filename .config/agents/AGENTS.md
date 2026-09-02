@@ -75,10 +75,9 @@ credential helper、認証エージェント、署名ブローカーが内部で
   - Docker の未整形 `inspect` / `info` / `history` / `compose config` / `compose convert` / `stack config`、TLS 鍵を含みうる `context export`、keystore の秘密値を返す `pass get` / `pass run`、コンテナ内の `env` / `printenv`、完全なプロセス引数を出す `top` / `compose top` / `ps --no-trunc`。秘密を含まない固定 format、`compose config --services` などの集約出力、安全な列だけを指定した `top` は対象外
 - 上記を迂回する操作
   - `git -c core.pager=<コマンド>` などの設定注入と、同等の環境変数の前置（`GIT_SSH_COMMAND`、`GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n`、`GIT_CONFIG_PARAMETERS` など）、`include.path` による別ファイルの読み込み、URL 単位で書く `credential.<url>.helper` / `protocol.<name>.allow` / `url.<base>.insteadOf`
-  - `gh alias` / `gh extension` / `gh config` と `terraform console` / `terragrunt console`（任意のコマンド実行・任意のファイル読み取りになる）。`git` / `gh` / `terraform` の既知でないサブコマンドも、登録済み alias の可能性があるため同じ扱いとする
-  - 実行体・引数・設定ディレクトリを差し替える環境変数（`TF_CLI_ARGS` / `TF_CLI_ARGS_<command>`、`TG_TF_PATH`、`TERRAGRUNT_TFPATH`、`GH_CONFIG_DIR`、`DOCKER_HOST`、`DOCKER_CONFIG`、`DOCKER_CERT_PATH`、`BUILDKIT_HOST`、`BUILDX_BUILDER`、`npm_config_*`）と、設定の探索先そのものを変える `HOME` / `XDG_CONFIG_HOME`。前置代入・直前の `export`・条件分岐や関数の中の `export`・`set -a` 中の代入（`readonly` / `read` / `declare` / `printf -v` などによるものを含む）・関数呼び出しへの前置代入を問わず同じ扱いとする
-  - 同じことをする CLI オプション（docker の `--host` / `-H` / `--context` / `-c` / `--config` / `--tlscacert` / `--tlscert` / `--tlskey`、buildx の `--builder`）
-  - `git config` による設定の永続化（`git config core.hooksPath ...`、`--add include.path ...`、`git config alias.x '!コマンド'` など）。`--get` / `--list` のような読み取り形式は対象外
+  - `terraform console` / `terragrunt console`（`file()` などで任意のファイル読み取りになる）
+  - 実行体や暗黙の引数を差し替える環境変数（Git の pager / editor / SSH / 設定注入、`TF_CLI_ARGS` / `TF_CLI_ARGS_<command>`、`TG_TF_PATH`、`TERRAGRUNT_TFPATH`、`GH_PAGER` / `GH_EDITOR` / `GH_BROWSER` と fallback の `PAGER` / `EDITOR` / `VISUAL` / `BROWSER`、`AWS_PAGER` / `MANPAGER`、shell の起動ファイル・オプションを変える `BASH_ENV` / `ZDOTDIR` / `SHELLOPTS`、`DOCKER_CLI_PLUGIN_EXTRA_DIRS`、`npm_config_call` / `npm_config_script_shell`）と、同じことをする CLI オプション。前置代入・継承環境・直前の `export`・条件分岐や関数の中の `export`・`set -a` / `set -k` 中の代入（`readonly` / `read` / `declare` / `printf -v` などによるものを含む）・関数呼び出しへの前置代入を問わず同じ扱いとする。CLI の仕様上、空値が pager を無効化する場合は許可する
+  - `git config` による外部コマンド・別設定ファイルの永続的な注入（`git config core.hooksPath ...`、`--add include.path ...`、`git config alias.x '!コマンド'` など）
   - 無害な名前の symlink 経由での指定（実体が `.env` や `*.tfstate` なら同じ扱いとする）
   - 受け取った文字列を shell へ渡すラッパー経由の実行（`npx -c`、`npm exec -c`、`script -c`、`flock -c`、`git submodule foreach`、`mise exec -- <コマンド>`）。中身は元のコマンドと同じ基準で判断する
   - エディタや sqlite3 から shell へ抜ける指定（`vim -c ':!コマンド'`、`+!コマンド`、`:terminal`、`sqlite3` の `.shell` / `.system` / `.load` / `.once |コマンド`）
@@ -89,7 +88,7 @@ credential helper、認証エージェント、署名ブローカーが内部で
   - 入力リダイレクトやオプションへの連結による読み取り指定（`< ~/.aws/credentials`、`--opt=<パス>`、`gh api -F body=@<パス>`）
   - コンテナ内の標準 reader で保護対象を file operand にすることと、`tar` で保護対象を archive へ取り込むこと
   - `rsync --password-file` と、`file://` / `fileb://` で認証情報ファイルを指定すること
-  - 認証情報を持つ環境変数の値を引数へ展開すること（`$GITHUB_TOKEN`、`$SSH_AUTH_SOCK`、標準の proxy 変数など）と、認証ファイルの保存先を示す標準変数（AWS・Kubernetes・コンテナ・GitHub・OCM・Helm・PostgreSQL・パッケージ管理など）を使って内容を読むこと。proxy の暗黙利用や値を返さない存在確認は対象外
+  - 認証情報を持つ環境変数へ平文を設定することと、その値を引数へ明示展開すること（`$GITHUB_TOKEN`、`$SSH_AUTH_SOCK`、userinfo 付き proxy など）。認証ファイルの保存先を示す標準変数を reader へ展開して内容を読むことも含む。CLI 自身による認証エージェント・proxy・設定パスの暗黙利用と、値を返さない存在確認は対象外
   - 大文字小文字を変えた表記（macOS では同じファイルに届くため、`~/.SSH/ID_ED25519` も同じ扱いとする）
 
 #### 行ってよいこと
@@ -100,6 +99,7 @@ credential helper、認証エージェント、署名ブローカーが内部で
   - `gh auth status`（`--show-token` なし）、`ghtkn info`、`aws sts get-caller-identity`、`kubectl get pods`、`oc get pods`、`rosa list clusters`、`uv auth dir`、`vault status`
   - `security find-certificate -p` と、`security export -t certs` / `-t pubKeys`（公開証明書・公開鍵だけを明示した出力）
 - 認証情報を扱わない通常の Git・AWS・コンテナ操作
+- `AWS_CONFIG_FILE`、`KUBECONFIG`、`GH_CONFIG_DIR`、`DOCKER_HOST` / `DOCKER_CONFIG`、`TF_CLI_CONFIG_FILE`、`HOME` / `XDG_CONFIG_HOME` などの標準的な設定・接続先変数と、それに対応する通常の CLI オプション。これらを reader へ渡して内容を出力する操作は対象外
 - `--raw` を伴わない `kubectl config view`、`aws configure get region` のような非秘密の設定参照
 - AWS CLI のローカル `help` / `--version`、標準 API の `--generate-cli-skeleton` と、秘密を返さないと確認できた API の `--dry-run`
 - 認証情報ファイルの内容を読まない `test -e` / `test -f` による存在確認
@@ -114,7 +114,8 @@ credential helper、認証エージェント、署名ブローカーが内部で
 
 認証状態を変えるだけで秘密値を出力しない操作は、一律禁止せず、この確認を経て実行できる。
 `op signin` は session token 自体を出力するため例外として禁止する。
-保護対象パスへの書き込み・移動・削除は読み取りとして拒否せず、この確認を経て実行できる。
+保護対象パスへの書き込み・移動・削除は、内容を読まないことが明確な操作に限り、この確認を経て実行できる。
+ただし、Codex の filesystem `deny` 対象は読み取り・書き込み・移動・削除が、Claude Code の `Read` deny 対象は Read / Edit / Write が技術的に拒否される。ランタイムの deny に一致する操作が必要な場合は、ユーザーが端末で行う。
 
 判断はコマンド単位の禁止リストではなく、「読み取りだけで済むと確かめられるか」で行う。
 確かめられない場合は確認する。
@@ -161,24 +162,16 @@ credential helper、認証エージェント、署名ブローカーが内部で
 - 基本は処理の意味・役割を1行で説明し、必要な場合だけ実装理由をさらに1行で補う。理由の1行だけでもよく、全処理への追加や2行への統一はしない
 - 変更履歴・修正経緯・PR説明・ライブラリの一般論・長い背景説明をインラインコメントに入れない
 
-## 優先ツール
+## 外部仕様の確認
 
-### Context7（外部仕様の確認）
-
-利用可能なら、以下の仕様確認で Context7 を優先する。
-
-- バージョンに依存する仕様
-- モデルの知識カットオフ以降に変わりうる、更新頻度の高いライブラリや API
-- 知名度が低く、モデルの知識が不確かなライブラリや API
-
-安定した著名ライブラリの一般仕様は、組み込みの Web 検索・取得で確認してよい。
-最新仕様や変更点が問題になりうる場合は、モデルの記憶だけで断定しない。
-
-Context7 で取得できない場合は、以下の一次情報を使う。
+バージョンに依存する仕様、更新頻度の高いライブラリや API、知名度が低く不確かな仕様は、以下の一次情報を使う。
 
 - 公式ドキュメント
 - リリースノート
 - ソースコード
+
+安定した著名ライブラリの一般仕様は、組み込みの Web 検索・取得で確認してよい。
+最新仕様や変更点が問題になりうる場合は、モデルの記憶だけで断定しない。
 
 ### ツールが利用できない場合
 
@@ -193,6 +186,7 @@ Context7 で取得できない場合は、以下の一次情報を使う。
 
 - テストを新規作成・追加しない。既存ファイルへのテストケース追加も行わない
 - テスト追加の代わりに検証用スクリプトやサンプルコードを追加せず、品質向上を理由に例外を設けない
+- 破壊的操作や認証情報取得などを模した検証用文字列は、実行コードとして解釈されるプロセス引数に直接埋め込まず、標準入力または既存の入力ファイルから渡す
 - 既存テストの削除・無効化で問題を隠さない
 - 変更後は影響範囲に応じ、既存テスト・型チェック・lint・ビルドなどを必要な範囲で実行する
 - 既存挙動を変える場合は変更前後を比較し、意図しない退行がないか確認する

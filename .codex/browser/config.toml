@@ -1,9 +1,5 @@
-## ============================================================================
-## Codex browser plugin 設定 (~/.codex/browser/config.toml として配置)
-## ============================================================================
-
-# ログイン済みブラウザは Cookie・セッション経由で機密情報に到達しうるため、
-# CDP フルアクセスは無効にし、ブラウザ操作は常に承認を必須とする
-approval_mode          = "always_ask"  # ブラウザ操作ごとに承認を求める
-history_approval_mode  = "always_ask"  # 履歴アクセスごとに承認を求める
-download_approval_mode = "always_ask"  # ダウンロードごとに承認を求める
+approval_mode = "always_ask"
+history_approval_mode = "always_ask"
+download_approval_mode = "always_ask"
+upload_approval_mode = "always_ask"
+full_cdp_access_enabled = false

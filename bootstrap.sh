@@ -9,11 +9,11 @@
 #   2. macos/defaults.sh による macOS 設定の適用
 #   3. scripts/link-dotfiles.sh による dotfiles のシンボリックリンク展開
 #   4. Homebrew の導入 (未導入時、Xcode Command Line Tools も同時に導入される)
-#   5. macos/Brewfile に基づく不足パッケージのインストールとログイン項目の登録
+#   5. macos/Brewfile に基づく不足パッケージのインストールとログイン項目の追加・削除
 #   6. mise によるグローバル開発ツールの導入
 #   7. scripts/setup-git.sh による Git の共通設定
 #   8. zsh プラグインの取得
-#   9. Claude Code CLI / Codex CLI の導入 (未導入時)
+#   9. Claude Code CLI / Codex CLI の導入と公式 Claude Code プラグインの整理
 #  10. private Codex Custom Pets の取得と一括インストール (アクセス可能な場合)
 #  11. private Agent Skills の取得と同期 (アクセス可能な場合)
 #  12. private dotfiles-private (非公開設定) の取得と適用 (アクセス可能な場合)
@@ -25,6 +25,7 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 failed_steps=()
 skipped_steps=()
+last_run_and_record_status=0
 
 # 非対話 git とリポジトリ検証の共通関数
 setup_common_library="$repo_dir/lib/setup-common.sh"
@@ -74,11 +75,13 @@ run_and_record() {
   shift
 
   if "$@"; then
+    last_run_and_record_status=0
     return 0
   else
     status=$?
   fi
 
+  last_run_and_record_status="$status"
   record_failure "$label" "$status"
 }
 
@@ -264,16 +267,37 @@ sudo -k 2>/dev/null || true
 trap - EXIT
 
 step 'login items'
+
+# Logi Options+ の機能はインストーラが登録するバックグラウンドサービスで常駐する。
+# メインアプリのウィンドウはログイン時に不要なため、旧セットアップで追加した項目を除去する。
+logi_options_app=/Applications/logioptionsplus.app
+run_and_record \
+  "login item removed: $logi_options_app" \
+  osascript - "$logi_options_app" <<'APPLESCRIPT'
+on run argv
+  set targetPath to item 1 of argv
+  tell application "System Events"
+    repeat with existingItem in every login item
+      set existingPath to path of existingItem
+      if existingPath is targetPath or existingPath is (targetPath & "/") then
+        delete existingItem
+      end if
+    end repeat
+  end tell
+end run
+APPLESCRIPT
+
 for login_item_app in \
   /Applications/Rectangle.app \
-  /Applications/Typeless.app \
-  /Applications/logioptionsplus.app; do
+  /Applications/Typeless.app; do
   if [[ ! -d "$login_item_app" ]]; then
-    printf 'warning: skipped login item for missing %s\n' "$login_item_app" >&2
+    record_skip "login item added: $login_item_app (アプリが見つからないため)"
     continue
   fi
 
-  if ! osascript - "$login_item_app" <<'APPLESCRIPT'
+  run_and_record \
+    "login item added: $login_item_app" \
+    osascript - "$login_item_app" <<'APPLESCRIPT'
 on run argv
   set targetPath to item 1 of argv
   tell application "System Events"
@@ -284,9 +308,6 @@ on run argv
   end tell
 end run
 APPLESCRIPT
-  then
-    printf 'warning: failed to add login item %s\n' "$login_item_app" >&2
-  fi
 done
 
 # ============================================================================
@@ -339,7 +360,7 @@ else
 fi
 
 # ============================================================================
-# Claude Code CLI / Codex CLI
+# Claude Code CLI / 公式プラグイン / Codex CLI
 # ============================================================================
 
 step 'Claude Code'
@@ -347,6 +368,140 @@ if ! command -v claude >/dev/null 2>&1 && [[ ! -x "$HOME/.local/bin/claude" ]]; 
   run_and_record \
     'Claude Code installer' \
     run_downloaded_installer https://claude.ai/install.sh /bin/bash
+fi
+
+claude_executable="$(command -v claude 2>/dev/null || true)"
+if [[ -z "$claude_executable" && -x "$HOME/.local/bin/claude" ]]; then
+  claude_executable="$HOME/.local/bin/claude"
+fi
+
+if [[ -z "$claude_executable" ]]; then
+  record_skip 'Claude Code plugins (Claude Code が使えないため)'
+elif ! command -v jq >/dev/null 2>&1; then
+  record_skip 'Claude Code plugins (jq が使えないため)'
+elif claude_marketplaces="$(
+  "$claude_executable" plugin marketplace list --json |
+    jq -ce '
+      if type == "array" then
+        [.[] | objects | .name? | strings]
+      else
+        error("expected an array")
+      end
+    '
+)"; then
+  claude_official_marketplace_ready=1
+  if ! jq -e \
+    'index("claude-plugins-official") != null' \
+    <<<"$claude_marketplaces" >/dev/null; then
+    run_and_record \
+      'Claude Code marketplace: claude-plugins-official' \
+      "$claude_executable" plugin marketplace add \
+      anthropics/claude-plugins-official --scope user
+    claude_marketplace_add_status="$last_run_and_record_status"
+
+    if claude_marketplaces="$(
+      "$claude_executable" plugin marketplace list --json |
+        jq -ce '
+          if type == "array" then
+            [.[] | objects | .name? | strings]
+          else
+            error("expected an array")
+          end
+        '
+    )" && jq -e \
+      'index("claude-plugins-official") != null' \
+      <<<"$claude_marketplaces" >/dev/null; then
+      :
+    else
+      status=$?
+      claude_official_marketplace_ready=0
+      if ((claude_marketplace_add_status == 0)); then
+        record_failure 'Claude Code marketplace verification' "$status"
+      fi
+      record_skip 'Claude Code plugins (公式 marketplace を登録できないため)'
+    fi
+  fi
+
+  if ((claude_official_marketplace_ready)); then
+    if claude_plugins="$(
+      "$claude_executable" plugin list --json |
+        jq -ce '
+          if type == "array" then
+            [
+              .[]
+              | objects
+              | select(.scope == "user")
+              | select(.id? | type == "string")
+              | {id, enabled: (.enabled == true)}
+            ]
+          else
+            error("expected an array")
+          end
+        '
+    )"; then
+      if jq -e \
+        'any(.[]; .id == "context7@claude-plugins-official")' \
+        <<<"$claude_plugins" >/dev/null; then
+        run_and_record \
+          'Claude Code plugin removed: context7@claude-plugins-official' \
+          "$claude_executable" plugin uninstall context7@claude-plugins-official --scope user
+      fi
+
+      for claude_plugin in \
+        linear@claude-plugins-official \
+        microsoft-docs@claude-plugins-official \
+        github@claude-plugins-official; do
+        if jq -e --arg plugin "$claude_plugin" \
+          'any(.[]; .id == $plugin)' \
+          <<<"$claude_plugins" >/dev/null; then
+          continue
+        fi
+
+        run_and_record \
+          "Claude Code plugin: $claude_plugin" \
+          "$claude_executable" plugin install "$claude_plugin" --scope user
+      done
+
+      if claude_plugins="$(
+        "$claude_executable" plugin list --json |
+          jq -ce '
+            if type == "array" then
+              [
+                .[]
+                | objects
+                | select(.scope == "user")
+                | select(.id? | type == "string")
+                | {id, enabled: (.enabled == true)}
+              ]
+            else
+              error("expected an array")
+            end
+          '
+      )"; then
+        if jq -e '
+          any(
+            .[];
+            .id == "github@claude-plugins-official" and .enabled
+          )
+        ' <<<"$claude_plugins" >/dev/null; then
+          run_and_record \
+            'Claude Code plugin disabled: github@claude-plugins-official' \
+            "$claude_executable" plugin disable \
+            github@claude-plugins-official --scope user
+        fi
+      else
+        status=$?
+        record_failure 'Claude Code plugin list after install' "$status"
+      fi
+    else
+      status=$?
+      record_failure 'Claude Code plugin list' "$status"
+    fi
+  fi
+else
+  status=$?
+  record_failure 'Claude Code marketplace list' "$status"
+  record_skip 'Claude Code plugins (公式 marketplace を確認できないため)'
 fi
 
 step 'Codex'

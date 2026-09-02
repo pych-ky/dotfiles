@@ -18,7 +18,6 @@ review_model = "gpt-5.6-sol"  # コードレビュー用モデル
 # 推論関連
 model_reasoning_effort   = "xhigh"   # 推論の深さ (low / medium / high / xhigh)
 model_reasoning_summary  = "auto"    # 推論要約の形式 (auto / concise / detailed / none)
-model_verbosity          = "low"     # 応答の詳細度 (low / medium / high)
 hide_agent_reasoning     = true      # エージェント推論過程を非表示
 show_raw_agent_reasoning = false     # 生の推論データを非表示
 
@@ -29,33 +28,66 @@ personality = "pragmatic"  # 性格プリセット (none / friendly / pragmatic)
 web_search = "live"  # Web 検索モード (disabled / cached / live)
 
 # 認証情報の保管場所
-# macOS キーチェーンを AI ツールから利用しない方針のため file 保管とする。
-# ~/.codex/auth.json は Claude 側の読み取り禁止パス (denyRead) に登録済み
+# Codex 自身の認証情報は file 保管とし、外部 CLI の credential store と分ける。
+# Git などが credential helper 経由で Keychain を内部利用することは制限しない。
+# ~/.codex/auth.json は Claude 側の組み込み Read deny に登録済み
 cli_auth_credentials_store = "file"  # CLI 認証情報の保存先 (auto / keyring / file)
 
 
 ## ============================================================================
-## 承認ポリシー & サンドボックス
+## 承認ポリシー & パーミッション
 ## ============================================================================
 
-approval_policy = "on-request"       # 操作の承認要否 (untrusted / on-request / never)
-default_permissions = "hardened"     # 認証情報を読めない workspace 権限を既定にする
+approval_policy     = "on-request"          # 操作の承認要否 (untrusted / on-request / never)
+default_permissions = "保護付きフルアクセス"  # AI エージェント内部データと shell 履歴を除くフルアクセスを既定にする
 
 
 ## ============================================================================
-## 認証情報の読み取り禁止
+## 既定許可と AI エージェント内部データの保護
 ## ============================================================================
 #
-# :workspace の保護を継承しつつ、機密ファイル・ディレクトリだけを deny する。
-# 絶対パスと ~/path の双方で実際の読み取り拒否を確認済み (Codex 0.148.0)。
+# ルート全体を読み書き可能にし、外部 CLI が内部利用する認証材は deny しない。
+# Codex / Claude Code 自身の認証・履歴と shell 履歴だけを固定 deny にする。
+# その他の認証情報の直接取得は AGENTS.md と PreToolUse で拒否する。
 # permission profile は旧 sandbox_mode / [sandbox_workspace_write] と併用しない。
-[permissions.hardened]
-description = "認証情報の読み取りを禁止する既定プロファイル"
-extends = ":workspace"
-filesystem = { glob_scan_max_depth = 8, ":workspace_roots" = { "**/.env" = "deny", "**/.env.*" = "deny", "**/secrets" = "deny", "**/secrets/**" = "deny", "**/credentials" = "deny", "**/credentials/**" = "deny", "**/.git-credentials" = "deny", "**/.netrc" = "deny", "**/.pgpass" = "deny", "**/.npmrc" = "deny", "**/.pypirc" = "deny", "**/.zsh_history" = "deny", "**/.bash_history" = "deny", "**/fish_history" = "deny", "**/gh/hosts.yml*" = "deny", "**/gcloud/credentials.db*" = "deny", "**/gcloud/access_tokens.db*" = "deny", "**/gcloud/application_default_credentials.json*" = "deny", "**/ocm/ocm.json*" = "deny", "**/helm/repositories.yaml*" = "deny", "**/helm/registry/config.json*" = "deny", "**/uv/credentials*" = "deny", "**/uv/credentials*/**" = "deny", "**/.aws/config" = "deny", "**/.docker/config.json" = "deny", "**/containers/auth.json" = "deny", "**/.ocm.json" = "deny", "**/.kube/config" = "deny", "**/.codex/auth.json" = "deny", "**/.claude/.credentials.json" = "deny", "**/.claude.json" = "deny", "**/.claude.json.backup" = "deny", "**/.terraform.d/credentials.tfrc.json" = "deny", "**/.terraformrc" = "deny", "**/.vault-token" = "deny", "**/.cargo/credentials.toml" = "deny", "**/cargo/credentials.toml" = "deny", "**/.curlrc" = "deny", "**/.wgetrc" = "deny", "**/.bundle/config" = "deny", "**/.composer/auth.json" = "deny", "**/composer/auth.json" = "deny", "**/pypoetry/auth.toml" = "deny", "**/.aws/sso" = "deny", "**/.aws/sso/**" = "deny", "**/.aws/cli" = "deny", "**/.aws/cli/**" = "deny", "**/.ssh" = "deny", "**/.ssh/**" = "deny", "**/.gnupg" = "deny", "**/.gnupg/**" = "deny", "**/.config/gcloud" = "deny", "**/.config/gcloud/**" = "deny", "**/.claude/backups" = "deny", "**/.claude/backups/**" = "deny", "**/.azure" = "deny", "**/.azure/**" = "deny", "**/.zsh_sessions" = "deny", "**/.zsh_sessions/**" = "deny", "**/.bash_sessions" = "deny", "**/.bash_sessions/**" = "deny", "**/Library/Keychains" = "deny", "**/Library/Keychains/**" = "deny", "**/.pg_service.conf" = "deny", "**/pg_service.conf" = "deny", "**/pip.conf" = "deny", "**/*.pem" = "deny", "**/*.key" = "deny", "**/*.p12" = "deny", "**/*.pfx" = "deny", "**/*.p8" = "deny", "**/*.der" = "deny", "**/*.ppk" = "deny", "**/*.jks" = "deny", "**/*.keystore" = "deny", "**/*.kdbx" = "deny", "**/*service-account*.json" = "deny", "**/*service_account*.json" = "deny", "**/*application_default_credentials*.json" = "deny", "**/*.tfstate*" = "deny", "**/id_rsa*" = "deny", "**/id_dsa*" = "deny", "**/id_ed25519*" = "deny", "**/id_ecdsa*" = "deny" }, "~/.ssh" = "deny", "~/.aws" = "deny", "~/.kube" = "deny", "~/.ocm.json" = "deny", "~/.config/ocm/ocm.json*" = "deny", "~/Library/Application Support/ocm/ocm.json*" = "deny", "~/.config/helm/repositories.yaml*" = "deny", "~/.config/helm/registry/config.json*" = "deny", "~/Library/Preferences/helm/repositories.yaml*" = "deny", "~/Library/Preferences/helm/registry/config.json*" = "deny", "~/.gnupg" = "deny", "~/.netrc" = "deny", "~/.git-credentials" = "deny", "~/.pgpass" = "deny", "~/.pg_service.conf" = "deny", "~/.npmrc" = "deny", "~/.pypirc" = "deny", "~/.curlrc" = "deny", "~/.wgetrc" = "deny", "~/.bundle/config" = "deny", "~/.config/composer/auth.json" = "deny", "~/.composer/auth.json" = "deny", "~/.config/pypoetry/auth.toml" = "deny", "~/Library/Application Support/pypoetry/auth.toml" = "deny", "~/.config/pip/pip.conf" = "deny", "~/.pip/pip.conf" = "deny", "~/Library/Application Support/pip/pip.conf" = "deny", "/etc/pip.conf" = "deny", "/Library/Application Support/pip/pip.conf" = "deny", "~/.zsh_history" = "deny", "~/.bash_history" = "deny", "~/.zsh_sessions" = "deny", "~/.bash_sessions" = "deny", "~/.local/share/fish/fish_history" = "deny", "~/.local/share/uv/credentials*" = "deny", "~/.local/share/uv/credentials*/**" = "deny", "~/.config/gcloud" = "deny", "~/Library/Keychains" = "deny", "/Library/Keychains" = "deny", "~/.codex/auth.json" = "deny", "~/.codex/history.jsonl" = "deny", "~/.codex/sessions" = "deny", "~/.codex/sessions/**" = "deny", "~/.codex/archived_sessions" = "deny", "~/.codex/archived_sessions/**" = "deny", "~/.codex/shell_snapshots" = "deny", "~/.codex/shell_snapshots/**" = "deny", "~/.claude/.credentials.json" = "deny", "~/.claude/history.jsonl" = "deny", "~/.claude/projects" = "deny", "~/.claude/projects/**" = "deny", "~/.claude/file-history" = "deny", "~/.claude/file-history/**" = "deny", "~/.claude/paste-cache" = "deny", "~/.claude/paste-cache/**" = "deny", "~/.claude/shell-snapshots" = "deny", "~/.claude/shell-snapshots/**" = "deny", "~/.claude.json" = "deny", "~/.claude.json.backup" = "deny", "~/.claude/backups" = "deny", "~/.config/gh/hosts.yml*" = "deny", "~/.docker/config.json" = "deny", "~/.terraform.d/credentials.tfrc.json" = "deny", "~/.terraformrc" = "deny", "~/.vault-token" = "deny", "~/.azure" = "deny", "~/.config/containers/auth.json" = "deny", "~/.cargo/credentials" = "deny", "~/.cargo/credentials.toml" = "deny" }
+[permissions."保護付きフルアクセス"]
+description = "AI エージェント内部データと shell 履歴を除くフルアクセス"
 
-[permissions.hardened.network]
-enabled = true  # 従来の workspace-write と同様、コマンドのネットワークアクセスを許可
+[permissions."保護付きフルアクセス".filesystem]
+":root" = "write"
+"~/.codex/plugins/cache/openai-bundled/browser" = "read"  # 信頼済み Browser RPC のコードを変更不可にする
+
+# Git、クラウド、コンテナ、パッケージ管理 CLI の設定・認証ストア、
+# 秘密鍵、keystore、service-account、環境ファイルは
+# filesystem deny に入れない。CLI 自身による通常利用を既定で許可し、
+# 内容の直接取得と秘密値を返す操作だけを PreToolUse で拒否する。
+
+# AI エージェントの認証情報・履歴
+"~/.codex/auth.json"                          = "deny"
+"~/.codex/history.jsonl"                      = "deny"
+"~/.codex/sessions"                           = "deny"
+"~/.codex/archived_sessions"                  = "deny"
+"~/.codex/shell_snapshots"                    = "deny"
+"~/.claude/.credentials.json"                 = "deny"
+"~/.claude/history.jsonl"                     = "deny"
+"~/.claude/projects"                          = "deny"
+"~/.claude/file-history"                      = "deny"
+"~/.claude/paste-cache"                       = "deny"
+"~/.claude/shell-snapshots"                   = "deny"
+"~/.claude.json"                              = "deny"
+"~/.claude.json.backup"                       = "deny"
+"~/.claude/backups"                           = "deny"
+
+# シェル履歴
+"~/.zsh_history"                              = "deny"
+"~/.bash_history"                             = "deny"
+"~/.zsh_sessions"                             = "deny"
+"~/.bash_sessions"                            = "deny"
+"~/.local/share/fish/fish_history"            = "deny"
+
+
+[permissions."保護付きフルアクセス".network]
+enabled = true  # コマンドのネットワークアクセスを制限しない
 
 
 ## ============================================================================
@@ -63,56 +95,85 @@ enabled = true  # 従来の workspace-write と同様、コマンドのネット
 ## ============================================================================
 
 [shell_environment_policy]
-inherit                 = "core"  # 親シェルから環境変数を継承する範囲 (all / core / none)
-ignore_default_excludes = false   # *KEY* / *SECRET* / *TOKEN* の既定除外を有効にする
-set                     = { GIT_TERMINAL_PROMPT = "0" }  # Git の認証待ちを防ぐ
+inherit                 = "all"   # CLI の通常設定を継承し、秘密値だけを下で除外する
+ignore_default_excludes = true    # TOKEN_FILE などの非秘密パスまで落とす既定除外は使わない
+set                     = { GIT_TERMINAL_PROMPT = "0", AWS_PAGER = "" }  # Git の認証待ちと AWS の外部 pager 起動を防ぐ
 
 # 除外パターンは正式なテーブル表記で書く。
 # 旧来の exclude / include_only 配列とは併用できない (Codex が読み込み時に弾く)。
 # filter 名は大文字小文字を区別しないため、同名の大小文字違いは重ねない。
 # エージェントは秘密を環境変数へ設定しない新しいターミナルから起動する前提とし、
-# ここは取りこぼしを拾う防御として置く
+# 秘密値と、実行体・暗黙の引数を差し替える変数を除外する。
+# `set` は filter 適用後に評価されるため、安全な空の AWS_PAGER は再設定される。
 [shell_environment_policy.filters]
+"*PASSWORD"                       = "exclude"
+"*PASSPHRASE"                     = "exclude"
+"*PASSWD"                         = "exclude"
+"*_API_KEY"                       = "exclude"
+"*_PRIVATE_KEY"                   = "exclude"
+"*_SECRET"                        = "exclude"
+"*_SECRET_KEY"                    = "exclude"
+"*_TOKEN"                         = "exclude"
+"API_KEY"                         = "exclude"
+"PRIVATE_KEY"                     = "exclude"
+"SECRET"                          = "exclude"
+"TOKEN"                           = "exclude"
 "AWS_ACCESS_KEY_ID"               = "exclude"
-"AWS_CONFIG_FILE"                 = "exclude"
+"AWS_BEARER_TOKEN_BEDROCK"        = "exclude"
 "AWS_CONTAINER_AUTHORIZATION_TOKEN" = "exclude"
-"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE" = "exclude"
-"AWS_CONTAINER_CREDENTIALS_FULL_URI" = "exclude"
-"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI" = "exclude"
 "AWS_SECRET_ACCESS_KEY"           = "exclude"
 "AWS_SECURITY_TOKEN"              = "exclude"
 "AWS_SESSION_TOKEN"               = "exclude"
-"AWS_SHARED_CREDENTIALS_FILE"     = "exclude"
-"AWS_WEB_IDENTITY_TOKEN_FILE"     = "exclude"
-"AZURE_*"                         = "exclude"
-"BUNDLE_USER_CONFIG"              = "exclude"
-"CARGO_HOME"                      = "exclude"
-"CLOUDSDK_CONFIG"                 = "exclude"
 "COMPOSER_AUTH"                   = "exclude"
-"COMPOSER_HOME"                   = "exclude"
-"DOCKER_CERT_PATH"                = "exclude"
-"DOCKER_CONFIG"                   = "exclude"
-"GH_CONFIG_DIR"                   = "exclude"
-"GNUPGHOME"                       = "exclude"
-"GOOGLE_APPLICATION_CREDENTIALS" = "exclude"
-"HELM_CONFIG_HOME"                = "exclude"
+"CREDENTIALS"                     = "exclude"
+"DOCKER_AUTH_CONFIG"              = "exclude"
+"GOOGLE_CREDENTIALS"              = "exclude"
 "HELM_KUBETOKEN"                  = "exclude"
-"HELM_REGISTRY_CONFIG"            = "exclude"
-"HELM_REPOSITORY_CONFIG"          = "exclude"
-"KUBECONFIG"                      = "exclude"
-"NETRC"                           = "exclude"
-"NPM_CONFIG_USERCONFIG"           = "exclude"
-"OCM_CONFIG"                      = "exclude"
-"PGPASSFILE"                      = "exclude"
 "PGPASSWORD"                      = "exclude"
-"PGSERVICEFILE"                   = "exclude"
-"PGSSLKEY"                        = "exclude"
-"PGSYSCONFDIR"                    = "exclude"
-"PIP_CONFIG_FILE"                 = "exclude"
-"REGISTRY_AUTH_FILE"              = "exclude"
-"TF_CLI_CONFIG_FILE"              = "exclude"
-"UV_CREDENTIALS_DIR"              = "exclude"
-"WGETRC"                          = "exclude"
+"TF_TOKEN_*"                      = "exclude"
+"AWS_PAGER"                       = "exclude"
+"BASH_ENV"                        = "exclude"
+"BROWSER"                         = "exclude"
+"DOCKER_CLI_PLUGIN_EXTRA_DIRS"    = "exclude"
+"EDITOR"                          = "exclude"
+"GH_BROWSER"                      = "exclude"
+"GH_EDITOR"                       = "exclude"
+"GH_PAGER"                        = "exclude"
+"GIT_ASKPASS"                     = "exclude"
+"GIT_CONFIG"                      = "exclude"
+"GIT_CONFIG_COUNT"                = "exclude"
+"GIT_CONFIG_GLOBAL"               = "exclude"
+"GIT_CONFIG_KEY_*"                = "exclude"
+"GIT_CONFIG_PARAMETERS"           = "exclude"
+"GIT_CONFIG_SYSTEM"               = "exclude"
+"GIT_CONFIG_VALUE_*"              = "exclude"
+"GIT_EDITOR"                      = "exclude"
+"GIT_EXEC_PATH"                   = "exclude"
+"GIT_EXTERNAL_DIFF"               = "exclude"
+"GIT_PAGER"                       = "exclude"
+"GIT_PROXY_COMMAND"               = "exclude"
+"GIT_SEQUENCE_EDITOR"             = "exclude"
+"GIT_SSH"                         = "exclude"
+"GIT_SSH_COMMAND"                 = "exclude"
+"GIT_TEMPLATE_DIR"                = "exclude"
+"LESSCLOSE"                       = "exclude"
+"LESSOPEN"                        = "exclude"
+"MANPAGER"                        = "exclude"
+"PAGER"                           = "exclude"
+"SHELLOPTS"                       = "exclude"
+"SSH_ASKPASS"                     = "exclude"
+"TERRAGRUNT_AUTH_PROVIDER_CMD"    = "exclude"
+"TERRAGRUNT_IAC_ENGINE"           = "exclude"
+"TERRAGRUNT_TFPATH"               = "exclude"
+"TF_CLI_ARGS*"                    = "exclude"
+"TF_REATTACH_PROVIDERS"           = "exclude"
+"TG_AUTH_PROVIDER_CMD"            = "exclude"
+"TG_IAC_ENGINE"                   = "exclude"
+"TG_TF_PATH"                      = "exclude"
+"VISUAL"                          = "exclude"
+"ZDOTDIR"                         = "exclude"
+"npm_config_call"                 = "exclude"
+"npm_config_script_shell"         = "exclude"
 
 
 ## ============================================================================
@@ -133,6 +194,9 @@ status_line = [
   "fast-mode",             # Fast モードの有効/無効
 ]
 
+[tui.keymap.composer]
+submit = "ctrl-enter"  # Ctrl+Enter で送信
+
 
 ## ============================================================================
 ## 履歴
@@ -147,18 +211,23 @@ persistence = "save-all"  # 履歴の永続化 (none / save-all)
 ## ============================================================================
 
 [features]
+hooks              = true   # 共通 PreToolUse ガードを有効にする
 shell_snapshot     = false  # shell 状態や環境変数を平文ファイルへ保存しない
 prevent_idle_sleep = true  # アイドル時のスリープを防止
 
 
 ## ============================================================================
-## MCP サーバー
+## 実行前ガード
 ## ============================================================================
 
-# Context7
-[mcp_servers.context7]
-command = "npx"
-args = ["-y", "@upstash/context7-mcp@latest"]
+[[hooks.PreToolUse]]
+matcher = "^Bash$"
+
+[[hooks.PreToolUse.hooks]]
+type          = "command"
+command       = "$HOME/.claude/hooks/pre-bash-guard.sh"
+timeout       = 30
+statusMessage = "Bash コマンドを検査中"
 
 
 ## ============================================================================
@@ -173,8 +242,16 @@ enabled = true
 [plugins."chrome@openai-bundled"]
 enabled = true
 
+# Computer Use
+[plugins."computer-use@openai-bundled"]
+enabled = true
+
 # GitHub
 [plugins."github@openai-curated"]
+enabled = true
+
+# Linear
+[plugins."linear@openai-curated"]
 enabled = true
 
 # Slack
@@ -222,8 +299,11 @@ enabled = true
 # 提案表示
 ambient-suggestions-enabled = false  # 提案表示を無効化
 
+# ブラウザ
+"browser-family-enabled:chrome" = true  # Composer で Chrome のブラウザ参照を有効にする
+
 # 入力操作
-composerEnterBehavior                     = "cmdIfMultiline"  # 複数行入力時は Cmd/Ctrl+Enter で送信
+composerEnterBehavior                     = "cmdAlways"       # 常に Cmd/Ctrl+Enter で送信
 hotkey-window-projectless-default-enabled = true              # グローバルホットキーでプロジェクトなしウィンドウを開く
 
 # 実行中の follow-up
@@ -236,6 +316,7 @@ git-pr-instructions     = "簡潔な日本語で記述してください。"
 # 表示
 conversationDetailMode    = "STEPS_COMMANDS"  # 会話詳細にステップとコマンドを表示
 git-show-sidebar-pr-icons = true              # Git サイドバーに PR アイコンを表示
+mac-menu-bar-enabled      = false             # メニューバー項目を表示しない
 show-context-window-usage = true              # コンテキスト使用量を表示
 
 # レビュー
