@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""危険な Bash コマンドを検出する Claude PreToolUse スキャナー。"""
+"""危険な Bash コマンドを検出する PreToolUse スキャナー。"""
 
 import json
 import os
@@ -55,6 +55,10 @@ AWS_CONFIGURE_SECRET_REASON = (
     "AWS の credential 設定は configure get で出力したり、"
     "configure set の平文引数で保存したりできません。"
 )
+AWS_PAGER_REASON = (
+    "AWS CLI の pager を外部コマンドへ差し替える環境変数やオプションは"
+    "許可していません。"
+)
 DOCKER_MOUNT_REASON = (
     "認証情報を含むパスを docker のボリューム・ビルドコンテキストとして"
     "渡すことは許可していません。"
@@ -71,10 +75,6 @@ DOCKER_SOCKET_REASON = (
     "(コンテナ側から、この検査を通らない新しいマウントを作れるため)。"
 )
 ENV_DUMP_REASON = "printenv / env による環境変数の一括出力は許可していません。"
-UNKNOWN_SUBCOMMAND_REASON = (
-    "このコマンドの未知のサブコマンドは許可していません "
-    "(shell alias などで任意のコマンドを起動できるため)。"
-)
 DESTRUCTIVE_CONFIRM_REASON = (
     "取り消せない、または検査を迂回する操作のため、実行前に確認してください。"
 )
@@ -212,41 +212,6 @@ GH_VALUE_OPTIONS = {
     "-c",
     "--codespace",
 }
-# gh は shell alias (`gh alias set x '!command'`) と extension で任意のコマンドを
-# 起動できる。サンドボックス外で動くため、既知のサブコマンドだけを通し、
-# 知らない語 (= alias / extension) は拒否する
-GH_SAFE_SUBCOMMANDS = {
-    "api",
-    "attestation",
-    "browse",
-    "accessibility",
-    "cache",
-    "codespace",
-    "completion",
-    "cs",
-    "gitignore",
-    "license",
-    "preview",
-    "gist",
-    "help",
-    "issue",
-    "label",
-    "org",
-    "pr",
-    "project",
-    "release",
-    "repo",
-    "ruleset",
-    "run",
-    "search",
-    "secret",
-    "ssh-key",
-    "gpg-key",
-    "status",
-    "variable",
-    "version",
-    "workflow",
-}
 # 認証・秘密の状態を変える gh の操作。理由を具体的に示すため個別に持つ
 # (これ以外の状態変更は GH_READONLY_* の allowlist から漏れる形で確認へ回る)
 GH_CONFIRM_SUBCOMMANDS = {
@@ -267,6 +232,7 @@ GH_CONFIRM_SUBCOMMANDS = {
 # 読み取りだけで済む gh の動詞 (第 2 語)。
 # ここに無い操作は、外部の状態を変えうるものとして確認へ回す
 GH_READONLY_VERBS = {
+    "get",
     "list",
     "view",
     "status",
@@ -319,15 +285,6 @@ GH_PASSTHROUGH_REASON = (
     "許可していません (core.hooksPath や ProxyCommand で任意のコマンドを"
     "起動できます)。"
 )
-# alias / extension / config は任意コマンドの起動口になるため拒否する。
-# `gh auth status` のような参照は GH_SAFE_SUBCOMMANDS 側で通る
-GH_DENIED_SUBCOMMANDS = {
-    ("alias",),
-    ("extension",),
-    ("extensions",),
-    ("ext",),
-    ("config",),
-}
 # gh に外部コマンドを起動させる環境変数
 # gh api で外部の状態を変える指定。
 # 明示した HTTP method に加えて、フィールド指定は暗黙に POST になる
@@ -366,58 +323,10 @@ GH_EXEC_ENV_VARS = {
     "VISUAL",
     "GH_BROWSER",
     "BROWSER",
-    # 設定ディレクトリを差し替えると、そこの config.yml に書いた
-    # `alias: {x: '!command'}` がそのまま任意コマンドの起動になる
-    # (探索先そのものを変える XDG_CONFIG_HOME は CONFIG_ROOT_ENV_VARS で見る)
-    "GH_CONFIG_DIR",
 }
 
-# terraform / terragrunt も excludedCommands でサンドボックス外を走る。
-# console は file() などで任意のファイルを読めるため拒否し、
-# 知らないサブコマンドは通さない
-TERRAFORM_SAFE_SUBCOMMANDS = {
-    "apply",
-    "destroy",
-    "fmt",
-    "force-unlock",
-    "get",
-    "graph",
-    "help",
-    "import",
-    "init",
-    "login",
-    "logout",
-    "metadata",
-    "modules",
-    "output",
-    "plan",
-    "providers",
-    "refresh",
-    "show",
-    "state",
-    "taint",
-    "test",
-    "untaint",
-    "validate",
-    "version",
-    "workspace",
-    # terragrunt 固有
-    "catalog",
-    "dag",
-    "find",
-    "hcl",
-    "hclfmt",
-    "hclvalidate",
-    "info",
-    "list",
-    "render",
-    "render-json",
-    "run",
-    "run-all",
-    "scaffold",
-    "stack",
-    "terragrunt-info",
-}
+# terraform / terragrunt の console は file() などで任意のファイルを
+# 読めるため拒否する。
 TERRAFORM_DENIED_SUBCOMMANDS = {("console",)}
 # state には平文の秘密値が含まれうる。標準出力へ返す操作は拒否する
 TERRAFORM_SECRET_SUBCOMMANDS = {
@@ -495,10 +404,7 @@ TERRAFORM_EXEC_OPTION_REASON = (
 # TF_CLI_ARGS / TF_CLI_ARGS_<command> は、コマンドラインに書いていない
 # `-json` のような秘密を出すオプションを後から差し込める
 TERRAFORM_EXEC_ENV_VARS = {
-    "TF_CLI_CONFIG_FILE",
-    "TERRAFORM_CONFIG",
     "TF_REATTACH_PROVIDERS",
-    "TF_PLUGIN_CACHE_DIR",
     "TG_TF_PATH",
     "TERRAGRUNT_TFPATH",
     "TG_IAC_ENGINE",
@@ -508,17 +414,13 @@ TERRAFORM_EXEC_ENV_VARS = {
 }
 TERRAFORM_EXEC_ENV_PREFIXES = ("TF_CLI_ARGS",)
 TERRAFORM_EXEC_ENV_REASON = (
-    "terraform / terragrunt の実行ファイル・引数・設定ファイルを差し替える"
-    "環境変数の指定は許可していません "
+    "terraform / terragrunt の実行ファイル・引数を差し替える環境変数の"
+    "指定は許可していません "
     "(コマンドラインに現れないオプションを後から差し込めるため)。"
 )
 TERRAFORM_SECRET_REASON = (
     "terraform の state や出力には平文の秘密値が含まれうるため、"
     "それを標準出力へ返す操作は許可していません。"
-)
-GH_EXEC_SUBCOMMAND_REASON = (
-    "gh の alias / extension / config は任意のコマンドを起動できるため"
-    "許可していません (`gh alias set x '!command'` など)。"
 )
 AWS_GLOBAL_VALUE_OPTIONS = {
     "--profile",
@@ -531,7 +433,6 @@ AWS_GLOBAL_VALUE_OPTIONS = {
     "--cli-connect-timeout",
     "--color",
     "--cli-binary-format",
-    "--cli-pager",
     "--cli-auto-prompt",
 }
 AWS_GLOBAL_BOOLEAN_OPTIONS = {
@@ -921,11 +822,17 @@ AWS_SSM_DECRYPT_SUBCOMMANDS = {
 }
 # 認証状態を変える AWS の操作。利用者が開始するものとして確認へ回す
 AWS_CONFIRM_SUBCOMMANDS = {
+    ("login",),
+    ("logout",),
     ("sso", "login"),
     ("sso", "logout"),
     ("configure", "sso"),
     ("configure", "sso-session"),
+    ("configure", "set"),
+    ("configure", "import"),
 }
+AWS_PAGER_ENV_VARS = {"AWS_PAGER", "PAGER"}
+AWS_HELP_PAGER_ENV_VARS = {"MANPAGER", "PAGER"}
 # `aws configure get <name>` は保存済みの設定値を出力する。
 # region のような無害な項目もあるため、名前が認証情報を指す場合だけ拒否する
 AWS_CONFIGURE_SECRET_MARKERS = frozenset(
@@ -1125,6 +1032,7 @@ CREDENTIAL_FILE_REASON = (
 CREDENTIAL_FILE_COMPONENTS = (
     ".aws/credentials",
     ".aws/config",
+    ".aws/login",
     ".aws/sso",
     ".aws/cli",
     ".ssh",
@@ -1190,6 +1098,7 @@ CREDENTIAL_FILE_NAMES = (
     ".bash_history",
     "fish_history",
     "pip.conf",
+    "key.pem",
     "id_rsa",
     "id_dsa",
     "id_ecdsa",
@@ -1214,27 +1123,47 @@ CREDENTIAL_PATH_FRAGMENTS = (
     ".composer/auth.json",
     "composer/auth.json",
 )
-# 秘密鍵・証明書ストアの拡張子
+# 拡張子だけで認証情報と判断できる秘密鍵・証明書ストア
 CREDENTIAL_FILE_SUFFIXES = (
-    ".pem",
     ".p12",
     ".pfx",
     ".p8",
-    ".der",
     ".ppk",
     ".key",
     ".keystore",
     ".jks",
     ".kdbx",
 )
-# 秘密鍵ファイル名の前方一致。`id_ed25519_work` のような接尾辞付きも対象にする
-# (Claude 側の `Read(**/id_ed25519*)` と範囲を揃える)
+# PEM / DER は公開証明書にも使われるため、境界付きの秘密鍵名だけを対象にする
+PRIVATE_KEY_CONTAINER_SUFFIXES = (".pem", ".der")
+PRIVATE_KEY_STEM_NAMES = (
+    "priv",
+    "private",
+    "client-key",
+    "client_key",
+    "server-key",
+    "server_key",
+    "tls-key",
+    "tls_key",
+)
+PRIVATE_KEY_STEM_MARKERS = (
+    "privkey",
+    "priv-key",
+    "priv_key",
+    "privatekey",
+    "private-key",
+    "private_key",
+)
+PRIVATE_KEY_STEM_PREFIXES = ("priv-", "priv_")
+PRIVATE_KEY_STEM_SUFFIXES = ("-priv", "_priv", "-private", "_private")
+# 静的 path deny と異なり `.pub` を除外できるため、`id_ed25519_work` のような
+# 接尾辞付き秘密鍵も前方一致で対象にする
 CREDENTIAL_FILE_PREFIXES = ("id_rsa", "id_dsa", "id_ecdsa", "id_ed25519")
 # 名前の途中に現れても保管先とみなす部分文字列。
 # terraform state は平文の秘密値を含みうるうえ、`terraform.tfstate.backup` の
 # ように接尾辞が変わるため、接尾辞ではなく部分一致で見る
 CREDENTIAL_FILE_INFIXES = (".tfstate",)
-# 環境変数ファイル。Claude の Read deny (./.env, ./.env.*) と対にする。
+# 環境変数ファイル。Claude の作業ディレクトリ・ホーム向け Read deny と対にする。
 # 値を持たない雛形は追跡してよいため、除外する
 DOTENV_TEMPLATE_NAMES = (
     ".env.example",
@@ -1280,11 +1209,19 @@ SENSITIVE_PARAMETER_NAMES = {
     "HELM_KUBETOKEN",
     "PGPASSWORD",
 }
+# 値ではなく、認証エージェントや接続先を指す通常設定。
+NON_SECRET_RUNTIME_PARAMETER_NAMES = {
+    "SSH_AUTH_SOCK",
+    "SSH_AGENT_PID",
+    "GPG_AGENT_INFO",
+    "DOCKER_HOST",
+}
 # 値そのものは秘密でないが、認証情報の保存先を指す環境変数。
 # 内容読み取りは拒否し、厳密な test -e / test -f だけは許可する。
 CREDENTIAL_PATH_PARAMETER_NAMES = {
     "AWS_CONFIG_FILE",
     "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+    "AWS_LOGIN_CACHE_DIRECTORY",
     "AWS_SHARED_CREDENTIALS_FILE",
     "AWS_WEB_IDENTITY_TOKEN_FILE",
     "AZURE_CONFIG_DIR",
@@ -1330,26 +1267,24 @@ PROXY_PARAMETER_NAMES = frozenset(
     }
 )
 CREDENTIAL_VARIABLE_REASON = (
-    "認証情報を持つ環境変数の値を、コマンドの引数へ展開する操作は"
-    "許可していません。"
+    "認証情報を持つ環境変数へ平文を設定したり、その値をコマンドの引数へ"
+    "展開したりする操作は許可していません。"
 )
 
-DOCKER_VALUE_OPTIONS = {"-H", "--host", "--context", "--config", "--log-level"}
-# 接続先やプラグインの置き場を差し替える環境変数。
-# docker はサンドボックス外で走るため、別のデーモンや別の実行体へ向けられる
+DOCKER_VALUE_OPTIONS = {
+    "-H",
+    "--host",
+    "-c",
+    "--context",
+    "--config",
+    "--log-level",
+    "--tlscacert",
+    "--tlscert",
+    "--tlskey",
+}
+# CLI プラグインの探索先を差し替える環境変数。
 DOCKER_EXEC_ENV_VARS = {
-    "DOCKER_HOST",
-    "DOCKER_CONFIG",
-    "DOCKER_CONTEXT",
     "DOCKER_CLI_PLUGIN_EXTRA_DIRS",
-    "BUILDX_CONFIG",
-    # 接続に使う TLS 認証材の置き場。サンドボックス外で読まれる
-    "DOCKER_CERT_PATH",
-    "DOCKER_TLS",
-    "DOCKER_TLS_VERIFY",
-    # BuildKit の接続先と builder の選択
-    "BUILDKIT_HOST",
-    "BUILDX_BUILDER",
 }
 # 認証情報そのものをビルドへ渡す環境変数。
 # 外部状態の変更 (確認) ではなく、認証情報の受け渡しとして拒否する
@@ -1360,29 +1295,8 @@ DOCKER_CREDENTIAL_ENV_VARS = {
 # SSH agent の socket をビルドへ渡す環境変数
 DOCKER_SSH_ENV_VARS = {"BUILDX_BAKE_GIT_SSH"}
 DOCKER_EXEC_ENV_REASON = (
-    "docker の接続先やプラグインの置き場を差し替える環境変数の指定は"
-    "許可していません (別のデーモンや別の実行体へ向けられるため)。"
-)
-# 環境変数と同じことをする CLI オプション。
-# `--host` / `--context` は接続先、`--config` は認証情報を含む設定ディレクトリ、
-# `--tls*` は接続に使う鍵を指す
-# `-c` は `--context` の短縮形。サブコマンドの `-c` (`docker run -c 512` の
-# --cpu-shares など) と紛れないよう、サブコマンドより前だけを見る
-DOCKER_EXEC_OPTIONS = {
-    "-H",
-    "--host",
-    "-c",
-    "--context",
-    "--config",
-    "--tlscacert",
-    "--tlscert",
-    "--tlskey",
-}
-# buildx のサブコマンドオプション。グローバルの位置には来ないため別に見る
-DOCKER_BUILDER_OPTIONS = {"--builder"}
-DOCKER_EXEC_OPTION_REASON = (
-    "docker の接続先・設定ディレクトリ・TLS 鍵を指定するオプションは"
-    "許可していません (別のデーモンや別の設定をサンドボックス外で使えるため)。"
+    "docker の CLI プラグイン探索先を差し替える環境変数の指定は"
+    "許可していません (別の実行体へ向けられるため)。"
 )
 DOCKER_MOUNT_OPTIONS = {"-v", "--volume", "--mount"}
 # ファイルの内容をそのままコンテナへ渡すオプション。マウントと同じ経路になる
@@ -1714,24 +1628,6 @@ DOCKER_COPY_SUBCOMMANDS = (
     ("compose", "cp"),
 )
 CONTAINER_COMMANDS = {"docker", "podman", "nerdctl"}
-
-# settings.json の sandbox.excludedCommands に載る、サンドボックス外で走るコマンド。
-# これらは denyRead が効かないため、設定の探索先を差し替える指定も塞ぐ
-SANDBOX_EXCLUDED_COMMANDS = CONTAINER_COMMANDS | {
-    "git",
-    "gh",
-    "terraform",
-    "terragrunt",
-}
-# どのコマンドでも設定ファイルの探索先そのものを変えてしまう環境変数。
-# 差し替えた先に alias や credential.helper を書けば任意のコマンドを起こせる
-CONFIG_ROOT_ENV_VARS = {"HOME", "XDG_CONFIG_HOME"}
-CONFIG_ROOT_ENV_REASON = (
-    "サンドボックス外で走るコマンドの設定探索先 (HOME / XDG_CONFIG_HOME) を"
-    "差し替える指定は許可していません "
-    "(alias や credential.helper を書いた別の設定を読ませられるため)。"
-)
-
 # 名前だけで認証情報とみなす環境変数の部分文字列。
 # Codex の既定除外 (*KEY* / *SECRET* / *TOKEN*) と同じ考え方で、
 # 値を見ずに名前で判定する
@@ -1876,46 +1772,9 @@ GIT_CONFIRM_SUBCOMMANDS = {
     ("worktree", "remove"),
     ("worktree", "prune"),
 }
-# git が知っているサブコマンド。ここに無い語は `git config alias.x '!command'`
-# で登録された alias の可能性があり、sandbox 外で任意のコマンドを起動できる。
-# `git help -a` の一覧 (ガイド名を含む) をもとにする
-GIT_SAFE_SUBCOMMANDS = {
-    "add", "am", "annotate", "apply", "archimport", "archive", "attributes",
-    "backfill", "bisect", "blame", "branch", "bugreport", "bundle", "cat-file",
-    "check-attr", "check-ignore", "check-mailmap", "check-ref-format",
-    "checkout", "checkout-index", "cherry", "cherry-pick", "citool", "clean",
-    "cli", "clone", "column", "commit", "commit-graph", "commit-tree",
-    "config", "count-objects", "credential", "credential-cache",
-    "credential-store", "cvsexportcommit", "cvsimport", "cvsserver", "daemon",
-    "describe", "diagnose", "diff", "diff-files", "diff-index", "diff-pairs",
-    "diff-tree", "difftool", "fast-export", "fast-import", "fetch",
-    "fetch-pack", "filter-branch", "filter-repo", "fmt-merge-msg",
-    "for-each-ref", "for-each-repo", "format-bundle", "format-chunk",
-    "format-commit-graph", "format-index", "format-pack", "format-patch",
-    "format-rev", "format-signature", "fsck", "gc", "get-tar-commit-id",
-    "gitk", "gitweb", "grep", "gui", "hash-object", "help", "history", "hook",
-    "hooks", "http-backend", "ignore", "imap-send", "index-pack", "init",
-    "instaweb", "interpret-trailers", "last-modified", "lfs", "log",
-    "ls-files", "ls-remote", "ls-tree", "mailinfo", "mailmap", "mailsplit",
-    "maintenance", "merge", "merge-base", "merge-file", "merge-index",
-    "merge-one-file", "merge-tree", "mergetool", "mktag", "mktree", "modules",
-    "multi-pack-index", "mv", "name-rev", "notes", "p4", "pack-objects",
-    "pack-redundant", "pack-refs", "patch-id", "protocol-capabilities",
-    "protocol-common", "protocol-http", "protocol-pack", "protocol-v2",
-    "prune", "prune-packed", "pull", "push", "quiltimport", "range-diff",
-    "read-tree", "rebase", "reflog", "refs", "remote", "repack", "replace",
-    "replay", "repo", "repository-layout", "request-pull", "rerere", "reset",
-    "restore", "rev-list", "rev-parse", "revert", "revisions", "rm", "scalar",
-    "send-email", "send-pack", "sh-i18n", "sh-setup", "shortlog", "show",
-    "show-branch", "show-index", "show-ref", "sparse-checkout", "stash",
-    "status", "stripspace", "submodule", "svn", "switch", "symbolic-ref",
-    "tag", "unpack-file", "unpack-objects", "update-index", "update-ref",
-    "update-server-info", "url-parse", "var", "verify-commit", "verify-pack",
-    "verify-tag", "version", "whatchanged", "worktree", "write-tree",
-}
 # `git config` の読み取り形式と書き込み・編集形式。
-# 書き込みは設定ファイルへ残るため、後続のサンドボックス外 `git commit` /
-# `git push` から効いてしまう (`-c` の一時指定と同じ経路が永続化する)
+# 書き込みは設定ファイルへ残り、後続の git から効いてしまう
+# (`-c` の一時指定と同じ経路が永続化する)
 GIT_CONFIG_VALUE_OPTIONS = {
     "-f",
     "--file",
@@ -1955,11 +1814,6 @@ GIT_CONFIG_WRITE_SUBCOMMANDS = {
     "rename-section",
     "remove-section",
 }
-GIT_ALIAS_REASON = (
-    "git の未知のサブコマンドは許可していません "
-    "(`git config alias.x '!command'` で登録した alias から、"
-    "サンドボックス外で任意のコマンドを起動できるため)。"
-)
 GIT_EXEC_INJECTION_REASON = (
     "外部コマンドを起動させる git の設定 (core.pager など) や "
     "同等の環境変数の指定は許可していません "
@@ -2115,9 +1969,7 @@ INTERPRETER_CODE_CONFIRM_REASON = (
 )
 # bypassPermissions では確認ダイアログが出ないため、確認理由はそのまま拒否になる。
 # ただしインタプリタへ渡したコードだけは例外にする。
-# - 外部プロセスの起動と難読化は、モードによらずここまでで deny 済み
-# - インタプリタはサンドボックス外コマンド (excludedCommands) ではないので、
-#   残るコードはサンドボックス内で動き、denyRead により認証情報を読めない
+# 既知の認証情報パス、外部プロセスの起動、難読化はモードによらず deny 済み。
 # ここを拒否にすると、bypassPermissions では一切のスクリプト処理ができなくなる
 BYPASS_ALLOWED_CONFIRMATIONS = {INTERPRETER_CODE_CONFIRM_REASON}
 
@@ -2204,13 +2056,31 @@ PACKAGE_RUNNER_SUBCOMMANDS = {
     "pnpm": frozenset({"exec", "dlx"}),
     "npx": frozenset(),
 }
-# npm は CLI オプションと同じ設定を環境変数でも受け取る。
-# `npm_config_call` はそのままコマンド文字列の指定になる
-NPM_CONFIG_ENV_PREFIXES = ("npm_config_", "NPM_CONFIG_")
+# npm_config_call はそのままコマンド文字列の指定になる。
+NPM_EXEC_ENV_NAMES = {"npm_config_call", "npm_config_script_shell"}
 NPM_CONFIG_ENV_REASON = (
-    "npm の設定を環境変数 (npm_config_*) で注入する指定は許可していません "
-    "(`npm_config_call` などで任意のコマンドを起動できるため)。"
+    "npm に実行コマンドや shell を指定する環境変数は許可していません。"
 )
+SHELL_STARTUP_ENV_VARS = {"BASH_ENV", "ENV", "ZDOTDIR"}
+SHELL_OPTION_ENV_VARS = {"SHELLOPTS"}
+TRACKED_SHELL_OPTIONS = {"allexport", "keyword", "xtrace"}
+
+# 起動元から継承される値はコマンド文字列に現れない。任意コマンドの起動や
+# 暗黙の引数追加に使える名前だけを、値そのものではなく空・非空へ畳んで追跡する。
+INHERITED_EXEC_ENV_NAMES = (
+    GIT_EXEC_ENV_VARS
+    | GH_EXEC_ENV_VARS
+    | TERRAFORM_EXEC_ENV_VARS
+    | AWS_PAGER_ENV_VARS
+    | AWS_HELP_PAGER_ENV_VARS
+    | DOCKER_EXEC_ENV_VARS
+    | DOCKER_CREDENTIAL_ENV_VARS
+    | DOCKER_SSH_ENV_VARS
+    | SHELL_STARTUP_ENV_VARS
+    | SHELL_OPTION_ENV_VARS
+)
+INHERITED_EXEC_ENV_PREFIXES = GIT_EXEC_ENV_PREFIXES + TERRAFORM_EXEC_ENV_PREFIXES
+INHERITED_NONEMPTY_MARKER = "__inherited_nonempty_environment_value__"
 # `--` の後ろを、そのまま別プロセスの argv として起こすラッパー
 ARGV_WRAPPER_SUBCOMMANDS = {"mise": {"exec", "x"}}
 # `script <出力ファイル> <コマンド...>` (macOS 形式) の値を取るオプション
@@ -2341,10 +2211,18 @@ ARITHMETIC_EXPRESSION_MARKER_RE = re.compile(
     r"__arithmetic_expansion__([0-9a-f]*)__"
 )
 ARITHMETIC_COMMAND_MARKER_RE = re.compile(r"__arithmetic_command__([0-9a-f]*)__")
+PARAMETER_ASSIGNMENT_MARKER_RE = re.compile(
+    r"__parameter_assignment__([0-9a-f]*)__"
+)
 NON_STDIN_FD_PATH_RE = re.compile(r"^/(?:dev/fd|proc/self/fd)/[1-9][0-9]*$")
 # 算術式の中の代入 (`i = 0`、`i += 1` など)。`==` とは区別する
 ARITHMETIC_ASSIGNMENT_RE = re.compile(
     r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:[+\-*/%&|^]|<<|>>)?=(?!=)(.*)$", re.S
+)
+ARITHMETIC_MUTATION_NAME_RE = re.compile(
+    r"^\s*(?:\+\+|--)?([A-Za-z_][A-Za-z0-9_]*)\s*"
+    r"(?:(?:[+\-*/%&|^]|<<|>>)?=(?!=)|\+\+|--)",
+    re.S,
 )
 # 引用なしヒアドキュメント本文の中のパラメータ展開
 HEREDOC_PARAMETER_RE = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)")
@@ -2644,6 +2522,52 @@ def aws_global_version_requested(arguments):
         if argument == "--version":
             return True
     return False
+
+
+def environment_value_state(name, values, tainted_names):
+    """環境変数の実効状態を absent / empty / nonempty / unknown で返す。"""
+    if name in values:
+        return "nonempty" if values[name] else "empty"
+    if name in tainted_names:
+        return "unknown"
+    return "absent"
+
+
+def environment_override_is_nonempty(names, values, tainted_names, prefixes=()):
+    """対象環境変数が空でない値へ差し替えられたかを判定する。"""
+    for name in set(values) | set(tainted_names):
+        if name not in names and not name.startswith(prefixes):
+            continue
+        if environment_value_state(name, values, tainted_names) in {
+            "nonempty",
+            "unknown",
+        }:
+            return True
+    return False
+
+
+def aws_external_pager_is_nonempty(arguments, candidates, values, tainted_names):
+    """AWS CLI が実際に選ぶ外部 pager が差し替えられているかを返す。"""
+    help_requested = any(words and words[-1] == "help" for words in candidates)
+    if help_requested:
+        # terminal help は通常出力とは別実装で、MANPAGER、PAGER の順に使う。
+        for name in ("MANPAGER", "PAGER"):
+            state = environment_value_state(name, values, tainted_names)
+            if state != "absent":
+                return state in {"nonempty", "unknown"}
+        return False
+
+    if boolean_option_enabled(arguments, {"--no-cli-pager"}):
+        return False
+    aws_pager_state = environment_value_state(
+        "AWS_PAGER", values, tainted_names
+    )
+    if aws_pager_state != "absent":
+        return aws_pager_state in {"nonempty", "unknown"}
+    return environment_value_state("PAGER", values, tainted_names) in {
+        "nonempty",
+        "unknown",
+    }
 
 
 def aws_help_invocation(arguments, expected):
@@ -3334,6 +3258,14 @@ def basename_is_credential(basename):
         return True
     if any(basename.endswith(suffix) for suffix in CREDENTIAL_FILE_SUFFIXES):
         return True
+    stem, suffix = os.path.splitext(basename)
+    if suffix in PRIVATE_KEY_CONTAINER_SUFFIXES and (
+        stem in PRIVATE_KEY_STEM_NAMES
+        or any(marker in stem for marker in PRIVATE_KEY_STEM_MARKERS)
+        or stem.startswith(PRIVATE_KEY_STEM_PREFIXES)
+        or stem.endswith(PRIVATE_KEY_STEM_SUFFIXES)
+    ):
+        return True
     if basename.endswith(".json") and any(
         marker in basename
         for marker in (
@@ -3804,6 +3736,10 @@ def credential_path_argument_roles(command, arguments):
         non_files.update(range(len(arguments)))
         return reads, changes, non_files
 
+    interpreter = interpreter_name(command)
+    if interpreter in INTERPRETER_CODE_OPTIONS:
+        non_files.update(interpreter_code_argument_indexes(interpreter, arguments))
+
     if command == "dd":
         for index, argument in enumerate(arguments):
             operand, separator, _path = argument.partition("=")
@@ -4258,7 +4194,7 @@ def gh_non_file_argument_indexes(arguments):
 
 
 def gh_file_ingress_references(arguments):
-    """gh がサンドボックス外で読むローカルファイル・ディレクトリを返す。"""
+    """gh が外部サービスへ送るローカルファイル・ディレクトリを返す。"""
     references = list(
         option_values_with_joined(arguments, GH_FILE_INPUT_OPTIONS)
     )
@@ -5546,6 +5482,90 @@ def proxy_value_contains_credentials(value):
     return parsed.username is not None or parsed.password is not None
 
 
+def environment_name_holds_secret_value(name):
+    """変数名がパスや agent socket ではなく秘密値そのものを表すか返す。"""
+    if name in CREDENTIAL_PATH_PARAMETER_NAMES:
+        return False
+    if name in NON_SECRET_RUNTIME_PARAMETER_NAMES:
+        return False
+    return parameter_is_sensitive(name)
+
+
+def environment_value_reveals_credential(name, value):
+    """既知または未知の値が、認証情報を環境へ渡す形かを返す。"""
+    if name in PROXY_PARAMETER_NAMES:
+        return value is None or bool(value) and proxy_value_contains_credentials(value)
+    if not environment_name_holds_secret_value(name):
+        return False
+    return value is None or bool(value)
+
+
+def inherited_execution_environment():
+    """危険な実行差し替え変数だけを、秘密値を保持せず継承する。"""
+    inherited = {}
+    for name in os.environ:
+        if not (
+            name in INHERITED_EXEC_ENV_NAMES
+            or name.startswith(INHERITED_EXEC_ENV_PREFIXES)
+            or name.casefold() in NPM_EXEC_ENV_NAMES
+        ):
+            continue
+        if name == "SHELLOPTS":
+            inherited[name] = ":".join(
+                option
+                for option in sorted(TRACKED_SHELL_OPTIONS)
+                if option in os.environ[name].split(":")
+            )
+        else:
+            inherited[name] = (
+                INHERITED_NONEMPTY_MARKER if os.environ[name] else ""
+            )
+    return inherited
+
+
+def printf_static_assignment_value(arguments):
+    """printf -v の結果が単純な静的文字列なら返す。"""
+    index = 0
+    target_seen = False
+    while index < len(arguments):
+        argument = arguments[index]
+        if argument == "--":
+            index += 1
+            break
+        if argument == "-v":
+            if index + 1 >= len(arguments):
+                return None
+            target_seen = True
+            index += 2
+            continue
+        if argument.startswith("-v") and argument != "-v":
+            target_seen = True
+            index += 1
+            continue
+        if argument.startswith("-") and argument != "-":
+            index += 1
+            continue
+        break
+    if not target_seen or index >= len(arguments):
+        return None
+    format_string = arguments[index]
+    if contains_expansion_or_marker(format_string):
+        return None
+    # %% 以外の変換指定があれば、後続引数を評価しないと結果を確定できない。
+    if re.search(r"%(?:[^%]|$)", format_string):
+        return None
+    return format_string.replace("%%", "%")
+
+
+def assignment_reveals_credential(assignment):
+    """環境変数への代入が平文の認証情報をプロセスへ渡す形か返す。"""
+    match = ASSIGNMENT_PARTS_RE.match(assignment)
+    if not match:
+        return False
+    name, _subscript, _append, value = match.groups()
+    return environment_value_reveals_credential(name, value)
+
+
 def container_environment_spec_reveals_secret(name, value):
     """Docker の環境指定がホストの秘密値を渡す形かを返す。"""
     if value is None:
@@ -6154,17 +6174,6 @@ def container_debug_reveals_secret(arguments):
     return False
 
 
-def container_debug_uses_alternate_host(arguments):
-    words = subcommand_words(
-        arguments,
-        DOCKER_VALUE_OPTIONS
-        | {"-c", "--command", "-l", "--host", "--shell", "--tool"},
-    )
-    return words[:1] == ["debug"] and bool(
-        container_debug_option_values(arguments, {"--host"})
-    )
-
-
 def container_child_reveals_secret(arguments):
     """docker exec 等の直接 child が認証情報を出力する形かを判定する。"""
     for operand in container_child_operand_candidates(arguments):
@@ -6647,7 +6656,7 @@ def git_config_written_keys(arguments):
     """`git config` が設定ファイルへ書き込む形なら、対象のキーを返す。
 
     書き込みは `-c` の一時指定と違って設定ファイルへ残るため、
-    後続のサンドボックス外 `git commit` / `git push` からも効いてしまう。
+    後続の `git` からも効いてしまう。
     読み取りと明示された形 (`--get` / `--list` / `config get` / `config list`)
     以外は書き込みとみなす。戻り値は (書き込みか, キーの一覧)。
     """
@@ -6868,47 +6877,6 @@ def container_ps_format_is_safe(template):
     )
 
 
-def container_global_options(arguments):
-    """サブコマンドより前に置かれたグローバルオプションだけを返す。
-
-    `-c` や `--config` はサブコマンド側にも同名のオプションがあるため、
-    グローバルの位置に限って判定する。
-    """
-    global_arguments = []
-    value_options = DOCKER_VALUE_OPTIONS | DOCKER_EXEC_OPTIONS
-    index = 0
-    while index < len(arguments):
-        argument = arguments[index]
-        if not argument.startswith("-") or argument == "-":
-            break
-        clustered = docker_short_option_cluster(
-            argument,
-            value_options,
-            DOCKER_GLOBAL_SHORT_BOOLEAN_FLAGS,
-        )
-        if clustered is not None:
-            option, joined = clustered
-            if option:
-                global_arguments.append(option)
-                if joined is not None:
-                    global_arguments.append(joined)
-                else:
-                    index += 1
-                    if index < len(arguments):
-                        global_arguments.append(arguments[index])
-            else:
-                global_arguments.append(argument)
-            index += 1
-            continue
-        global_arguments.append(argument)
-        if "=" not in argument and argument in value_options:
-            index += 1
-            if index < len(arguments):
-                global_arguments.append(arguments[index])
-        index += 1
-    return global_arguments
-
-
 def interpreter_cluster_code(command, token):
     """短縮オプションの塊から、コード本体と「次の引数がコードか」を返す。
 
@@ -7005,6 +6973,45 @@ def interpreter_code_arguments(command, arguments):
                     code.append(argument)
                     break
     return code
+
+
+def interpreter_code_argument_indexes(command, arguments):
+    """インタプリタへ直接渡されたコード本体の argv 位置を返す。"""
+    options = INTERPRETER_CODE_OPTIONS.get(command)
+    if not options:
+        return set()
+
+    indexes = set()
+    pending = False
+    for index, argument in enumerate(arguments):
+        if pending:
+            indexes.add(index)
+            pending = False
+            continue
+        if argument in options:
+            pending = True
+            continue
+        name, separator, _value = argument.partition("=")
+        if separator and name in options:
+            indexes.add(index)
+            continue
+        if argument.startswith("-") and not argument.startswith("--"):
+            cluster_code, cluster_pending = interpreter_cluster_code(
+                command, argument
+            )
+            if cluster_code:
+                indexes.add(index)
+            pending = cluster_pending
+
+    if command in INTERPRETER_POSITIONAL_CODE and not indexes:
+        if "-f" not in arguments and not any(
+            argument.startswith("-f") for argument in arguments
+        ):
+            for index, argument in enumerate(arguments):
+                if not argument.startswith("-"):
+                    indexes.add(index)
+                    break
+    return indexes
 
 
 def interpreter_reads_stdin_script(command, arguments):
@@ -7270,6 +7277,66 @@ def code_builds_target_dynamically(code_arguments):
     )
 
 
+def static_string_literals(code):
+    """インタプリタコードから静的な文字列リテラル候補を取り出す。"""
+    literals = []
+    index = 0
+    while index < len(code):
+        quote = code[index]
+        if quote not in {"'", '"', "`"}:
+            index += 1
+            continue
+        start = index
+        delimiter = quote * 3 if code.startswith(quote * 3, index) else quote
+        index += len(delimiter)
+        value = []
+        while index < len(code):
+            if code.startswith(delimiter, index):
+                end = index + len(delimiter)
+                literals.append(("".join(value), start, end))
+                index = end
+                break
+            if code[index] == "\\" and index + 1 < len(code):
+                escaped = code[index + 1]
+                if escaped in {"\\", "'", '"', "`", "/"}:
+                    value.append(escaped)
+                else:
+                    value.extend(("\\", escaped))
+                index += 2
+                continue
+            value.append(code[index])
+            index += 1
+        else:
+            # コメント中の apostrophe などを文字列開始と誤認しても、後続の
+            # 正しいリテラルまで走査を打ち切らない。
+            index = start + 1
+
+    candidates = [value for value, _start, _end in literals]
+    if not literals:
+        return candidates
+
+    combined = literals[0][0]
+    previous_end = literals[0][2]
+    for value, start, end in literals[1:]:
+        separator = code[previous_end:start]
+        if re.fullmatch(r"\s*(?:[+.]\s*)?", separator):
+            combined += value
+            candidates.append(combined)
+        else:
+            combined = value
+        previous_end = end
+    return candidates
+
+
+def code_references_credential_path(code_arguments):
+    """コード内の静的文字列が既知の認証情報パスを指すかを判定する。"""
+    return any(
+        argument_references_credential_path(candidate, path_context=True)
+        for code in code_arguments
+        for candidate in static_string_literals(code)
+    )
+
+
 def env_dump_arguments(command, arguments):
     """環境変数の値を出力する形の呼び出しかどうかを判定する。
 
@@ -7486,6 +7553,13 @@ def arithmetic_expression_marker(expression):
 
 def arithmetic_command_marker(expression):
     return "__arithmetic_command__" + expression.encode("utf-8").hex() + "__"
+
+
+def parameter_assignment_marker(parameter):
+    """`${name=word}` / `${name:=word}` の代入を後段へ渡す。"""
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*:?=", parameter, re.S):
+        return ""
+    return "__parameter_assignment__" + parameter.encode("utf-8").hex() + "__"
 
 
 def parameter_arithmetic_markers(parameter):
@@ -8407,6 +8481,7 @@ def collect_substitutions(command, nested=None, mark_unquoted_fields=True):
                         parameter,
                         parameter_sanitized,
                     )
+                    + parameter_assignment_marker(parameter_sanitized)
                     + parameter_arithmetic_markers(parameter_sanitized)
                     + prompt_expansion_marker(parameter)
                 )
@@ -8533,6 +8608,7 @@ def collect_substitutions(command, nested=None, mark_unquoted_fields=True):
                     parameter,
                     parameter_sanitized,
                 )
+                + parameter_assignment_marker(parameter_sanitized)
                 + parameter_arithmetic_markers(parameter_sanitized)
                 + prompt_expansion_marker(parameter)
                 + markers
@@ -8631,9 +8707,10 @@ def collect_substitutions(command, nested=None, mark_unquoted_fields=True):
 
 
 def collect_heredoc_substitutions(body):
-    """引用なしヒアドキュメントのコマンド置換と算術式を回収する。"""
+    """引用なしヒアドキュメントの置換・算術式・代入展開を回収する。"""
     nested = []
     arithmetic_expressions = []
+    parameter_assignments = []
     index = 0
     while index < len(body):
         if body[index] == "\\":
@@ -8658,6 +8735,8 @@ def collect_heredoc_substitutions(body):
             parameter = body[index + 2 : closing - 1]
             parameter_sanitized, parameter_nested = collect_substitutions(parameter)
             nested.extend(parameter_nested)
+            if parameter_assignment_marker(parameter_sanitized):
+                parameter_assignments.append(parameter_sanitized)
             markers = parameter_arithmetic_markers(parameter_sanitized)
             for match in ARITHMETIC_EXPRESSION_MARKER_RE.finditer(markers):
                 try:
@@ -8669,7 +8748,7 @@ def collect_heredoc_substitutions(body):
             index = closing
         else:
             index += 1
-    return nested, arithmetic_expressions
+    return nested, arithmetic_expressions, parameter_assignments
 
 
 def expand_punctuation(token):
@@ -8943,6 +9022,20 @@ def split_command_units(tokens):
     return units
 
 
+def command_unit_state_is_uncertain(unit):
+    """条件分岐・複合コマンド・pipeline 内で実行が確定しない unit か返す。"""
+    return bool(
+        unit["group_depth"]
+        or unit["before"] in {"&&", "||", "|", "|&"}
+        or unit["after"] in {"&&", "||", "|", "|&"}
+        or any(
+            command_basename(token)
+            in {"if", "then", "elif", "else", "while", "until", "do"}
+            for token in unit["tokens"]
+        )
+    )
+
+
 def remove_redirections(tokens, heredoc_bodies, heredoc_index):
     argv = []
     input_file_operands = []
@@ -8987,12 +9080,20 @@ def remove_redirections(tokens, heredoc_bodies, heredoc_index):
                         stdin_is_external = False
                         stdin_commands = [heredoc_bodies[heredoc_index][0]]
                     if not heredoc_bodies[heredoc_index][1]:
-                        _, arithmetic_expressions = collect_heredoc_substitutions(
+                        (
+                            _,
+                            arithmetic_expressions,
+                            parameter_assignments,
+                        ) = collect_heredoc_substitutions(
                             heredoc_bodies[heredoc_index][0]
                         )
                         argv.extend(
                             arithmetic_expression_marker(expression)
                             for expression in arithmetic_expressions
+                        )
+                        argv.extend(
+                            parameter_assignment_marker(assignment)
+                            for assignment in parameter_assignments
                         )
                     heredoc_index += 1
                 elif operator == "<<<" and redirects_stdin:
@@ -9049,8 +9150,9 @@ def strip_control_prefixes(argv):
     declarations = {"for", "select", "case", "function", "in"}
     while argv and command_basename(argv[0]) in executable_prefixes:
         argv = argv[1:]
-        while argv and ASSIGNMENT_RE.match(argv[0]):
-            argv = argv[1:]
+    if argv and command_basename(argv[0]) in {"for", "select"}:
+        # ループ変数は allexport 中に環境へ載る。反復値はコマンドの argv ではない。
+        return argv[:2]
     if argv and command_basename(argv[0]) in declarations:
         return []
     return argv
@@ -9106,7 +9208,13 @@ def split_env_string(value):
         raise ShellScanError("invalid env split-string: " + str(error))
 
 
-def unwrap_env(arguments, split_depth=0, environment=None):
+def unwrap_env(
+    arguments,
+    split_depth=0,
+    environment=None,
+    tainted_environment=None,
+    assignments=None,
+):
     if split_depth > 32:
         raise ShellScanError("nested env split-string depth exceeded")
     index = 0
@@ -9133,6 +9241,8 @@ def unwrap_env(arguments, split_depth=0, environment=None):
             # env の単独 `-` は `-i` と同じ
             if environment is not None:
                 environment.clear()
+            if tainted_environment is not None:
+                tainted_environment.clear()
             index += 1
             continue
         if argument in long_options_with_value:
@@ -9142,19 +9252,38 @@ def unwrap_env(arguments, split_depth=0, environment=None):
                 expanded = (
                     split_env_string(arguments[index + 1]) + arguments[index + 2 :]
                 )
-                return unwrap_env(expanded, split_depth + 1, environment)
+                return unwrap_env(
+                    expanded,
+                    split_depth + 1,
+                    environment,
+                    tainted_environment,
+                    assignments,
+                )
             if argument == "--unset" and environment is not None:
                 environment.pop(arguments[index + 1], None)
+            if argument == "--unset" and tainted_environment is not None:
+                tainted_environment.discard(arguments[index + 1])
             index += 2
             continue
         if argument.startswith("--split-string="):
             expanded = (
                 split_env_string(argument.split("=", 1)[1]) + arguments[index + 1 :]
             )
-            return unwrap_env(expanded, split_depth + 1, environment)
+            return unwrap_env(
+                expanded,
+                split_depth + 1,
+                environment,
+                tainted_environment,
+                assignments,
+            )
         if any(argument.startswith(option + "=") for option in long_options_with_value):
             if argument.startswith("--unset=") and environment is not None:
                 environment.pop(argument.split("=", 1)[1], None)
+            if (
+                argument.startswith("--unset=")
+                and tainted_environment is not None
+            ):
+                tainted_environment.discard(argument.split("=", 1)[1])
             index += 1
             continue
         if argument in long_options_with_optional_value or any(
@@ -9166,6 +9295,11 @@ def unwrap_env(arguments, split_depth=0, environment=None):
         if argument in long_flags:
             if argument == "--ignore-environment" and environment is not None:
                 environment.clear()
+            if (
+                argument == "--ignore-environment"
+                and tainted_environment is not None
+            ):
+                tainted_environment.clear()
             index += 1
             continue
         if argument.startswith("--"):
@@ -9181,6 +9315,8 @@ def unwrap_env(arguments, split_depth=0, environment=None):
                 option = short_options[option_index]
                 if option == "i" and environment is not None:
                     environment.clear()
+                if option == "i" and tainted_environment is not None:
+                    tainted_environment.clear()
                 if option in short_options_with_value:
                     inline_value = short_options[option_index + 1 :]
                     if option == "S":
@@ -9198,6 +9334,8 @@ def unwrap_env(arguments, split_depth=0, environment=None):
                             split_env_string(split_value) + trailing,
                             split_depth + 1,
                             environment,
+                            tainted_environment,
+                            assignments,
                         )
                     if not inline_value:
                         if index + 1 >= len(arguments):
@@ -9206,6 +9344,9 @@ def unwrap_env(arguments, split_depth=0, environment=None):
                     if option == "u" and environment is not None:
                         unset_name = inline_value or arguments[index]
                         environment.pop(unset_name, None)
+                    if option == "u" and tainted_environment is not None:
+                        unset_name = inline_value or arguments[index]
+                        tainted_environment.discard(unset_name)
                     break
                 if option not in short_flags:
                     raise ShellScanError("unsupported env option")
@@ -9213,16 +9354,24 @@ def unwrap_env(arguments, split_depth=0, environment=None):
             index += 1
             continue
         if ASSIGNMENT_RE.match(argument):
+            if assignments is not None:
+                assignments.append(argument)
             if environment is not None and "[" not in argument.split("=", 1)[0]:
                 name, value = argument.split("=", 1)
                 environment[name] = value
+                if tainted_environment is not None:
+                    tainted_environment.discard(name)
             index += 1
             continue
         break
     while index < len(arguments) and ASSIGNMENT_RE.match(arguments[index]):
+        if assignments is not None:
+            assignments.append(arguments[index])
         if environment is not None and "[" not in arguments[index].split("=", 1)[0]:
             name, value = arguments[index].split("=", 1)
             environment[name] = value
+            if tainted_environment is not None:
+                tainted_environment.discard(name)
         index += 1
     return arguments[index:]
 
@@ -9545,22 +9694,45 @@ def shell_command_string(arguments):
     return None
 
 
-def shell_enables_xtrace(arguments):
-    """新しい shell が command string を xtrace 有効で実行するかを返す。"""
-    enabled = False
+def shell_option_enabled(
+    arguments,
+    option_name,
+    short_flag,
+    environment,
+    tainted_environment,
+):
+    """子 shell が指定の set option を有効にして起動するかを返す。"""
+    shellopts = environment.get("SHELLOPTS")
+    enabled = (
+        shellopts is not None
+        and (
+            contains_expansion_or_marker(shellopts)
+            or option_name in shellopts.split(":")
+        )
+    ) or (
+        "SHELLOPTS" not in environment
+        and "SHELLOPTS" in tainted_environment
+    )
     index = 0
+    option_arguments = {"-O", "+O", "--rcfile", "--init-file"}
     while index < len(arguments):
         argument = arguments[index]
         if argument == "--":
             break
         if argument in {"-o", "+o"}:
-            if index + 1 < len(arguments) and arguments[index + 1] == "xtrace":
+            if index + 1 < len(arguments) and arguments[index + 1] == option_name:
                 enabled = argument == "-o"
             index += 2
             continue
+        if argument in option_arguments:
+            index += 2
+            continue
+        if argument.startswith("--"):
+            index += 1
+            continue
         if argument.startswith(("-", "+")) and len(argument) > 1:
             flags = argument[1:]
-            if "x" in flags:
+            if short_flag in flags:
                 enabled = argument.startswith("-")
             if "c" in flags:
                 break
@@ -9600,12 +9772,31 @@ def shell_reads_stdin_script(arguments):
     return True
 
 
-def shell_startup_inputs(arguments, environment):
+def shell_startup_inputs(
+    command,
+    arguments,
+    environment,
+    tainted_environment,
+):
     inputs = [
         environment[name]
         for name in ("BASH_ENV", "ENV")
         if environment.get(name)
     ]
+    inputs.extend(
+        INHERITED_NONEMPTY_MARKER
+        for name in ("BASH_ENV", "ENV")
+        if name not in environment and name in tainted_environment
+    )
+    if command == "zsh":
+        if "ZDOTDIR" in environment:
+            inputs.append(environment["ZDOTDIR"] or INHERITED_NONEMPTY_MARKER)
+        elif "ZDOTDIR" in tainted_environment:
+            inputs.append(INHERITED_NONEMPTY_MARKER)
+        elif "HOME" in environment:
+            inputs.append(environment["HOME"] or INHERITED_NONEMPTY_MARKER)
+        elif "HOME" in tainted_environment:
+            inputs.append(INHERITED_NONEMPTY_MARKER)
     index = 0
     while index < len(arguments):
         argument = arguments[index]
@@ -9973,15 +10164,18 @@ class CommandScanner:
         self.integer_variables = set()
         # declare -A の連想配列。添字は算術式ではなく文字列キーになる
         self.associative_variables = set()
-        self.shell_variables = {}
-        self.exported_environment = {}
+        inherited_environment = inherited_execution_environment()
+        self.shell_variables = inherited_environment.copy()
+        self.exported_environment = inherited_environment.copy()
         # 一度でも export された変数名。値の追跡とは別に、増える一方で保持する。
         # 条件付き実行や関数呼び出しでは値を巻き戻すが、実際の bash では
         # 成功した export が後続コマンドへ残るため
-        # (`export GH_CONFIG_DIR=/tmp/fake && gh pr list`)
+        # (`export TF_CLI_ARGS_show=-json && terraform show`)
         self.tainted_environment = set()
         # `set -a` (allexport)。有効な間は、ただの代入も export と同じになる
         self.allexport = False
+        # `set -k` (keyword)。後置された assignment word もコマンド環境へ載る
+        self.keyword = False
         # xtrace 中は展開後の引数が標準エラーへ出る。機密値の存在確認例外にも効く。
         self.xtrace = False
 
@@ -10071,9 +10265,11 @@ class CommandScanner:
             elif integer_mode is True:
                 self.arithmetic_values.setdefault(name, "0")
             if export_mode is True:
-                self.exported_environment[name] = self.shell_variables.get(
-                    name,
-                    QUOTED_EXPANSION_MARKER,
+                value = self.shell_variables.get(name)
+                if not match and environment_value_reveals_credential(name, value):
+                    add_reason(self.reasons, CREDENTIAL_VARIABLE_REASON)
+                self.exported_environment[name] = (
+                    value if value is not None else QUOTED_EXPANSION_MARKER
                 )
                 self.tainted_environment.add(name)
             elif export_mode is False:
@@ -10083,13 +10279,21 @@ class CommandScanner:
         match = ASSIGNMENT_PARTS_RE.match(assignment)
         if not match or match.group(2) is not None:
             return
+        if assignment_reveals_credential(assignment):
+            add_reason(self.reasons, CREDENTIAL_VARIABLE_REASON)
         name, _, append, value = match.groups()
-        if self.allexport:
+        was_exported = (
+            name in self.exported_environment
+            or name in self.tainted_environment
+        )
+        if self.allexport or was_exported:
             # allexport の間は、ただの代入も export と同じ結果になる
             self.tainted_environment.add(name)
         if append:
             value = self.shell_variables.get(name, QUOTED_EXPANSION_MARKER) + value
         self.shell_variables[name] = value
+        if self.allexport or was_exported:
+            self.exported_environment[name] = value
 
     def inspect_export(self, arguments):
         unexport = False
@@ -10112,12 +10316,16 @@ class CommandScanner:
             if match:
                 self.record_arithmetic_assignment(operand)
                 self.record_shell_assignment(operand)
+            elif not unexport and environment_value_reveals_credential(
+                name, self.shell_variables.get(name)
+            ):
+                add_reason(self.reasons, CREDENTIAL_VARIABLE_REASON)
             if unexport:
                 self.exported_environment.pop(name, None)
             else:
-                self.exported_environment[name] = self.shell_variables.get(
-                    name,
-                    QUOTED_EXPANSION_MARKER,
+                value = self.shell_variables.get(name)
+                self.exported_environment[name] = (
+                    value if value is not None else QUOTED_EXPANSION_MARKER
                 )
                 self.tainted_environment.add(name)
 
@@ -10166,6 +10374,34 @@ class CommandScanner:
             # `--` や位置パラメータが来たら、そこから先はオプションではない
             break
 
+    def set_keyword(self, enabled, persist):
+        """keyword の有効化は常に、無効化は確実な位置でだけ反映する。"""
+        if enabled:
+            self.keyword = True
+        elif persist:
+            self.keyword = False
+
+    def update_keyword(self, arguments, persist):
+        """`set -k` / `set +k` / `set -o keyword` の切り替えを追う。"""
+        index = 0
+        while index < len(arguments):
+            argument = arguments[index]
+            if argument in {"--", "-", "+"}:
+                break
+            if argument in {"-o", "+o"}:
+                if index + 1 < len(arguments) and arguments[index + 1] == "keyword":
+                    self.set_keyword(argument == "-o", persist)
+                    index += 2
+                    continue
+                index += 1
+                continue
+            if argument.startswith(("-", "+")) and len(argument) > 1:
+                if "k" in argument[1:]:
+                    self.set_keyword(argument.startswith("-"), persist)
+                index += 1
+                continue
+            break
+
     def update_xtrace(self, arguments, persist):
         """`set -x` / `set +x` / `set -o xtrace` の切り替えを追う。"""
         index = 0
@@ -10188,14 +10424,56 @@ class CommandScanner:
                 continue
             break
 
+    def update_shopt_options(self, arguments, persist):
+        """`shopt -s/-u -o` による set option の切り替えを追う。"""
+        enabled = None
+        shell_options = False
+        names = []
+        end_of_options = False
+        for argument in arguments:
+            if argument == "--":
+                end_of_options = True
+                continue
+            if not end_of_options and argument.startswith("-") and argument != "-":
+                flags = argument[1:]
+                shell_options = shell_options or "o" in flags
+                if "s" in flags:
+                    enabled = True
+                if "u" in flags:
+                    enabled = False
+                continue
+            names.append(argument)
+        if not shell_options or enabled is None:
+            return
+        for name in names:
+            if command_word_is_dynamic(name):
+                raise ShellScanError("dynamic shopt option name")
+            if name == "allexport":
+                self.set_allexport(enabled, persist)
+            elif name == "keyword":
+                self.set_keyword(enabled, persist)
+            elif name == "xtrace" and (enabled or persist):
+                self.xtrace = enabled
+
+    def record_allexport_target(self, name, value):
+        """allexport 中に組み込み等が設定した環境変数を記録する。"""
+        if environment_value_reveals_credential(name, value):
+            add_reason(self.reasons, CREDENTIAL_VARIABLE_REASON)
+        tracked_value = value if value is not None else INHERITED_NONEMPTY_MARKER
+        self.shell_variables[name] = tracked_value
+        self.exported_environment[name] = tracked_value
+        self.tainted_environment.add(name)
+
     def taint_arithmetic_targets(self, expression):
-        """allexport 中の算術代入の対象名を taint する。"""
+        """allexport 中の算術代入先を非空の環境変数として記録する。"""
         if not self.allexport:
             return
         for part in split_arithmetic_parts(expression):
-            match = ARITHMETIC_ASSIGNMENT_RE.match(part)
+            match = ARITHMETIC_MUTATION_NAME_RE.match(part)
             if match:
-                self.tainted_environment.add(match.group(1))
+                self.record_allexport_target(
+                    match.group(1), INHERITED_NONEMPTY_MARKER
+                )
 
     def taint_builtin_targets(self, command, arguments):
         """allexport 中に、組み込みが代入する変数名を taint する。
@@ -10207,6 +10485,10 @@ class CommandScanner:
         if not self.allexport:
             return
         targets = []
+        if command == "getopts" and len(arguments) >= 2:
+            targets.append(arguments[1])
+        elif command in {"for", "select"} and arguments:
+            targets.append(arguments[0])
         name_options = ALLEXPORT_NAME_OPTIONS.get(command)
         if name_options is not None:
             targets.extend(option_values_with_joined(arguments, name_options))
@@ -10214,26 +10496,122 @@ class CommandScanner:
         if value_options is not None:
             targets.extend(subcommand_words(arguments, value_options))
         for target in targets:
-            name = target.split("=", 1)[0].split("[", 1)[0]
+            match = ASSIGNMENT_PARTS_RE.match(target)
+            name = (
+                match.group(1)
+                if match
+                else target.split("=", 1)[0].split("[", 1)[0]
+            )
             if command_word_is_dynamic(name):
                 raise ShellScanError("allexport assignment target is dynamic")
             if re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name):
+                if match:
+                    value = match.group(4)
+                    if match.group(3):
+                        previous = self.shell_variables.get(name)
+                        value = None if previous is None else previous + value
+                elif command == "printf":
+                    value = printf_static_assignment_value(arguments)
+                elif command in {"readonly", "declare", "typeset", "local"}:
+                    value = self.shell_variables.get(name)
+                else:
+                    value = None
+                self.record_allexport_target(name, value)
+
+    def call_environment_assignments(self, argv):
+        """関数呼び出しの間だけ環境へ載る assignment word を返す。"""
+        argv = strip_control_prefixes(argv)
+        assignments, remaining = self.split_leading_assignments(argv)
+        assignments = list(assignments)
+        while remaining and command_basename(remaining[0]) == "time":
+            remaining = unwrap_time(remaining[1:])
+            nested, remaining = self.split_leading_assignments(remaining)
+            assignments.extend(nested)
+        if self.keyword and remaining:
+            assignments.extend(
+                argument
+                for argument in remaining[1:]
+                if ASSIGNMENT_RE.match(argument)
+            )
+        return assignments
+
+    def apply_call_environment(self, argv):
+        """関数呼び出しの一時環境を適用し、復元用の状態を返す。"""
+        state = {}
+        for assignment in self.call_environment_assignments(argv):
+            match = ASSIGNMENT_PARTS_RE.match(assignment)
+            if not match or match.group(2) is not None:
+                continue
+            name, _subscript, append, value = match.groups()
+            if name not in state:
+                state[name] = (
+                    name in self.shell_variables,
+                    self.shell_variables.get(name),
+                    name in self.exported_environment,
+                    self.exported_environment.get(name),
+                    name in self.tainted_environment,
+                )
+            if append:
+                previous = self.shell_variables.get(name)
+                if previous is None and name in self.tainted_environment:
+                    previous = INHERITED_NONEMPTY_MARKER
+                value = (previous or "") + value
+            self.shell_variables[name] = value
+            self.exported_environment[name] = value
+            self.tainted_environment.discard(name)
+        return state
+
+    def restore_call_environment(self, state):
+        """関数呼び出しへ適用した一時環境だけを元へ戻す。"""
+        for name, (
+            had_shell_value,
+            shell_value,
+            had_exported_value,
+            exported_value,
+            was_tainted,
+        ) in state.items():
+            if had_shell_value:
+                self.shell_variables[name] = shell_value
+            else:
+                self.shell_variables.pop(name, None)
+            if had_exported_value:
+                self.exported_environment[name] = exported_value
+            else:
+                self.exported_environment.pop(name, None)
+            if was_tainted:
                 self.tainted_environment.add(name)
+            else:
+                self.tainted_environment.discard(name)
 
-    def add_call_environment_taint(self, argv):
-        """関数呼び出しへ前置された代入を、呼び出しの間だけ taint する。
+    @staticmethod
+    def changed_mapping_names(before, after):
+        missing = object()
+        return {
+            name
+            for name in set(before) | set(after)
+            if before.get(name, missing) != after.get(name, missing)
+        }
 
-        `VAR=value fn` の値は関数を抜けると元へ戻るため、taint も
-        呼び出しの間に限る。戻り値は、この呼び出しで足した名前。
-        """
-        names = set()
-        for assignment in self.split_leading_assignments(argv)[0]:
-            name = assignment.split("=", 1)[0]
-            if "[" not in name:
-                names.add(name)
-        added = names - self.tainted_environment
-        self.tainted_environment |= added
-        return added
+    def invalidate_environment_changes(
+        self,
+        shell_variables_before,
+        exported_environment_before,
+    ):
+        """条件分岐や関数内で変化し得た値を unknown として残す。"""
+        changed_shell = self.changed_mapping_names(
+            shell_variables_before, self.shell_variables
+        )
+        changed_exported = self.changed_mapping_names(
+            exported_environment_before, self.exported_environment
+        )
+        return changed_shell, changed_exported
+
+    def apply_invalidated_environment(self, changed_shell, changed_exported):
+        for name in changed_shell:
+            self.shell_variables.pop(name, None)
+        for name in changed_exported:
+            self.exported_environment.pop(name, None)
+            self.tainted_environment.add(name)
 
     def taint_assignment_names(self, assignments):
         """代入された変数名を、環境へ載りうるものとして覚える。"""
@@ -10247,6 +10625,8 @@ class CommandScanner:
         if self.allexport:
             self.taint_assignment_names(assignments)
         for assignment in assignments:
+            if assignment_reveals_credential(assignment):
+                add_reason(self.reasons, CREDENTIAL_VARIABLE_REASON)
             # `value="$GITHUB_TOKEN"` のように、秘密を別名へ移す代入も止める
             if contains_sensitive_parameter(assignment):
                 add_reason(self.reasons, CREDENTIAL_VARIABLE_REASON)
@@ -10272,6 +10652,31 @@ class CommandScanner:
                     raise ShellScanError("invalid arithmetic expression marker")
                 self.check_arithmetic(expression)
 
+    def inspect_parameter_assignments(self, argv):
+        """代入演算子付き parameter expansion が変える変数を追跡する。"""
+        for argument in argv:
+            for marker in PARAMETER_ASSIGNMENT_MARKER_RE.finditer(argument):
+                try:
+                    parameter = bytes.fromhex(marker.group(1)).decode("utf-8")
+                except (ValueError, UnicodeDecodeError):
+                    raise ShellScanError("invalid parameter assignment marker")
+                match = re.match(
+                    r"^([A-Za-z_][A-Za-z0-9_]*)(:?=)(.*)$",
+                    parameter,
+                    re.S,
+                )
+                if not match:
+                    raise ShellScanError("invalid parameter assignment")
+                name, operator, value = match.groups()
+                known = name in self.shell_variables
+                if known and (operator == "=" or self.shell_variables[name]):
+                    continue
+                if not known and name in self.tainted_environment:
+                    if self.allexport:
+                        self.record_allexport_target(name, None)
+                    continue
+                self.record_shell_assignment(name + "=" + value)
+
     def inspect_arithmetic_commands(self, argv):
         found = False
         for argument in argv:
@@ -10296,6 +10701,7 @@ class CommandScanner:
         stdin_commands,
         stdin_is_external,
         inherited_contexts,
+        persist_assignments=True,
     ):
         """外側のスコープで定義された関数の呼び出しなら、その本体を検査する。"""
         for context in reversed(inherited_contexts):
@@ -10306,13 +10712,13 @@ class CommandScanner:
                 unit_stdin_commands,
                 unit_stdin_is_external,
                 unit_stdin_is_redirected,
+                unit_persist_assignments,
                 unit_after,
             ) = context
             name = static_function_call(argv, functions)
             if not name or name in self.active_functions:
                 continue
-            # `VAR=value fn` の前置代入は関数の実行中だけ環境に載る
-            call_taint = self.add_call_environment_taint(argv)
+            call_environment = self.apply_call_environment(argv)
             self.active_functions.add(name)
             try:
                 self.inspect_function_call(
@@ -10323,14 +10729,16 @@ class CommandScanner:
                     unit_stdin_commands,
                     unit_stdin_is_external,
                     unit_stdin_is_redirected,
+                    unit_persist_assignments,
                     unit_after,
                     depth,
                     stdin_commands,
                     stdin_is_external,
+                    persist_assignments=persist_assignments,
                 )
             finally:
                 self.active_functions.discard(name)
-                self.tainted_environment -= call_taint
+                self.restore_call_environment(call_environment)
             return True
         return False
 
@@ -10343,17 +10751,26 @@ class CommandScanner:
         unit_stdin_commands,
         unit_stdin_is_external,
         unit_stdin_is_redirected,
+        unit_persist_assignments,
         unit_after,
         depth,
         stdin_commands,
         stdin_is_external,
         call_stack=None,
+        persist_assignments=True,
     ):
         call_stack = call_stack or []
         if name in call_stack:
             raise ShellScanError("recursive function call is unsupported")
         body_indexes = functions[name]["body_indexes"]
         redirection_index = functions[name]["redirection_index"]
+        options_before = (self.allexport, self.keyword, self.xtrace)
+        localizes_options = any(
+            len(unit_argv[body_index]) >= 2
+            and command_basename(unit_argv[body_index][0]) == "local"
+            and unit_argv[body_index][1] == "-"
+            for body_index in body_indexes
+        )
         if unit_stdin_is_redirected[redirection_index]:
             for body_index in body_indexes:
                 body_argv = unit_argv[body_index]
@@ -10363,6 +10780,10 @@ class CommandScanner:
                     depth + 1,
                     unit_stdin_commands[redirection_index],
                     unit_stdin_is_external[redirection_index],
+                    persist_assignments=(
+                        persist_assignments
+                        and unit_persist_assignments[body_index]
+                    ),
                 )
         for body_index in body_indexes:
             body_argv = unit_argv[body_index]
@@ -10375,29 +10796,42 @@ class CommandScanner:
                 else stdin_commands,
                 unit_stdin_is_external[body_index]
                 or (stdin_is_external and not unit_stdin_is_redirected[body_index]),
+                persist_assignments=(
+                    persist_assignments
+                    and unit_persist_assignments[body_index]
+                ),
             )
             nested_name = static_function_call(body_argv, functions)
             if nested_name:
-                self.inspect_function_call(
-                    nested_name,
-                    functions,
-                    definition_indexes,
-                    unit_argv,
-                    unit_stdin_commands,
-                    unit_stdin_is_external,
-                    unit_stdin_is_redirected,
-                    unit_after,
-                    depth + 1,
-                    unit_stdin_commands[body_index]
-                    if unit_stdin_is_redirected[body_index]
-                    else stdin_commands,
-                    unit_stdin_is_external[body_index]
-                    or (
-                        stdin_is_external
-                        and not unit_stdin_is_redirected[body_index]
-                    ),
-                    call_stack + [name],
-                )
+                call_environment = self.apply_call_environment(body_argv)
+                try:
+                    self.inspect_function_call(
+                        nested_name,
+                        functions,
+                        definition_indexes,
+                        unit_argv,
+                        unit_stdin_commands,
+                        unit_stdin_is_external,
+                        unit_stdin_is_redirected,
+                        unit_persist_assignments,
+                        unit_after,
+                        depth + 1,
+                        unit_stdin_commands[body_index]
+                        if unit_stdin_is_redirected[body_index]
+                        else stdin_commands,
+                        unit_stdin_is_external[body_index]
+                        or (
+                            stdin_is_external
+                            and not unit_stdin_is_redirected[body_index]
+                        ),
+                        call_stack + [name],
+                        persist_assignments=(
+                            persist_assignments
+                            and unit_persist_assignments[body_index]
+                        ),
+                    )
+                finally:
+                    self.restore_call_environment(call_environment)
 
         for position, body_index in enumerate(body_indexes[:-1]):
             if unit_after[body_index] not in PIPE_OPERATORS:
@@ -10409,23 +10843,86 @@ class CommandScanner:
                 unit_argv[right_index],
                 depth + 1,
                 stdin_is_external=True,
+                persist_assignments=(
+                    persist_assignments
+                    and unit_persist_assignments[right_index]
+                ),
             )
             nested_name = static_function_call(unit_argv[right_index], functions)
             if nested_name:
-                self.inspect_function_call(
-                    nested_name,
-                    functions,
-                    definition_indexes,
-                    unit_argv,
-                    unit_stdin_commands,
-                    unit_stdin_is_external,
-                    unit_stdin_is_redirected,
-                    unit_after,
-                    depth + 1,
-                    [],
-                    True,
-                    call_stack + [name],
+                call_environment = self.apply_call_environment(
+                    unit_argv[right_index]
                 )
+                try:
+                    self.inspect_function_call(
+                        nested_name,
+                        functions,
+                        definition_indexes,
+                        unit_argv,
+                        unit_stdin_commands,
+                        unit_stdin_is_external,
+                        unit_stdin_is_redirected,
+                        unit_persist_assignments,
+                        unit_after,
+                        depth + 1,
+                        [],
+                        True,
+                        call_stack + [name],
+                        persist_assignments=(
+                            persist_assignments
+                            and unit_persist_assignments[right_index]
+                        ),
+                    )
+                finally:
+                    self.restore_call_environment(call_environment)
+
+        if localizes_options:
+            self.allexport = self.allexport or options_before[0]
+            self.keyword = self.keyword or options_before[1]
+            self.xtrace = self.xtrace or options_before[2]
+
+    def scan_child_shell(
+        self,
+        arguments,
+        environment,
+        tainted_environment,
+        nested,
+        depth,
+        stdin_is_external=False,
+        reject_function_definitions=False,
+    ):
+        """子 shell の起動時 option を、その内側の走査中だけ反映する。"""
+        previous_options = (self.allexport, self.keyword, self.xtrace)
+        self.allexport = shell_option_enabled(
+            arguments,
+            "allexport",
+            "a",
+            environment,
+            tainted_environment,
+        )
+        self.keyword = shell_option_enabled(
+            arguments,
+            "keyword",
+            "k",
+            environment,
+            tainted_environment,
+        )
+        self.xtrace = shell_option_enabled(
+            arguments,
+            "xtrace",
+            "x",
+            environment,
+            tainted_environment,
+        )
+        try:
+            self.scan(
+                nested,
+                depth,
+                stdin_is_external,
+                reject_function_definitions,
+            )
+        finally:
+            self.allexport, self.keyword, self.xtrace = previous_options
 
     def scan(
         self,
@@ -10472,7 +10969,7 @@ class CommandScanner:
             add_reason(self.reasons, PROMPT_EXPANSION_REASON)
         for body, quoted in heredoc_bodies:
             if not quoted:
-                heredoc_nested, _ = collect_heredoc_substitutions(body)
+                heredoc_nested, _, _ = collect_heredoc_substitutions(body)
                 nested_commands.extend(heredoc_nested)
                 # 引用なしヒアドキュメントは本文中の展開が効く。
                 # 本文はマーカー化を経ないため、変数名を直接見る
@@ -10493,6 +10990,9 @@ class CommandScanner:
         if reject_function_definitions and functions:
             raise ShellScanError("function definition escapes the inspected input")
         unit_after = [unit["after"] for unit in units]
+        unit_persist_assignments = [
+            not command_unit_state_is_uncertain(unit) for unit in units
+        ]
         resolved = []
         unit_argv = []
         unit_stdin_commands = []
@@ -10540,6 +11040,7 @@ class CommandScanner:
                     unit_stdin_commands,
                     unit_stdin_is_external,
                     unit_stdin_is_redirected,
+                    unit_persist_assignments,
                     unit_after,
                 )
             )
@@ -10550,16 +11051,7 @@ class CommandScanner:
             if index in definition_indexes:
                 resolved.append(None)
                 continue
-            state_is_uncertain = (
-                unit["group_depth"]
-                or unit["before"] in {"&&", "||", "|", "|&"}
-                or unit["after"] in {"&&", "||", "|", "|&"}
-                or any(
-                    command_basename(token)
-                    in {"if", "then", "elif", "else", "while", "until", "do"}
-                    for token in unit["tokens"]
-                )
-            )
+            state_is_uncertain = not unit_persist_assignments[index]
             if state_is_uncertain:
                 self.arithmetic_values.clear()
             integer_variables_before = self.integer_variables.copy()
@@ -10589,9 +11081,7 @@ class CommandScanner:
                     and not unit_stdin_is_redirected[index]
                 )
                 if function_name:
-                    # `VAR=value fn` の前置代入は関数本体から見えるが、
-                    # 抜けたあとは元へ戻るので taint も呼び出しの間だけにする
-                    call_taint = self.add_call_environment_taint(argv)
+                    call_environment = self.apply_call_environment(argv)
                     try:
                         self.inspect_function_call(
                             function_name,
@@ -10601,13 +11091,15 @@ class CommandScanner:
                             unit_stdin_commands,
                             unit_stdin_is_external,
                             unit_stdin_is_redirected,
+                            unit_persist_assignments,
                             unit_after,
                             depth,
                             unit_stdin_commands[index],
                             call_stdin_is_external,
+                            persist_assignments=not state_is_uncertain,
                         )
                     finally:
-                        self.tainted_environment -= call_taint
+                        self.restore_call_environment(call_environment)
                 else:
                     # eval / trap の内側から、外側で定義された関数を呼ぶ形
                     self.inspect_inherited_function_call(
@@ -10616,22 +11108,40 @@ class CommandScanner:
                         unit_stdin_commands[index],
                         call_stdin_is_external,
                         inherited_contexts,
+                        persist_assignments=not state_is_uncertain,
                     )
+                changed_shell, changed_exported = (
+                    self.invalidate_environment_changes(
+                        function_shell_before,
+                        function_environment_before,
+                    )
+                )
                 # 関数内の代入は local かどうかで呼び出し元への影響が変わる。
-                # どちらか分からないので、呼び出し前の状態へ戻して覚えない
-                # (忘れた値は後続の算術式で確認へ回るだけで、実行は止まらない)
+                # 値は呼び出し前へ戻し、変わり得た名前だけ unknown として残す。
                 self.arithmetic_values = function_values_before
                 self.integer_variables = function_integers_before
                 self.shell_variables = function_shell_before
                 self.exported_environment = function_environment_before
+                self.apply_invalidated_environment(
+                    changed_shell,
+                    changed_exported,
+                )
             if state_is_uncertain:
+                changed_shell, changed_exported = (
+                    self.invalidate_environment_changes(
+                        shell_variables_before,
+                        exported_environment_before,
+                    )
+                )
                 self.arithmetic_values.clear()
-                # 実行されるか分からない位置での代入は、覚えずに捨てる。
-                # 値を忘れた変数は後続の算術式で「未知」になり確認へ回るだけなので、
-                # `export X=... && cmd` のような日常操作を止めずに済む
+                # 実行されるか分からない位置で変わり得た値は unknown として残す。
                 self.integer_variables = integer_variables_before
                 self.shell_variables = shell_variables_before
                 self.exported_environment = exported_environment_before
+                self.apply_invalidated_environment(
+                    changed_shell,
+                    changed_exported,
+                )
 
         if heredoc_index != len(heredoc_bodies):
             raise ShellScanError("heredoc body could not be associated")
@@ -10657,19 +11167,27 @@ class CommandScanner:
                 )
                 function_name = static_function_call(unit_argv[inner_index], functions)
                 if function_name:
-                    self.inspect_function_call(
-                        function_name,
-                        functions,
-                        definition_indexes,
-                        unit_argv,
-                        unit_stdin_commands,
-                        unit_stdin_is_external,
-                        unit_stdin_is_redirected,
-                        unit_after,
-                        depth,
-                        unit_stdin_commands[index],
-                        unit_stdin_is_external[index],
+                    call_environment = self.apply_call_environment(
+                        unit_argv[inner_index]
                     )
+                    try:
+                        self.inspect_function_call(
+                            function_name,
+                            functions,
+                            definition_indexes,
+                            unit_argv,
+                            unit_stdin_commands,
+                            unit_stdin_is_external,
+                            unit_stdin_is_redirected,
+                            unit_persist_assignments,
+                            unit_after,
+                            depth,
+                            unit_stdin_commands[index],
+                            unit_stdin_is_external[index],
+                            persist_assignments=False,
+                        )
+                    finally:
+                        self.restore_call_environment(call_environment)
 
         for index, unit in enumerate(units):
             if index in definition_indexes:
@@ -10692,19 +11210,27 @@ class CommandScanner:
                 )
                 function_name = static_function_call(unit_argv[right_index], functions)
                 if function_name:
-                    self.inspect_function_call(
-                        function_name,
-                        functions,
-                        definition_indexes,
-                        unit_argv,
-                        unit_stdin_commands,
-                        unit_stdin_is_external,
-                        unit_stdin_is_redirected,
-                        unit_after,
-                        depth,
-                        [],
-                        True,
+                    call_environment = self.apply_call_environment(
+                        unit_argv[right_index]
                     )
+                    try:
+                        self.inspect_function_call(
+                            function_name,
+                            functions,
+                            definition_indexes,
+                            unit_argv,
+                            unit_stdin_commands,
+                            unit_stdin_is_external,
+                            unit_stdin_is_redirected,
+                            unit_persist_assignments,
+                            unit_after,
+                            depth,
+                            [],
+                            True,
+                            persist_assignments=False,
+                        )
+                    finally:
+                        self.restore_call_environment(call_environment)
                 nested_indexes = {
                     int(match.group(1))
                     for argument in unit_argv[right_index]
@@ -10753,8 +11279,10 @@ class CommandScanner:
         persist_assignments=True,
     ):
         stdin_commands = stdin_commands or []
-        effective_environment = self.exported_environment.copy()
         original_argv = argv
+        self.inspect_parameter_assignments(original_argv)
+        effective_environment = self.exported_environment.copy()
+        effective_tainted_environment = self.tainted_environment.copy()
         leading_assignments, argv = self.split_leading_assignments(argv)
         try:
             self.inspect_arithmetic_expansions(original_argv)
@@ -10762,18 +11290,40 @@ class CommandScanner:
             if not self.reasons:
                 raise
         if not argv:
-            self.validate_assignments(
-                leading_assignments,
-                persist=persist_assignments,
-            )
+            # 不確実な分岐でも一度記録し、呼び出し元で unknown へ畳む。
+            self.validate_assignments(leading_assignments, persist=True)
             return None
         self.validate_assignments(leading_assignments, persist=False)
         # 前置代入も、直前の `export` で設定された値と同じくこのコマンドへ届く。
         # 両者を同じ環境として扱う (environment_names を参照)
         for assignment in leading_assignments:
-            name, value = assignment.split("=", 1)
-            if "[" not in name:
+            match = ASSIGNMENT_PARTS_RE.match(assignment)
+            if match and match.group(2) is None:
+                name, _subscript, append, value = match.groups()
+                if append:
+                    value = effective_environment.get(name, "") + value
                 effective_environment[name] = value
+                effective_tainted_environment.discard(name)
+
+        if self.keyword:
+            keyword_assignments = [
+                argument for argument in argv[1:] if ASSIGNMENT_RE.match(argument)
+            ]
+            if keyword_assignments:
+                self.validate_assignments(keyword_assignments, persist=False)
+                argv = [argv[0]] + [
+                    argument
+                    for argument in argv[1:]
+                    if not ASSIGNMENT_RE.match(argument)
+                ]
+                for assignment in keyword_assignments:
+                    match = ASSIGNMENT_PARTS_RE.match(assignment)
+                    if match and match.group(2) is None:
+                        name, _subscript, append, value = match.groups()
+                        if append:
+                            value = effective_environment.get(name, "") + value
+                        effective_environment[name] = value
+                        effective_tainted_environment.discard(name)
 
         if ARITHMETIC_COMMAND_MARKER_RE.fullmatch(argv[0]):
             return None
@@ -10794,9 +11344,14 @@ class CommandScanner:
             elif command == "exec":
                 argv = unwrap_exec_options(arguments)
             elif command_cf == "env":
-                env_assignments = effective_environment.copy()
-                argv = unwrap_env(arguments, environment=env_assignments)
-                effective_environment = env_assignments
+                env_assignments = []
+                argv = unwrap_env(
+                    arguments,
+                    environment=effective_environment,
+                    tainted_environment=effective_tainted_environment,
+                    assignments=env_assignments,
+                )
+                self.validate_assignments(env_assignments, persist=False)
                 # 実行コマンドを伴わない env は環境変数の一括出力になる
                 if not any(
                     not ASSIGNMENT_RE.match(argument) for argument in argv
@@ -10834,9 +11389,13 @@ class CommandScanner:
                 return None
             self.validate_assignments(wrapper_assignments, persist=False)
             for assignment in wrapper_assignments:
-                name, value = assignment.split("=", 1)
-                if "[" not in name:
+                match = ASSIGNMENT_PARTS_RE.match(assignment)
+                if match and match.group(2) is None:
+                    name, _subscript, append, value = match.groups()
+                    if append:
+                        value = effective_environment.get(name, "") + value
                     effective_environment[name] = value
+                    effective_tainted_environment.discard(name)
 
         command = command_basename(argv[0])
         arguments = argv[1:]
@@ -10847,7 +11406,7 @@ class CommandScanner:
         # 直前の `export` や `env` ラッパーで設定されたものも含む
         # (`export TF_CLI_ARGS_show=-json; terraform show` を取り落とさないため)。
         # 条件付き実行や関数の中の export は値を巻き戻すが、名前は taint として残す
-        environment_names = set(effective_environment) | self.tainted_environment
+        environment_names = set(effective_environment) | effective_tainted_environment
         pip_arguments = pip_invocation_arguments(command_cf, arguments)
 
         if command_cf == "rsync" and any(
@@ -10906,30 +11465,12 @@ class CommandScanner:
                     ("auth", "status", "--show-token=true"),
                 },
             )
-            exec_help = exact_local_help_invocation(
-                arguments,
-                {
-                    ("alias",),
-                    ("alias", "set"),
-                    ("alias", "delete"),
-                    ("alias", "import"),
-                    ("extension",),
-                    ("extension", "install"),
-                    ("extension", "exec"),
-                    ("config",),
-                    ("config", "set"),
-                },
-            )
-            known_help = bool(
+            subcommand_help = bool(
                 arguments
                 and arguments[-1] in {"--help", "-h"}
-                and any(
-                    words
-                    and (words[0] in GH_SAFE_SUBCOMMANDS or words[0] == "auth")
-                    for words in candidates
-                )
+                and any(words for words in candidates)
             )
-            local_help = token_help or exec_help or known_help
+            local_help = token_help or subcommand_help
             shows_token = boolean_option_enabled(
                 arguments, {"--show-token"}, short_flags={"t"}
             )
@@ -10948,19 +11489,6 @@ class CommandScanner:
                 add_reason(self.reasons, GH_TOKEN_REASON)
             if gh_api_reveals_secret(candidates, arguments):
                 add_reason(self.reasons, GH_API_SECRET_REASON)
-            # gh は excludedCommands でサンドボックス外を走る。alias / extension /
-            # config は任意コマンドの起動口になるため、既知のサブコマンドだけを通す
-            if not local_help and any(
-                subcommand_candidates_match(candidates, expected)
-                for expected in GH_DENIED_SUBCOMMANDS
-            ):
-                add_reason(self.reasons, GH_EXEC_SUBCOMMAND_REASON)
-            elif not local_help and any(
-                words and words[0] not in GH_SAFE_SUBCOMMANDS and words[0] != "auth"
-                for words in candidates
-            ):
-                # 既知でない語は、あらかじめ登録された shell alias の可能性がある
-                add_reason(self.reasons, UNKNOWN_SUBCOMMAND_REASON)
             # `--` の後ろは git / ssh のオプションになり、ここでは検査できない
             if not local_help and "--" in arguments and any(
                 subcommand_candidates_match(candidates, expected)
@@ -10978,10 +11506,13 @@ class CommandScanner:
             if gh_writes_through_api(candidates, arguments):
                 # gh api は外部の状態をそのまま書き換えられる
                 add_reason(self.confirmations, DESTRUCTIVE_CONFIRM_REASON)
-            if any(name in GH_EXEC_ENV_VARS for name in environment_names):
+            if environment_override_is_nonempty(
+                GH_EXEC_ENV_VARS,
+                effective_environment,
+                effective_tainted_environment,
+            ):
                 add_reason(self.reasons, GIT_EXEC_INJECTION_REASON)
         elif command_cf in {"terraform", "terragrunt"}:
-            # terraform も excludedCommands でサンドボックス外を走る。
             # console は file() などで任意のファイルを読める
             # wrapper (`stack run state pull` など) を剥がしても語数が足りるよう、
             # 打ち切りを wrapper の段数ぶん深くしてから剥がす
@@ -11004,10 +11535,11 @@ class CommandScanner:
             # オプションと同じことを環境変数でもできる。
             # TF_CLI_ARGS_show=-json のように、コマンドラインに現れない
             # 秘密出力オプションを後から差し込める
-            if any(
-                name in TERRAFORM_EXEC_ENV_VARS
-                or name.startswith(TERRAFORM_EXEC_ENV_PREFIXES)
-                for name in environment_names
+            if environment_override_is_nonempty(
+                TERRAFORM_EXEC_ENV_VARS,
+                effective_environment,
+                effective_tainted_environment,
+                TERRAFORM_EXEC_ENV_PREFIXES,
             ):
                 add_reason(self.reasons, TERRAFORM_EXEC_ENV_REASON)
             if not terraform_help and terraform_reveals_secret(candidates, arguments):
@@ -11017,11 +11549,6 @@ class CommandScanner:
                 for expected in TERRAFORM_DENIED_SUBCOMMANDS
             ):
                 add_reason(self.reasons, TERRAFORM_CONSOLE_REASON)
-            elif not terraform_help and any(
-                words and words[0] not in TERRAFORM_SAFE_SUBCOMMANDS
-                for words in candidates
-            ):
-                add_reason(self.reasons, UNKNOWN_SUBCOMMAND_REASON)
             # `workspace select -or-create` は new と同じく workspace を作る
             creates_workspace = subcommand_candidates_match(
                 candidates, ("workspace", "select")
@@ -11104,6 +11631,13 @@ class CommandScanner:
             )
             if reads_or_writes_configured_secret and not exits_after_version:
                 add_reason(self.reasons, AWS_CONFIGURE_SECRET_REASON)
+            if aws_external_pager_is_nonempty(
+                arguments,
+                candidates,
+                effective_environment,
+                effective_tainted_environment,
+            ):
+                add_reason(self.reasons, AWS_PAGER_REASON)
             if (
                 unsafe_credential_matches
                 or exposes_debug_trace
@@ -11131,16 +11665,17 @@ class CommandScanner:
                 add_reason(self.reasons, GIT_CONFIG_SECRET_REASON)
             # git -c core.pager=<コマンド> のように、git 自身に外部コマンドを
             # 起動させる指定は、ここまでの検査をすべて迂回できる
-            if git_injects_command(arguments, environment_names) or (
-                file_option_values(arguments, GIT_EXEC_PATH_OPTIONS)
+            if (
+                git_injects_command(arguments, ())
+                or environment_override_is_nonempty(
+                    GIT_EXEC_ENV_VARS,
+                    effective_environment,
+                    effective_tainted_environment,
+                    GIT_EXEC_ENV_PREFIXES,
+                )
+                or file_option_values(arguments, GIT_EXEC_PATH_OPTIONS)
             ):
                 add_reason(self.reasons, GIT_EXEC_INJECTION_REASON)
-            # 既知でない語は `git config alias.x '!command'` で登録した alias の
-            # 可能性がある。git は excludedCommands でサンドボックス外を走る
-            if any(
-                words and words[0] not in GIT_SAFE_SUBCOMMANDS for words in candidates
-            ):
-                add_reason(self.reasons, GIT_ALIAS_REASON)
             # `git submodule foreach '<コマンド>'` は文字列を shell へ渡す
             for expected in GIT_SHELL_STRING_SUBCOMMANDS:
                 for words in candidates:
@@ -11180,7 +11715,7 @@ class CommandScanner:
             ):
                 add_reason(self.reasons, CREDENTIAL_FILE_REASON)
             # `git config core.hooksPath ...` は設定ファイルへ残るため、
-            # 後続のサンドボックス外 git からも効いてしまう
+            # 後続の git からも効いてしまう
             writes_config, written_keys = git_config_written_keys(arguments)
             if writes_config:
                 if any(config_key_injects_command(key) for key in written_keys):
@@ -11194,7 +11729,6 @@ class CommandScanner:
             ):
                 add_reason(self.confirmations, DESTRUCTIVE_CONFIRM_REASON)
         elif command_cf in CONTAINER_COMMANDS:
-            # docker はサンドボックス外で実行されるため、denyRead が効かない。
             # AI 専用の隔離デーモンを用意するまでの暫定 guard として、
             # ホスト側の認証情報がコンテナへ渡る経路をここで塞ぐ。
             # run / create だけでなく compose と build も同じ経路になる
@@ -11252,20 +11786,24 @@ class CommandScanner:
                 reference_is_socket(source) for source in references
             ):
                 add_reason(self.reasons, DOCKER_SOCKET_REASON)
-            if any(name in DOCKER_EXEC_ENV_VARS for name in environment_names):
+            if environment_override_is_nonempty(
+                DOCKER_EXEC_ENV_VARS,
+                effective_environment,
+                effective_tainted_environment,
+            ):
                 add_reason(self.reasons, DOCKER_EXEC_ENV_REASON)
-            if any(name in DOCKER_CREDENTIAL_ENV_VARS for name in environment_names):
+            if environment_override_is_nonempty(
+                DOCKER_CREDENTIAL_ENV_VARS,
+                effective_environment,
+                effective_tainted_environment,
+            ):
                 add_reason(self.reasons, DOCKER_ENV_REASON)
-            if any(name in DOCKER_SSH_ENV_VARS for name in environment_names):
+            if environment_override_is_nonempty(
+                DOCKER_SSH_ENV_VARS,
+                effective_environment,
+                effective_tainted_environment,
+            ):
                 add_reason(self.reasons, DOCKER_SSH_REASON)
-            # 環境変数と同じことを CLI オプションでもできる。
-            # サブコマンド側の同名オプションと紛れないよう、位置を限って見る
-            if option_values_with_joined(
-                container_global_options(arguments), DOCKER_EXEC_OPTIONS
-            ) or option_values_with_joined(
-                docker_arguments, DOCKER_BUILDER_OPTIONS
-            ) or container_debug_uses_alternate_host(docker_arguments):
-                add_reason(self.reasons, DOCKER_EXEC_OPTION_REASON)
             if container_reveals_secret(decision_words, arguments) or (
                 container_child_reveals_secret(arguments)
             ) or container_debug_reveals_secret(docker_arguments):
@@ -11285,7 +11823,9 @@ class CommandScanner:
             if reads_stdin_code:
                 # ヒアドキュメントなど、内容が静的に分かる標準入力は検査できる
                 code_arguments = code_arguments + list(stdin_commands)
-            if code_starts_process(interpreter_cf, code_arguments):
+            if code_references_credential_path(code_arguments):
+                add_reason(self.reasons, CREDENTIAL_FILE_REASON)
+            elif code_starts_process(interpreter_cf, code_arguments):
                 add_reason(self.reasons, INTERPRETER_EXEC_REASON)
             elif code_builds_target_dynamically(code_arguments):
                 add_reason(self.reasons, INTERPRETER_OBFUSCATION_REASON)
@@ -11300,22 +11840,12 @@ class CommandScanner:
         # `set -a` (allexport) の間は、ただの代入もそのまま環境変数になる
         if command == "set":
             self.update_allexport(arguments, persist_assignments)
+            self.update_keyword(arguments, persist_assignments)
             self.update_xtrace(arguments, persist_assignments)
+        elif command == "shopt":
+            self.update_shopt_options(arguments, persist_assignments)
         # 組み込みによる代入も、allexport の間は環境変数になる
         self.taint_builtin_targets(command, arguments)
-
-        # サンドボックス外で走るコマンドは、設定の探索先を差し替えられると
-        # 用意した別の設定 (alias、credential.helper など) を読んでしまう
-        # git は excludedCommands が `git commit` / `git push` だけなので、
-        # サンドボックス内で走る参照操作 (`git status` など) は対象にしない
-        if CONFIG_ROOT_ENV_VARS & environment_names:
-            if command_cf == "git":
-                git_words = subcommand_words(arguments, GIT_VALUE_OPTIONS)
-                runs_outside_sandbox = git_words[:1] in (["commit"], ["push"])
-            else:
-                runs_outside_sandbox = command_cf in SANDBOX_EXCLUDED_COMMANDS
-            if runs_outside_sandbox:
-                add_reason(self.reasons, CONFIG_ROOT_ENV_REASON)
 
         # 受け取った文字列を shell として実行するラッパー (`npx -c` など)。
         # 中身はここまでの検査を丸ごと迂回できるため、解析し直す
@@ -11333,9 +11863,14 @@ class CommandScanner:
         ):
             self.inspect_argv(wrapped_argv, depth + 1)
 
-        # npm の設定は環境変数でも渡せる (`npm_config_call` はコマンド文字列)
+        # npm_config_call / script_shell はコマンドそのものを差し替える。
         if command_cf in PACKAGE_RUNNER_SUBCOMMANDS and any(
-            name.startswith(NPM_CONFIG_ENV_PREFIXES) for name in environment_names
+            name.casefold() in NPM_EXEC_ENV_NAMES
+            and environment_value_state(
+                name, effective_environment, effective_tainted_environment
+            )
+            in {"nonempty", "unknown"}
+            for name in environment_names
         ):
             add_reason(self.reasons, NPM_CONFIG_ENV_REASON)
 
@@ -11382,8 +11917,8 @@ class CommandScanner:
             ):
                 add_reason(self.confirmations, AUTH_CHANGE_CONFIRM_REASON)
 
-        # excludedCommands が明示的にローカルファイルを読む引数は、通常の
-        # denyRead を迂回するため、パスとして検査する。
+        # CLI が明示的にローカルファイルを読む引数は、外部送信や tool output
+        # への露出につながるため、パスとして検査する。
         if any(
             argument_references_credential_path(reference, path_context=True)
             for reference in command_file_ingress_references(command_cf, arguments)
@@ -11499,6 +12034,7 @@ class CommandScanner:
         elif command == "let":
             for expression in arguments:
                 try:
+                    self.taint_arithmetic_targets(expression)
                     self.check_arithmetic(expression)
                 except ShellScanError:
                     if not self.reasons:
@@ -11561,8 +12097,10 @@ class CommandScanner:
                     "dynamic expansion controls shell option or script operand"
                 )
             for startup_input in shell_startup_inputs(
+                command,
                 arguments,
                 effective_environment,
+                effective_tainted_environment,
             ):
                 if shell_word_is_dynamic(startup_input):
                     raise ShellScanError("dynamic shell startup input")
@@ -11570,9 +12108,13 @@ class CommandScanner:
                     if stdin_is_external:
                         add_reason(self.reasons, SHELL_STDIN_REASON)
                     for stdin_command in stdin_commands:
-                        self.scan(
+                        self.scan_child_shell(
+                            arguments,
+                            effective_environment,
+                            effective_tainted_environment,
                             stdin_command,
                             depth + 1,
+                            stdin_is_external=False,
                             reject_function_definitions=True,
                         )
                 elif (
@@ -11586,12 +12128,14 @@ class CommandScanner:
             if nested is not None:
                 if XARGS_REPLACEMENT_MARKER in nested:
                     raise ShellScanError("xargs replacement in shell command string")
-                previous_xtrace = self.xtrace
-                self.xtrace = self.xtrace or shell_enables_xtrace(arguments)
-                try:
-                    self.scan(nested, depth + 1, stdin_is_external)
-                finally:
-                    self.xtrace = previous_xtrace
+                self.scan_child_shell(
+                    arguments,
+                    effective_environment,
+                    effective_tainted_environment,
+                    nested,
+                    depth + 1,
+                    stdin_is_external,
+                )
             elif any(NON_STDIN_FD_PATH_RE.match(argument) for argument in arguments):
                 add_reason(self.reasons, SHELL_STDIN_REASON)
             elif any("__process_substitution__" in argument for argument in arguments):
@@ -11600,9 +12144,13 @@ class CommandScanner:
                 if stdin_is_external:
                     add_reason(self.reasons, SHELL_STDIN_REASON)
                 for stdin_command in stdin_commands:
-                    self.scan(
+                    self.scan_child_shell(
+                        arguments,
+                        effective_environment,
+                        effective_tainted_environment,
                         stdin_command,
                         depth + 1,
+                        stdin_is_external=False,
                         reject_function_definitions=True,
                     )
         elif command in {".", "source"}:
@@ -11739,10 +12287,14 @@ def main():
         print("pre-bash-guard.sh: " + PARSE_REASON + " " + str(error), file=sys.stderr)
         return 2
 
+    # Codex の PreToolUse は ask を扱わないため、deny のみ共通で強制する。
+    # 確認対象は共通規約に委ね、Claude Code では従来どおり ask を返す。
+    is_codex_event = isinstance(event.get("turn_id"), str)
+
     # 拒否理由があれば確認では通さない
     if scanner.reasons:
         print_decision_json(command, "deny", scanner.reasons)
-    elif scanner.confirmations:
+    elif scanner.confirmations and not is_codex_event:
         # bypassPermissions では確認ダイアログが出ない。確認で止めるつもりだった
         # 操作が素通りするため、このモードでは確認理由をそのまま拒否にする
         # (サンドボックス内で完結する例外は BYPASS_ALLOWED_CONFIRMATIONS)

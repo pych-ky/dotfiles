@@ -1,8 +1,22 @@
 {
+  "global": {
+    "show_in_menu_bar": true
+  },
   "profiles": [
     {
       "name": "Default profile",
       "selected": true,
+      "devices": [
+        {
+          "identifiers": {
+            "is_keyboard": true,
+            "is_pointing_device": true,
+            "product_id": 640,
+            "vendor_id": 13364
+          },
+          "ignore": false
+        }
+      ],
       "complex_modifications": {
         "rules": [
           {
@@ -41,6 +55,61 @@
                   {
                     "key_code": "r",
                     "modifiers": ["command"]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "description": "Claude: Enter -> Newline, Cmd+Enter -> Send",
+            "manipulators": [
+              {
+                "type": "basic",
+                "from": {
+                  "key_code": "return_or_enter",
+                  "modifiers": {
+                    "mandatory": ["command"],
+                    "optional": ["caps_lock"]
+                  }
+                },
+                "to": [
+                  {
+                    "key_code": "return_or_enter"
+                  }
+                ],
+                "conditions": [
+                  {
+                    "type": "frontmost_application_if",
+                    "bundle_identifiers": ["^com\\.anthropic\\.claudefordesktop$"]
+                  },
+                  {
+                    "type": "expression_if",
+                    "expression": "accessibility.focused_ui_element.role_string == 'AXTextArea'"
+                  }
+                ]
+              },
+              {
+                "type": "basic",
+                "from": {
+                  "key_code": "return_or_enter",
+                  "modifiers": {
+                    "optional": ["caps_lock"]
+                  }
+                },
+                "to": [
+                  {
+                    "key_code": "return_or_enter",
+                    "modifiers": ["shift"]
+                  }
+                ],
+                "conditions": [
+                  {
+                    "type": "frontmost_application_if",
+                    "bundle_identifiers": ["^com\\.anthropic\\.claudefordesktop$"]
+                  },
+                  {
+                    "type": "expression_if",
+                    "expression": "accessibility.focused_ui_element.role_string == 'AXTextArea'"
                   }
                 ]
               }

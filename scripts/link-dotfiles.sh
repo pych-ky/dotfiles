@@ -167,9 +167,10 @@ is_correct_symlink() {
 
 # 自リポジトリ由来の管理対象外シンボリックリンクだけを削除
 remove_obsolete_symlink() {
-  local relative="$1"
-  local source="$repo_dir/$relative"
-  local target="$HOME/$relative"
+  local source_relative="$1"
+  local target_relative="${2:-$1}"
+  local source="$repo_dir/$source_relative"
+  local target="$HOME/$target_relative"
 
   is_correct_symlink "$target" "$source" || return 0
   run rm "$target"
@@ -342,6 +343,7 @@ main() {
     ".codex/browser/config.toml"
     ".claude/CLAUDE.md"
     ".claude/settings.json"
+    ".claude/keybindings.json"
     ".claude/hooks/pre-bash-guard.py"
     ".claude/hooks/pre-bash-guard.sh"
     ".claude/hooks/statusline.sh"
@@ -362,6 +364,11 @@ main() {
   # 廃止した注入フックのリンクを、自リポジトリ由来の場合だけ除去
   if ! remove_obsolete_symlink ".claude/hooks/inject-guidelines-context.sh"; then
     failed_items+=(".claude/hooks/inject-guidelines-context.sh (obsolete symlink)")
+  fi
+
+  # 旧構成で作成した認証 CLI 用 rule のリンクだけを除去する。
+  if ! remove_obsolete_symlink ".config/codex/rules/authenticated-cli.rules" ".codex/rules/authenticated-cli.rules"; then
+    failed_items+=(".codex/rules/authenticated-cli.rules (obsolete symlink)")
   fi
 
   for file in "${files[@]}"; do
@@ -418,6 +425,10 @@ main() {
     printf 'failed items:\n' >&2
     printf '  %s\n' "${failed_items[@]}" >&2
     return 1
+  fi
+
+  if ((!dry_run)); then
+    printf 'restart Codex to load updated hooks and permissions\n'
   fi
 }
 

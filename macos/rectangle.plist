@@ -22,6 +22,8 @@
 	<string>99</string>
 	<key>launchOnLogin</key>
 	<true/>
+	<key>hideMenubarIcon</key>
+	<false/>
 	<key>reflowTodo</key>
 	<dict>
 		<key>keyCode</key>

@@ -30,7 +30,6 @@ brew "tree"
 brew "jq"
 brew "yq"
 brew "shfmt"
-brew "duti"
 
 # Git / GitHub
 brew "git"
@@ -48,6 +47,7 @@ brew "uv"
 # aws / terraform / terragrunt は mise (.config/mise/config.toml) が持ち主。
 # ここでも宣言すると mise の shim が PATH 先頭に入って二重管理になるため置かない。
 # kubectl / helm は Rancher Desktop 同梱 (~/.rd/bin) を使う
+brew "azure-cli"
 brew "opa"
 brew "openshift-cli"
 brew "rosa-cli"
@@ -93,6 +93,10 @@ cask "logi-options+"
 cask "rancher"
 # Rancher Desktop と競合するため、使う場合はどちらか一方にする
 # cask "docker-desktop"
+
+# クラウド CLI (cask 配布)
+cask "gcloud-cli"
+cask "session-manager-plugin"
 
 # IaC linter (cask 配布)
 cask "terraform-linters/tap/tflint", trusted: true

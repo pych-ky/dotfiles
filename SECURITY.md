@@ -12,22 +12,25 @@
 > 一方で、credential helper・認証エージェント・署名ブローカーが内部で認証する通常の Git・AWS・コンテナ操作は制限しない。
 
 そのため、`security` や `aws` のようなコマンド名だけで一律に拒否せず、秘密値を出力するサブコマンドと、そうでないサブコマンドを分けて判断します。
+通常操作の自由度を優先し、CLI が内部利用する設定・credential store を OS の path deny では遮断しません。
+秘密値の直接取得は組み込みの `Read` deny、PreToolUse、共通規約で止めます。任意スクリプトや Keychain API などの残存経路は、隔離 runner や broker がない限り強制境界にならないことを明示します。
 
 `.claude/settings.json` の `permissions` は allow / deny の 2 区分だけを持ちます（`ask` は空）。
 確認が要る操作は、文字列規則では表記を網羅できないため、フックが実行時に `ask` を返して扱います。
+Codex の PreToolUse は `ask` 非対応のため、フックでは hard deny だけを強制し、確認は共通規約に従います。
 
 | 区分 | 決めるところ | 対象 |
 | --- | --- | --- |
 | deny | settings + フック | 保存済みの秘密値を出力する操作、それを持ち出す操作、検査を迂回する操作 |
 | allow | settings + フック | 秘密値を出力しない参照・状態確認と、通常の開発操作 |
-| ask | フックのみ | 不可逆な操作と、サンドボックス外で外部やホストの状態を変えうる操作（`bypassPermissions` では deny になる） |
+| ask（Claude Code） | フックのみ | 不可逆な操作と、外部やホストの状態を変えうる操作（`bypassPermissions` では deny になる） |
 
 ### 多層防御
 
 1. 規約: `.config/agents/AGENTS.md` が、行わないこと・行ってよいこと・確認してから行うことを定義する。
    Claude Code と Codex の双方がこのファイルを参照する
-2. コマンド遮断: `.claude/settings.json` は固定したコマンド形を、`.claude/hooks/pre-bash-guard.py` は引数の意味まで含む形を判断する。
-  `permissions.ask` は空とし、settings は許可または拒否へ二分する。確認はフックが `ask` を返して行う。
+2. コマンド遮断: `.claude/settings.json` は固定したコマンド形を、Claude Code と Codex が共有する `.claude/hooks/pre-bash-guard.py` は引数の意味まで含む形を判断する。
+  `permissions.ask` は空とし、settings は許可または拒否へ二分する。Claude Code の確認はフックが `ask` を返して行い、Codex は hard deny だけを同じフックから受け取る。
    フックはシェルを構文解析するため、パイプ・置換・`xargs`・関数定義を挟んでも同じ判断になる
    - キーチェーン: `security find-generic-password` / `find-internet-password` の `-w` / `-g`、`security dump-keychain`、秘密鍵や identity を含みうる `security export` は deny。実効 type を `certs` / `pubKeys` と明示した公開物だけの export は allow
      `security unlock-keychain` は秘密値を出力しないため、認証状態の変更として確認へ回す。
@@ -45,34 +48,40 @@
      ローカルの build context・bind mount・追加 context・ホストからのコピー元は、内容を開かずファイル名だけを走査する。`.dockerignore` で除外済みでも、保護対象名が存在する context は安全側で deny する
    - サブコマンドの判定では、値を取るグローバルオプションの一覧に漏れがあってもすり抜けないよう、
      未知のオプションは「値を取る」「取らない」の両方を候補に展開し、どれかが該当すれば拒否する
-3. 読み取り遮断: 認証情報ファイルを `Read` の deny とサンドボックスの `denyRead` の両方に登録し、さらにフックが**コマンドの引数としての指定**も拒否する。
-   `excludedCommands`（`docker` / `gh` / `terraform` / `terragrunt` / `git commit` / `git push`）はサンドボックスを迂回して `denyRead` が効かないため、この 3 層目が必要になる。
+3. 直接読み取り遮断: Claude Code の組み込み `Read` deny に認証情報ファイルを登録し、さらにフックが**コマンドの引数としての指定**を拒否する。
+   `Read` deny は同じパスへの Edit / Write と、Claude Code が認識できる `cat` / `head` / `tail` / `sed` などの Bash ファイル操作も拒否する。任意スクリプトや CLI 内部からの間接アクセスには適用しない。
+   GitHub、AWS、SSH、Kubernetes、コンテナ、クラウド、パッケージ管理などの CLI 設定・credential store と macOS Keychain は通常操作に必要なため、Claude Code の Bash と Codex の filesystem policy から利用可能にする。直接取得の拒否は PreToolUse と共通規約で維持する。
    ROSA/OCM、Helm repository / registry、uv credentials store、PostgreSQL の password / service file、pip・curl・wget・Bundler・Composer・Poetry の認証設定、shell 履歴、Codex / Claude Code の会話履歴・session transcript・file history・paste cache・shell snapshot、ユーザーおよびシステムの macOS Keychain、KeePass、service account の既知ファイルも同じ対象にする。
-   `.git-credentials`、`.netrc`、`.pgpass`、`.npmrc`、`.pypirc` と既知の token store は、ホーム外やワークスペース内の同名パスも対象にする。
+   `.git-credentials`、`.netrc`、`.pgpass`、`.npmrc`、`.pypirc` と既知の token store は、ホーム以下と、セッションの起動・現在ディレクトリ直下にある同名パスを対象にする。ホーム外では Claude Code をプロジェクトルートから起動する。
    AWS・Kubernetes・コンテナ・GitHub・OCM・Helm・uv・PostgreSQL・パッケージ管理などの標準環境変数で保存先を差し替えた場合も、内容読み取りだけを拒否し、`test -e` / `test -f` は許可する
    `rsync --password-file` と `file://` / `fileb://` の指定も通常のパス指定として扱う
-   認証情報パスの一覧を変更するときは、関連する 4 箇所を同時に更新する
-4. サンドボックス: Codex は `:workspace` を継承した `hardened` 権限プロファイルを基本とし、認証情報パスの読み取りを拒否する。
-   `:workspace_roots` の deny glob で、ワークスペース直下と入れ子の既知認証情報ファイルも同じように拒否する。
-   環境変数は `inherit = "core"` に加え、既定除外（`*KEY*` / `*SECRET*` / `*TOKEN*`）と `[shell_environment_policy.filters]` で絞る。認証ファイルの保存先を示す変数も Codex へ継承しない。Claude はフックで内容読み取りと存在確認を分けられるが、Codex はこの変数単位の除外を安全側の制約として受け入れる
-   Codex の shell snapshot は、展開済みの shell 環境を平文へ保存しないよう無効にする。Claude の shell snapshot は Bash 実行基盤が内部で使うため sandbox の `denyRead` には入れず、Read deny とフックでモデルからの直接参照だけを拒否する
-   ブラウザ操作は常時承認（`always_ask`）とし、CDP フルアクセスは有効化しない（設定を置かず既定の無効のままにする）
+   Claude Code のユーザー設定では、ホーム以下の再帰パターンを `Read(~/**/...)`、起動・現在ディレクトリ直下を `Read(./...)` で指定する。ユーザー設定の `Read(/...)` は `~/.claude` 相対であり、プロジェクトルート相対にはならない。`Read` のシステム絶対パスは `Read(//...)` を使う
+   macOS の `/etc` は `/private/etc` への symlink なので、固定の system path は必要に応じて両方の表記を deny する
+   PEM / DER は公開証明書にも使われるため拡張子だけでは拒否せず、exact basename の `key.pem`、stem が `priv` / `private` と一致する名前、接頭・接尾を区切った `priv`、接尾を区切った `private`、`privkey` / `privatekey` と `client-key` / `server-key` / `tls-key` などの既知名を拒否する。`privatelink-ca.pem` のように通常語の一部として `priv` を含むだけの名前は拒否しない
+   標準 SSH 秘密鍵名の静的 deny は exact basename に限定し、`.pub` を巻き込まない。フックは `.pub` を判別できるため、`id_ed25519_work` のような接尾辞付き秘密鍵も拒否する
+   認証情報パスの一覧を変更するときは、適用範囲に応じて共通規約、Claude Code の `Read` deny、フックを更新する。Codex の filesystem deny には外部 CLI が利用しうる認証材を追加しない
+4. 既定許可: Codex はルート全体の読み書きとネットワークを許可する「保護付きフルアクセス」権限プロファイルを既定とする。
+   Codex / Claude Code 自身の認証・履歴と shell 履歴だけを固定 deny にする。`.env`、秘密鍵、keystore、service-account などは Docker Compose、TLS、署名、クラウド CLI が内部利用しうるため path deny に入れず、直接取得だけをフックと規約で拒否する。
+   Codex の filesystem `deny` は読み取りだけでなく書き込み・移動・削除も拒否する。AI エージェント内部データの固定 deny を更新する必要がある場合は、Codex へ承認して実行させるのではなくユーザーが端末で行う。
+   Git / `gh` / `aws` を含む CLI に個別の allow rule は置かず、設定と認証キャッシュの読み書きも同じ権限プロファイルで実行する。秘密値を返す呼び出しと直接読み取りは共通の PreToolUse ガードで拒否する。
+   外部 CLI が利用しうる認証情報と秘密鍵は path policy の強制境界ではなく、`AGENTS.md` と PreToolUse で直接読み取らない。
+   環境変数は `inherit = "all"` とする。`TOKEN_FILE` などの非秘密パスまで巻き込む既定除外は使わず、`[shell_environment_policy.filters]` で秘密値名と実行体・暗黙の引数を差し替える変数だけを除外する。認証ファイルの保存先を示す変数は CLI の通常利用を妨げないため一律には除外しない
+   Codex の shell snapshot は、展開済みの shell 環境を平文へ保存しないよう無効にする。Claude の shell snapshot は `Read` deny とフックでモデルからの直接参照を拒否する
+   Browser プラグインはサイト利用・履歴・ファイル転送を常時確認とし、CDP フルアクセスは無効にする。Computer Use は別のアプリ承認境界であり、`Always allow` を選んだアプリでは以後の確認が省略される。承認したログイン済みサイトの表示内容とセッション権限で行える操作は残存リスクとして扱う
+   Claude Code は `auto` を既定とする。Auto では bare `Bash` allow が一時的に外れ、通常操作は classifier が承認する。filesystem sandbox は `.git/config` の更新と CLI の設定・認証ストア、ネットワークを一律に妨げるため明示的に無効化する。組み込みの `Read` deny は維持する
 5. 起動運用: AI エージェントは、認証情報の平文を環境変数へ設定しない新しいターミナルセッションから起動する。
   認証は credential helper・キーチェーン・認証エージェントへ委譲する
 6. 検査の迂回経路の遮断: 「コマンド名を見る」検査をすべて迂回できる経路を、フックで個別に塞ぐ。
    - git の設定注入: 外部コマンドを起動させる設定（`core.pager`、`credential.helper` など）、URL 単位で書ける `credential.<url>.helper` / `protocol.<name>.allow` / `url.<base>.insteadOf`、
      別ファイルを読み込ませる `include.path` / `includeIf.*.path`、`git -c` / `--config` / `--config-env`、
      同等の環境変数（`GIT_SSH_COMMAND` など）と `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n` / `GIT_CONFIG_PARAMETERS`
-   - サンドボックス外で走るコマンドの任意実行口: `gh` の `alias` / `extension` / `config`、`terraform` / `terragrunt` の `console`。
-     あらかじめ登録された shell alias は「知らないサブコマンド」として現れるため、`gh` / `terraform` / `git` とも既知のサブコマンド以外は拒否する
-   - サンドボックス外で走るコマンドの環境変数による差し替え: `TF_CLI_ARGS` / `TF_CLI_ARGS_<command>`（コマンドラインに現れない `-json` を後から差し込める）、
-     `TG_TF_PATH` / `TERRAGRUNT_TFPATH`（実行体の差し替え）、`GH_CONFIG_DIR`（alias を書いた config を読ませる）、
-     `DOCKER_HOST` / `DOCKER_CONFIG` / `DOCKER_CERT_PATH` / `BUILDKIT_HOST` / `BUILDX_BUILDER`、`npm_config_*`（`npm_config_call` はコマンド文字列そのもの）。
-     設定の探索先そのものを変える `HOME` / `XDG_CONFIG_HOME` は、実際にサンドボックス外を走る呼び出しに対して拒否する
-     （git は `commit` / `push` のみが `excludedCommands` なので、`git status` のような参照は対象にしない）。
-     判定は同じ argv の前置代入だけでなく、同じ Bash 呼び出しの中で `export` された変数も含めて行う
-   - 同じことをする CLI オプション: docker の `--host` / `-H` / `--context` / `-c` / `--config` / `--tlscacert` / `--tlscert` / `--tlskey`
-     （サブコマンド側の同名オプションと紛れないよう、サブコマンドより前の位置に限って見る）と、buildx の `--builder`
+   - 任意ファイルの出力口: `terraform` / `terragrunt` の `console`。
+     Git / `gh` / Terraform の未知サブコマンドは一律拒否せず、具体的に秘密値を出力する形だけを拒否する
+   - コマンド設定の環境変数による差し替え: `TF_CLI_ARGS` / `TF_CLI_ARGS_<command>`（コマンドラインに現れない `-json` を後から差し込める）、
+     `TG_TF_PATH` / `TERRAGRUNT_TFPATH`（実行体の差し替え）、`GH_PAGER` / `GH_EDITOR` / `GH_BROWSER` と fallback の `PAGER` / `EDITOR` / `VISUAL` / `BROWSER`、
+     `AWS_PAGER` / `MANPAGER`（外部 pager）、`BASH_ENV` / `ZDOTDIR` / `SHELLOPTS`（shell の起動ファイル・オプション）、`DOCKER_CLI_PLUGIN_EXTRA_DIRS`、`npm_config_call` / `npm_config_script_shell`（実行コマンドの差し替え）。
+     判定は同じ argv の前置代入だけでなく、継承環境と同じ Bash 呼び出しの中で `export` された変数も含めて行う。CLI の仕様上、空値で pager を無効化する指定は許可する
+     一方、`AWS_CONFIG_FILE`、`KUBECONFIG`、`GH_CONFIG_DIR`、`DOCKER_HOST` / `DOCKER_CONFIG`、`TF_CLI_CONFIG_FILE`、`HOME` / `XDG_CONFIG_HOME` などの標準的な設定・接続先変数と、それに対応する通常の CLI オプションは許可する。これらを reader へ渡す直接読み取りだけを拒否する
    - `git config` による永続化: `-c` の一時指定だけでなく、設定ファイルへ書き込む形（`git config core.hooksPath ...`、`--add`、`config set` など）も見る。
      書き込む先が外部コマンドを起動する設定キーなら deny、それ以外の書き込みは確認へ回す。
      `--get` / `--list` / `config get` / `config list` と、値を伴わない `git config <key>` は読み取りとして通す
@@ -96,40 +105,29 @@
      `BUILDX_BAKE_GIT_SSH`（SSH agent の socket を転送する）は、外部状態の変更ではなく認証情報の受け渡しとして deny。
      このほか `-v` / `--mount` / `--env-file` / `-e` / `--build-arg` / `--secret`（`src=` と `env=` の双方）/ ビルドコンテキスト、
      buildx bake の `--set <target>.secret.<id>=src=` / `.ssh` / `.context`、およびホストの socket（`--use-api-socket`、`*.sock` のマウント）
-     このほか、入力リダイレクトやオプションへ連結した認証情報パス、通常ファイルの `source` / `.`、認証情報を持つ環境変数の引数展開も拒否する。出力リダイレクトや、方向が明確な標準コマンドによる保護対象パスへの書き込み・移動・削除は内容読み取りではないため、deny ではなく確認へ回す
+     このほか、入力リダイレクトやオプションへ連結した認証情報パスと、認証情報を持つ環境変数の引数展開も拒否する。通常ファイルの `source` / `.`、出力リダイレクト、方向が明確な標準コマンドによる保護対象パスへの書き込み・移動・削除は、静的 deny に一致しない場合、Claude Code では確認へ回し、Codex では共通規約に従う。Codex の filesystem deny や Claude Code の `Read` deny に一致する操作は、承認後も実行できない
      コンテナ内でも、標準 reader の file operand と `tar` が archive へ取り込む入力元には同じパス判定を適用する
      標準の proxy 変数は値の明示展開だけを拒否し、クライアントによる暗黙利用と値を返さない存在確認は許可する
 
 ### 判断の記録
 
-- Claude Code の `permissions.defaultMode` は `auto` とする。
+- Claude Code の `permissions.defaultMode` は `auto` とする。Auto では任意コード実行になる bare `Bash` allow が一時的に外れ、通常操作は classifier が承認する。Auto 以外のモードへ切り替えると bare `Bash` allow が再び有効になる。
   `bypassPermissions` を明示的に選んだ場合、確認ダイアログが出ないため、フックの確認理由はそのまま拒否になる。
-  例外はインタプリタへ直接渡したコードだけで、次の 2 点が根拠になる。
-  外部プロセスの起動と難読化はモードによらず既に deny であること、
-  インタプリタは `excludedCommands` ではないためサンドボックス内で動き、`denyRead` により認証情報へ到達できないこと。
-  ここを拒否にすると `bypassPermissions` では一切のスクリプト処理ができなくなる。
+  インタプリタへ直接渡したコードは、既知の認証情報パス、外部プロセス起動、難読化を含む形をモードによらず deny し、それ以外を確認へ回す。
+  Codex の PreToolUse は確認を扱えないため、hard deny に該当しないコードは共通規約に従う。
   公式の注意どおり、`bypassPermissions` はコンテナや VM などの隔離環境でのみ使用する
 - スクリプトファイルの実行（`bash x.sh`、`python3 x.py`、`./x.sh`）は、モードによらず止めない。
-  これらはサンドボックス内で動くため `denyRead` が効き、その中から起動した `gh` / `git push` も同じくサンドボックス内で認証情報へ到達できない。
+  これらは CLI 設定・認証ストアへ到達できる。スクリプト本文は PreToolUse で解析しないため、直接取得の禁止は共通規約に依存する。
   一方、文字列を shell へ渡すラッパー（`npx -c` など）は中身を解析し直せるので、そちらは実際に検査する
-- **この判断が守るのは「認証情報の読み取り」だけである。**
-  サンドボックスの `denyRead` は読み取りしか止めないため、`bypassPermissions` で未解析のコードやスクリプトを通すと、
-  ワークスペース内のファイル書き換えと、許可ドメインへの通信は防げない。
-  つまり `rm -rf` や force push をフックが確認へ回していても、同じ結果を
-  `python3 -c` やスクリプトから起こすことは止められない。
-  破壊操作まで保証したい場合は、`bypassPermissions` を使わない（`auto` のままにする）か、
-  隔離環境で動かすかのいずれかが要る
+- **この構成はプロセス分離による強制境界ではない。**
+  Claude Code の Bash sandbox を無効化し、Codex でも CLI の credential store を path deny から外すため、任意スクリプトや独自バイナリは PreToolUse の字句検査を迂回できる。
+  `rm -rf` や force push、認証ファイルの直接読み取りをフックが止めても、同じ処理をスクリプトファイル内から起こすことまでは防げない。
+  AI が秘密値へ到達できないことを OS レベルで保証するには、秘密値を返さない broker、別ユーザー、コンテナ、VM などの隔離が要る
 - `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` は使わない。
   既定以外の permission mode と競合するため、起動前に新しいターミナルセッションを開き、秘密値を環境変数へ設定しない運用とする
-- `sandbox.allowUnsandboxedCommands` は `false`（Strict sandbox mode）とし、`dangerouslyDisableSandbox` による非サンドボックス再実行を禁止する
-- `gh` / `docker` / `terraform` / `terragrunt` / `git commit` / `git push` はサンドボックス外で実行する。
-  `gh` は認証、`docker` はソケット接続、`git commit` は pre-commit フック、`git push` は credential helper のために必要になる。
-  ただし `excludedCommands` はサンドボックスを完全に迂回し `denyRead` が効かないため、補償として上記のコマンド遮断とフックを置く。
-  とくに `gh` と `terraform` はコマンド名単位の除外だけでは守れない（`gh alias set x '!command'` で任意のコマンドを、
-  `terraform console` の `file()` で任意のファイルを扱えるため）。既知のサブコマンド以外を拒否する guard をフックに置いている
-- サンドボックス内の `git fetch` / `git pull` / `git clone` は excludedCommands に**含めない**。
-  credential helper がトークンの保管先へ到達できないため非公開リポジトリでは失敗するが、認証待ちでハングしないよう `GIT_TERMINAL_PROMPT=0` を設定する。
-  ここを迂回させるより、失敗させるほうを選ぶ
+- Claude Code の Bash sandbox は無効化する。コマンド別の `excludedCommands` やドメイン・パス allowlist は設けない
+- Git / `gh` / `aws` を含む通常 CLI は同じ既定 Allow の実行経路で動かす。各 CLI の設定と認証キャッシュを利用可能にし、非公開リポジトリ、AWS SSO、SSH/GPG、Kubernetes、コンテナ、クラウド、パッケージ管理を通常どおり扱う。
+  `GIT_TERMINAL_PROMPT=0` は認証設定が壊れた場合のハング防止として残す
 - GitHub の認証は SSH へ移行せず、HTTPS と通常の `gh auth git-credential` を使う。
   組織固有の URL だけ非公開側の設定で `ghtkn git-credential` に切り替え、8 時間で失効する User Access Token を使う。
   `gh auth login` と `ghtkn auth` のように秘密値を出力しない認証状態変更は、フックの確認を経て実行できる。
@@ -138,13 +136,16 @@
   一時認証情報そのものをシェルへ載せず、既存の credential provider 環境変数も値を展開せず設定有無だけを確認する
 - `permissions.ask` は空とし、settings は allow / deny に二分する。
   文字列規則だけでは表記を網羅できない操作（`rm -rf`、force push、書き込みを伴う `gh api`、
-  サンドボックス外 CLI の状態変更など）は settings では書き分けず、フックが実行時に判定する。
+  外部状態の変更など）は settings では書き分けず、フックが実行時に判定する。
   フックは通常モードでは `ask` を返して確認へ回し、`bypassPermissions` では確認が表示されないため deny を返す
-- Claude Code の `Read` deny と Codex の `:workspace_roots` deny に `**/.env.*` を残す（`.env.example` も読めなくなる）。
-  どちらの権限ルールにも安全な否定表記が無く、実値を持つ `.env.local` などを覆うほうを優先する。
+- Codex は認証 CLI 用の command rule を置かず、「保護付きフルアクセス」をすべてのコマンドの既定とする。
+  Codex の PreToolUse は `ask` 非対応のため、hard deny だけを強制する。
+  外部状態の変更確認は `.config/agents/AGENTS.md` と明示的なユーザー指示に依存し、改ざん耐性のある実行時境界ではない
+- Claude Code の `Read` deny に `~/**/.env.*` を残す（`.env.example` も読めなくなる）。
+  Claude Code の権限ルールには安全な否定表記が無く、実値を持つ `.env.local` などを覆うほうを優先する。
+  Codex は Docker Compose などの内部利用を妨げないよう、ワークスペースの `.env` を filesystem deny に入れない。直接読み取りはフックと `AGENTS.md` で禁止する。
   フックは雛形（`.env.example` / `.env.sample` / `.env.template` / `.env.dist`）を通す。
-  **これは過剰制限が残っている箇所である**（雛形を読ませたい場合は、`env.example` のように
-  `.env` で始まらない名前へ正本を置くのが現時点の回避策）
+  Claude Code の組み込み `Read` で雛形を扱う場合は、`env.example` のように `.env` で始まらない名前を使う
 - 真偽オプションは表記を正規化して判定する。
   `--show-token` と `--show-token=true` を別物として扱うと、hard deny を表記だけで回避できる
 - パスの比較はすべて casefold し、区切りの重複や `.` / `..` を畳んでから突き合わせる。
@@ -167,9 +168,8 @@
 - buildx bake の `--set` は、ターゲット名の**次の語だけ**を種別として見る。
   `targetpattern.key[.subkey]=value` の subkey まで種別に含めると、`target.args.ssh` のような
   普通の build argument 名が SSH 転送と誤認される
-- git のサブコマンドは既知の一覧（`git help -a`）に無いものを拒否する。
-  `git commit` / `git push` はサンドボックス外で走るため、`git config alias.x '!command'` で登録した
-  alias から任意のコマンドを起こせてしまう
+- Git / `gh` / Terraform のサブコマンドは allowlist 化しない。
+  拡張や alias も通常機能として許可し、秘密値を出力する呼び出しと、外部コマンドを永続的に注入する具体的な設定だけを拒否する
 - 認証情報パスの判定は、書かれた表記と `realpath` で解決した実体の**両方**へ同じ規則を当てる。
   無害な名前の symlink を置けば、名前だけの判定は素通りしてしまう。
   ただし保管先ディレクトリ（`secrets/` / `credentials/`）の判定を解決後のパスへ常に当てると、
@@ -192,7 +192,7 @@
   前置代入と同じ結果になる。
   値は条件付き実行や関数呼び出しのあとで巻き戻すが、**変数名は taint として増える一方で保持する**。
   実際の bash では成功した `export` が後続コマンドへ残るため、
-  `export GH_CONFIG_DIR=/tmp/fake && gh pr list` を通してはいけない。
+  `export TF_CLI_ARGS_show=-json && terraform show` を通してはいけない。
   巻き戻さない代わりに `export -n` での打ち消しも追わないが、これは安全側の誤差である。
   `export` と書かれていなくても環境へ載る経路も同じ扱いにする。
   `set -a`（allexport）の間の代入と、`VAR=value fn` のように関数呼び出しへ前置した代入がそれにあたる。
@@ -223,9 +223,9 @@
   途中に置いても前方一致しか効かず、覆えていないことに気付けないため
 - 「コマンドラインに現れる字句そのものを拒否する」規則は廃止した。
   文書の grep のような無害な操作まで止まる一方、実行経路はシェルの構文解析で判断できるため
-- Codex CLI の認証情報はキーチェーンを避けてファイル（`~/.codex/auth.json`）に保管し、Claude 側の `denyRead` と Codex 側の権限プロファイルの双方に登録する
+- Codex CLI の認証情報はキーチェーンを避けてファイル（`~/.codex/auth.json`）に保管し、Claude 側の組み込み `Read` deny と Codex 側の権限プロファイルの双方に登録する
 - Codex の Chrome 拡張と外部ブラウザ機能は無効化しない。
-  ログイン済みブラウザは Cookie 経由で機密に到達しうるため、専用プロファイルが用意されるまでは常時承認のままにする
+  Browser プラグインは常時確認とし、CDP フルアクセスは無効にする。承認後はログイン済みサイトの表示内容とセッション権限で行える操作へ到達できることを残存リスクとして扱う
 - URL 限定 helper に使う `ghtkn` の導入元は mise に一本化する。
   Homebrew と二重に宣言すると、shim と実体のどちらが動くかが端末の状態で変わる
 
@@ -239,23 +239,23 @@
   `.claude/settings.json`、`.claude/hooks/`、`git-hooks/` はいずれも追跡ファイルへのシンボリックリンクであり、エージェントが編集できる。
   現状の遮断は「改ざん耐性のある強制」ではなく「既定の運用」である
 - Codex からの macOS Keychain API 呼び出し。
-  `~/Library/Keychains` などの filesystem deny は Keychain ファイルの直接読み取りを止めるが、`securityd` を介した Keychain API まで遮断するものではない。
-  Claude Code はフックで標準の `security` 秘密出力コマンドを拒否する一方、Codex には同等の実行前フックがない。
+  credential helper の内部利用を妨げないよう、Codex の filesystem deny には Keychain を入れない。Claude Code の組み込み `Read` deny と共通規約はファイルの直接取得を、Claude Code と Codex の PreToolUse フックは標準の `security` 秘密出力コマンドを拒否するが、どちらも Security.framework を直接呼ぶ任意コードまでは判定できない。
   現時点では AGENTS の絶対禁止と会社の EDR による検知・確認を前提とし、Keychain IPC の OS レベル拒否や別ユーザー境界は導入していない
 - Git の追跡済み内容と履歴に対する広い参照。
   `.env` のように既知の認証情報パスをそのまま指定した形は拒否するが、パスを省略した `git diff` / `git show` / `git log -p` / `git archive` や `.` / `*` まで一律には拒否しない。glob や pathspec magic を使った任意の変形も完全には照合しない。
   通常の Git 操作を維持するため、認証情報を commit しないことを前提とする。誤って commit した認証情報を Git object database から取り除いて表示内容を安全に仲介する仕組みは未導入
 - AWS の署名ブローカー、または認証済みの隔離 runner。
-  `aws-env` を廃止したため一時認証情報はシェルに載らないが、代わりの安全な受け渡し口はまだ無い。
+  `aws-env` を廃止したため一時認証情報はシェルに載らないが、AWS CLI 自体は既定の実行経路から SSO キャッシュを使う。
+  CLI を認証済み環境から分離する署名ブローカーはまだ無い。
   `credential_process` が生の認証情報を AI 制御下のプロセスへ返すだけの構成は、最終解としない
+  Git / `gh` / AWS CLI の外部 pager は、Codex では継承対象から除外し、Claude Code では空値へ固定して無効化する。`~/.aws/login` や CLI alias を含む AWS 管理下のパスは、通常の CLI 利用を優先して filesystem deny には入れない
 - AI 専用の隔離 Docker デーモン、または VM。
   現在の `docker` はホストのソケットへ接続するため、コンテナ経由の持ち出しはフックの暫定 guard だけで塞いでいる。
   静的解析で読み切れない経路（Compose ファイルの中身など）は残存リスクとして受容している
-- AI 専用の Chrome プロファイル。
-  個人用プロファイルを接続しない前提を、設定ではなく運用で守っている段階
-- `gh` / `terraform` / `terragrunt` を `excludedCommands` に残したままにしている。
-  既知のサブコマンドだけを通す guard を置いたが、`terraform plan` / `apply` はプロバイダのプラグインバイナリを
-  サンドボックス外で実行するため、原理的には任意のコードが動く。
+- AI 専用の Chrome プロファイルと Computer Use の固定承認ポリシー。
+  個人用プロファイルを接続しない前提を、設定ではなく運用で守っている段階。Browser プラグインは常時確認・CDP フルアクセス無効だが、Computer Use には macOS 上で全アプリ共通の固定承認ポリシーを置いていない
+- Claude Code の Bash と Codex のコマンドは OS サンドボックスで分離していない。
+  `terraform plan` / `apply` などはプロバイダのプラグインバイナリを実行するため、原理的には任意のコードが動く。
   限定した wrapper／ブローカー、または隔離 runner を用意するまでの残存リスクとして受容している
 - インタプリタへ渡したコードの検査。
   外部コマンドの起動と、実行対象を実行時に組み立てる書き方（`__import__`、`eval`、`require` など）は
@@ -263,7 +263,8 @@
   検査しきれない分は実行そのものを ask にして補っているが、最終的には OS レベルの隔離が要る
 - AI エージェントからの GitHub 認証。
   通常の Git helper と `gh` は `gh auth login` の認証を使い、組織固有 URL の Git helper だけは非公開側で ghtkn に切り替える。
-  どちらも保管先へ安全に到達できないサンドボックス内の操作には、秘密値を返さない broker か wrapper が別途要る
+  現在は通常 CLI が保管先へ到達できるようにしており、認証だけを仲介する broker / wrapper には分離していない。
+  GitHub、AWS、SSH、Kubernetes、コンテナ、クラウド、パッケージ管理などの CLI 設定・認証ストアはスクリプトからも到達できるため、直接読み取りの遮断は PreToolUse と共通規約による運用境界であり、OS レベルの hard deny ではない
 - 各ブローカー socket の最終的な allowlist と、実認証を伴うエンドツーエンド検証
 
 ## 非公開での報告
