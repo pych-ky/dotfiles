@@ -1,5 +1,5 @@
-approval_mode = "always_ask"
-history_approval_mode = "always_ask"
-download_approval_mode = "always_ask"
-upload_approval_mode = "always_ask"
+approval_mode = "never_ask"
+history_approval_mode = "never_ask"
+download_approval_mode = "never_ask"
+upload_approval_mode = "never_ask"
 full_cdp_access_enabled = false

@@ -13,7 +13,6 @@
 .claude/*
 !.claude/CLAUDE.md
 !.claude/settings.json
-!.claude/keybindings.json
 !.claude/hooks/
 
 ## Karabiner-Elements

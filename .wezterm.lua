@@ -1,19 +1,41 @@
 local wezterm = require("wezterm")
 
 return {
-  -- 修飾付き Enter を TUI が区別できるよう、要求された拡張キー入力を有効化
+  -- TUI から要求された Kitty keyboard protocol のキーエンコーディングを有効化
   enable_kitty_keyboard = true,
   keys = {
-    -- Codex と Claude Code 共通の送信キーへ変換
+    -- CMD+C: 選択中はメニュー処理を介さずコピーし、選択がなければ中断
     {
-      key = "Enter",
+      key = "c",
       mods = "CMD",
-      action = wezterm.action.SendKey({ key = "Enter", mods = "CTRL" }),
+      action = wezterm.action_callback(function(window, pane)
+        local text = window:get_selection_text_for_pane(pane)
+        if text ~= "" then
+          window:copy_to_clipboard(text, "Clipboard")
+        else
+          window:perform_action(wezterm.action.SendKey({ key = "c", mods = "CTRL" }), pane)
+        end
+      end),
     },
-    -- CMD+A: 標準の「全選択」では取り切れないスクロールバック全体をクリップボードへコピー
     {
       key = "a",
       mods = "CMD",
+      action = wezterm.action.SendKey({ key = "a", mods = "CTRL" }),
+    },
+    {
+      key = "e",
+      mods = "CMD",
+      action = wezterm.action.SendKey({ key = "e", mods = "CTRL" }),
+    },
+    {
+      key = "r",
+      mods = "CMD",
+      action = wezterm.action.SendKey({ key = "r", mods = "CTRL" }),
+    },
+    -- CMD+SHIFT+A: 標準の「全選択」では取り切れないスクロールバック全体をクリップボードへコピー
+    {
+      key = "a",
+      mods = "CMD|SHIFT",
       action = wezterm.action_callback(function(window, pane)
         local dims = pane:get_dimensions()
         -- スクロールバックの先頭から末尾までを 1 つの選択範囲として取得

@@ -17,7 +17,7 @@
 	<key>internalTilingNotified</key>
 	<true/>
 	<key>landscapeSnapAreas</key>
-	<string>[4,{"action":21},6,{"action":13},1,{"action":20},3,{"action":24},5,{"action":23},2,{"action":30},7,{"action":2},8,{"action":14}]</string>
+	<string>[2,{"action":30},4,{"action":21},7,{"action":84},1,{"action":20},6,{"action":22},8,{"action":14},3,{"action":24},5,{"action":23}]</string>
 	<key>lastVersion</key>
 	<string>99</string>
 	<key>launchOnLogin</key>

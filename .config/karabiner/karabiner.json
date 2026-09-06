@@ -14,11 +14,84 @@
             "product_id": 640,
             "vendor_id": 13364
           },
-          "ignore": false
+          "ignore": false,
+          "simple_modifications": [
+            {
+              "from": { "key_code": "left_control" },
+              "to": [{ "key_code": "left_control" }]
+            },
+            {
+              "from": { "key_code": "left_option" },
+              "to": [{ "key_code": "left_option" }]
+            },
+            {
+              "from": { "key_code": "left_command" },
+              "to": [{ "key_code": "left_command" }]
+            }
+          ]
+        }
+      ],
+      "simple_modifications": [
+        {
+          "from": { "key_code": "left_control" },
+          "to": [{ "key_code": "left_command" }]
+        },
+        {
+          "from": { "key_code": "left_option" },
+          "to": [{ "key_code": "left_control" }]
+        },
+        {
+          "from": { "key_code": "left_command" },
+          "to": [{ "key_code": "left_option" }]
+        },
+        {
+          "from": { "key_code": "right_command" },
+          "to": [{ "key_code": "japanese_kana" }]
+        },
+        {
+          "from": { "key_code": "right_option" },
+          "to": [{ "key_code": "japanese_eisuu" }]
         }
       ],
       "complex_modifications": {
         "rules": [
+          {
+            "description": "Caps Lock -> Control",
+            "manipulators": [
+              {
+                "type": "basic",
+                "from": {
+                  "key_code": "caps_lock",
+                  "modifiers": { "optional": ["any"] }
+                },
+                "to": [{ "key_code": "left_control" }]
+              }
+            ]
+          },
+          {
+            "description": "Option+Tab -> App Switcher",
+            "manipulators": [
+              {
+                "type": "basic",
+                "from": {
+                  "key_code": "left_option",
+                  "modifiers": { "optional": ["any"] }
+                },
+                "to": [{ "key_code": "left_option" }],
+                "to_if_other_key_pressed": [
+                  {
+                    "other_keys": [
+                      {
+                        "key_code": "tab",
+                        "modifiers": { "optional": ["any"] }
+                      }
+                    ],
+                    "to": [{ "key_code": "left_command" }]
+                  }
+                ]
+              }
+            ]
+          },
           {
             "description": "Cmd+Y -> Redo",
             "manipulators": [
@@ -28,7 +101,7 @@
                   "key_code": "y",
                   "modifiers": {
                     "mandatory": ["command"],
-                    "optional": ["any"]
+                    "optional": ["caps_lock"]
                   }
                 },
                 "to": [
@@ -41,14 +114,14 @@
             ]
           },
           {
-            "description": "F5 -> Page Reload",
+            "description": "F5 / Shift+F5 -> Browser Reload",
             "manipulators": [
               {
                 "type": "basic",
                 "from": {
                   "key_code": "f5",
                   "modifiers": {
-                    "optional": ["any"]
+                    "optional": ["caps_lock"]
                   }
                 },
                 "to": [
@@ -56,62 +129,71 @@
                     "key_code": "r",
                     "modifiers": ["command"]
                   }
-                ]
-              }
-            ]
-          },
-          {
-            "description": "Claude: Enter -> Newline, Cmd+Enter -> Send",
-            "manipulators": [
-              {
-                "type": "basic",
-                "from": {
-                  "key_code": "return_or_enter",
-                  "modifiers": {
-                    "mandatory": ["command"],
-                    "optional": ["caps_lock"]
-                  }
-                },
-                "to": [
-                  {
-                    "key_code": "return_or_enter"
-                  }
                 ],
                 "conditions": [
                   {
                     "type": "frontmost_application_if",
-                    "bundle_identifiers": ["^com\\.anthropic\\.claudefordesktop$"]
-                  },
-                  {
-                    "type": "expression_if",
-                    "expression": "accessibility.focused_ui_element.role_string == 'AXTextArea'"
+                    "bundle_identifiers": [
+                      "^com\\.google\\.Chrome$",
+                      "^com\\.microsoft\\.edgemac$",
+                      "^org\\.mozilla\\.firefox$",
+                      "^com\\.apple\\.Safari$"
+                    ]
                   }
                 ]
               },
               {
                 "type": "basic",
                 "from": {
-                  "key_code": "return_or_enter",
+                  "key_code": "f5",
                   "modifiers": {
+                    "mandatory": ["shift"],
                     "optional": ["caps_lock"]
                   }
                 },
-                "to": [
-                  {
-                    "key_code": "return_or_enter",
-                    "modifiers": ["shift"]
-                  }
-                ],
+                "to": [{ "key_code": "r", "modifiers": ["command", "shift"] }],
                 "conditions": [
                   {
                     "type": "frontmost_application_if",
-                    "bundle_identifiers": ["^com\\.anthropic\\.claudefordesktop$"]
-                  },
-                  {
-                    "type": "expression_if",
-                    "expression": "accessibility.focused_ui_element.role_string == 'AXTextArea'"
+                    "bundle_identifiers": [
+                      "^com\\.google\\.Chrome$",
+                      "^com\\.microsoft\\.edgemac$",
+                      "^org\\.mozilla\\.firefox$"
+                    ]
                   }
                 ]
+              }
+            ]
+          },
+          {
+            "description": "F2 -> Finder Rename",
+            "manipulators": [
+              {
+                "type": "basic",
+                "from": {
+                  "key_code": "f2",
+                  "modifiers": { "optional": ["caps_lock"] }
+                },
+                "to": [{ "key_code": "return_or_enter" }],
+                "conditions": [
+                  {
+                    "type": "frontmost_application_if",
+                    "bundle_identifiers": ["^com\\.apple\\.finder$"]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "description": "Print Screen -> Screenshot Selection",
+            "manipulators": [
+              {
+                "type": "basic",
+                "from": {
+                  "key_code": "print_screen",
+                  "modifiers": { "optional": ["caps_lock"] }
+                },
+                "to": [{ "key_code": "4", "modifiers": ["command", "shift"] }]
               }
             ]
           }

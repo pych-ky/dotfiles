@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """危険な Bash コマンドを検出する PreToolUse スキャナー。"""
 
+import ast
 import json
 import os
 import re
@@ -17,7 +18,9 @@ from urllib.parse import unquote, urlsplit
 RM_CONFIRM_REASON = (
     "rm -rf / rm -Rf / rm --recursive --force は不可逆なため、実行前に確認してください。"
 )
-SUDO_REASON = "sudo の使用は Claude からは許可していません。"
+SUDO_CONFIRM_REASON = "sudo による権限を変更した実行は、実行前に確認してください。"
+SUDO_EXEC_ENV_VARS = {"SUDO_ASKPASS", "SUDO_EDITOR", "EDITOR", "VISUAL"}
+SUDO_EXEC_REASON = "sudo の認証 helper や editor の明示的な差し替えは許可していません。"
 HASH_REBIND_REASON = "hash -p によるコマンドパスの再束縛は許可していません。"
 PIPE_SHELL_REASON = "curl / wget ... | sh / bash 形式のコマンドは許可していません。"
 SHELL_STDIN_REASON = "内容を安全に検証できない標準入力を shell script として実行できません。"
@@ -319,6 +322,7 @@ GH_EXEC_ENV_VARS = {
     "GH_PAGER",
     "PAGER",
     "GH_EDITOR",
+    "GIT_EDITOR",
     "EDITOR",
     "VISUAL",
     "GH_BROWSER",
@@ -833,6 +837,18 @@ AWS_CONFIRM_SUBCOMMANDS = {
 }
 AWS_PAGER_ENV_VARS = {"AWS_PAGER", "PAGER"}
 AWS_HELP_PAGER_ENV_VARS = {"MANPAGER", "PAGER"}
+AWS_HELP_VALUE_OPTIONS = {
+    ("secretsmanager", "get-secret-value"): {
+        "--secret-id", "--version-id", "--version-stage",
+    },
+    ("ssm", "get-parameter"): {"--name"},
+    ("ssm", "get-parameter-history"): {"--name", "--max-results", "--next-token"},
+    ("ssm", "get-parameters-by-path"): {"--path", "--max-results", "--next-token"},
+    ("codeartifact", "login"): {
+        "--tool", "--domain", "--domain-owner", "--repository",
+        "--duration-seconds", "--namespace",
+    },
+}
 # `aws configure get <name>` は保存済みの設定値を出力する。
 # region のような無害な項目もあるため、名前が認証情報を指す場合だけ拒否する
 AWS_CONFIGURE_SECRET_MARKERS = frozenset(
@@ -1178,6 +1194,20 @@ DOTENV_TEMPLATE_NAMES = (
 # 空白やシェル記号を含むホームは、置き換えると語の分割やクォートの意味が
 # 変わってしまうため、その場合だけ従来どおりマーカーのままにする
 HOME_PATH = os.path.expanduser("~")
+# アカウント別の保存先は名前だけを列挙し、通常の Codex と同じ保護対象にする。
+CODEX_ACCOUNT_DIRECTORIES = tuple(
+    entry.name
+    for entry in os.scandir(HOME_PATH)
+    if entry.name.casefold().startswith(".codex-account-")
+)
+CREDENTIAL_FILE_COMPONENTS += tuple(
+    directory + "/" + component.split("/", 1)[1]
+    for directory in CODEX_ACCOUNT_DIRECTORIES
+    for component in CREDENTIAL_FILE_COMPONENTS
+    if component.startswith(".codex/")
+)
+SENSITIVE_MOUNT_PATHS += CODEX_ACCOUNT_DIRECTORIES
+
 HOME_IS_SUBSTITUTABLE = (
     bool(HOME_PATH) and re.fullmatch(r"[A-Za-z0-9_./-]+", HOME_PATH) is not None
 )
@@ -1699,6 +1729,8 @@ GIT_EXEC_ENV_VARS = {
     "PAGER",
     "GIT_EDITOR",
     "GIT_SEQUENCE_EDITOR",
+    "EDITOR",
+    "VISUAL",
     "GIT_SSH",
     "GIT_SSH_COMMAND",
     "GIT_EXTERNAL_DIFF",
@@ -1846,8 +1878,8 @@ INTERPRETER_FLAG_LETTERS = {
     "perl": "wnpacsTdWXuvVh",
     "ruby": "nplacdwvy",
     "node": "i",
-    "python": "BEIObdisuvqx",
-    "python3": "BEIObdisuvqx",
+    "python": "BEIOPSVbdhisuvqx",
+    "python3": "BEIOPSVbdhisuvqx",
     "php": "nqvzh",
     "awk": "",
     "gawk": "",
@@ -1872,13 +1904,34 @@ INTERPRETER_DIGIT_LETTERS = {
 INTERPRETER_VALUE_LETTERS = {
     "perl": "IiFmMDx",
     "ruby": "IrEKCFxi",
-    "node": "r",
+    "node": "rC",
     "python": "WXQm",
     "python3": "WXQm",
     "php": "d",
     "awk": "Ffv",
     "gawk": "Ffv",
     "osascript": "ls",
+}
+INTERPRETER_LONG_VALUE_OPTIONS = {
+    "python": {"--check-hash-based-pycs"},
+    "python3": {"--check-hash-based-pycs"},
+    "node": {
+        "--require", "--import", "--loader", "--experimental-loader",
+        "--input-type", "--conditions", "--inspect-port", "--title",
+        "--test-name-pattern", "--test-skip-pattern", "--test-reporter",
+        "--test-reporter-destination", "--icu-data-dir", "--openssl-config",
+        "--redirect-warnings", "--diagnostic-dir", "--env-file",
+        "--env-file-if-exists",
+    },
+    "ruby": {"--encoding", "--external-encoding", "--internal-encoding"},
+    "awk": {"--field-separator", "--assign", "--file"},
+    "gawk": {"--field-separator", "--assign", "--file"},
+    "php": {"--define", "--file"},
+}
+INTERPRETER_LONG_BOOLEAN_OPTIONS = {
+    "--help", "--version", "--test", "--watch", "--watch-preserve-output",
+    "--inspect", "--inspect-brk", "--trace-warnings", "--trace-deprecation",
+    "--no-warnings", "--enable-source-maps", "--experimental-strip-types",
 }
 INTERPRETER_CLUSTER_REASON = (
     "インタプリタの短縮オプションを構文どおり分解できませんでした。"
@@ -1955,6 +2008,22 @@ INTERPRETER_OBFUSCATION_IDENTIFIERS = (
     "Function",
     "constructor",
 )
+INTERPRETER_DYNAMIC_DISPATCH_IDENTIFIERS = {
+    "python": {
+        "exec", "__builtins__", "__getattribute__", "__getattr__",
+        "attrgetter", "methodcaller", "vars", "locals",
+    },
+    "python3": {
+        "exec", "__builtins__", "__getattribute__", "__getattr__",
+        "attrgetter", "methodcaller", "vars", "locals",
+    },
+    "node": {"Reflect", "getOwnPropertyDescriptor", "getOwnPropertyDescriptors"},
+    "ruby": {
+        "send", "__send__", "public_send", "method", "public_method",
+        "instance_eval", "class_eval", "module_eval",
+    },
+    "php": {"call_user_func", "call_user_func_array", "Closure", "ReflectionFunction"},
+}
 INTERPRETER_OBFUSCATION_REASON = (
     "実行対象を実行時に組み立てるコードは、静的に検査できないため"
     "許可していません。"
@@ -2065,8 +2134,8 @@ SHELL_STARTUP_ENV_VARS = {"BASH_ENV", "ENV", "ZDOTDIR"}
 SHELL_OPTION_ENV_VARS = {"SHELLOPTS"}
 TRACKED_SHELL_OPTIONS = {"allexport", "keyword", "xtrace"}
 
-# 起動元から継承される値はコマンド文字列に現れない。任意コマンドの起動や
-# 暗黙の引数追加に使える名前だけを、値そのものではなく空・非空へ畳んで追跡する。
+# 継承設定は通常の実行環境として扱い、コマンド内の再代入を追跡する。
+# 値そのものは保持せず、空・非空と継承元の区別だけを残す。
 INHERITED_EXEC_ENV_NAMES = (
     GIT_EXEC_ENV_VARS
     | GH_EXEC_ENV_VARS
@@ -2078,6 +2147,7 @@ INHERITED_EXEC_ENV_NAMES = (
     | DOCKER_SSH_ENV_VARS
     | SHELL_STARTUP_ENV_VARS
     | SHELL_OPTION_ENV_VARS
+    | SUDO_EXEC_ENV_VARS
 )
 INHERITED_EXEC_ENV_PREFIXES = GIT_EXEC_ENV_PREFIXES + TERRAFORM_EXEC_ENV_PREFIXES
 INHERITED_NONEMPTY_MARKER = "__inherited_nonempty_environment_value__"
@@ -2251,6 +2321,10 @@ class ArithmeticUnknownValueError(Exception):
 
 class ShellScanError(Exception):
     pass
+
+
+class InheritedEnvironmentValue(str):
+    """起動元の設定を、コマンド内で指定された文字列と区別する。"""
 
 
 def add_reason(reasons, reason):
@@ -2525,8 +2599,10 @@ def aws_global_version_requested(arguments):
 
 
 def environment_value_state(name, values, tainted_names):
-    """環境変数の実効状態を absent / empty / nonempty / unknown で返す。"""
+    """環境変数の実効状態を inherited / absent / empty / nonempty / unknown で返す。"""
     if name in values:
+        if isinstance(values[name], InheritedEnvironmentValue):
+            return "inherited"
         return "nonempty" if values[name] else "empty"
     if name in tainted_names:
         return "unknown"
@@ -2571,19 +2647,26 @@ def aws_external_pager_is_nonempty(arguments, candidates, values, tainted_names)
 
 
 def aws_help_invocation(arguments, expected):
-    """既知の global option 以外が `<service> <operation> help` かを返す。
+    """既知の option と値を消費し、位置引数の help だけを認識する。
 
     未知 option を推測して除くと、その値が `help` の場合をローカル help と
-    誤認しうる。ここでは完全に把握している global option だけを除去する。
+    誤認しうる。可変長の配列 option も推測で読み飛ばさない。
     """
+    if any(contains_expansion_or_marker(argument) for argument in arguments):
+        return False
     words = []
+    value_options = AWS_GLOBAL_VALUE_OPTIONS | AWS_HELP_VALUE_OPTIONS.get(expected, set())
+    boolean_options = AWS_GLOBAL_BOOLEAN_OPTIONS | {
+        "--with-decryption", "--no-with-decryption", "--recursive", "--no-recursive",
+        "--dry-run", "--no-dry-run",
+    }
     index = 0
     while index < len(arguments):
         argument = arguments[index]
         if argument == "--":
             return False
         name, separator, _ = argument.partition("=")
-        if name in AWS_GLOBAL_VALUE_OPTIONS:
+        if name in value_options:
             if separator:
                 index += 1
                 continue
@@ -2591,7 +2674,7 @@ def aws_help_invocation(arguments, expected):
                 return False
             index += 2
             continue
-        if argument in AWS_GLOBAL_BOOLEAN_OPTIONS:
+        if argument in boolean_options:
             index += 1
             continue
         if argument.startswith("-") and argument != "-":
@@ -3726,11 +3809,163 @@ def ssh_keygen_non_generation(arguments):
     return False
 
 
+CURL_SHORT_VALUE_OPTIONS = {
+    "-A", "-b", "-c", "-C", "-d", "-D", "-e", "-E", "-F", "-h", "-H",
+    "-K", "-m", "-o", "-P", "-Q", "-r", "-t", "-T", "-u", "-U", "-w",
+    "-x", "-X", "-y", "-Y", "-z",
+}
+CURL_SHORT_BOOLEAN_FLAGS = set("#012346aBfgGiIjJklLMnNOpqRsSvVZ")
+WGET_SHORT_VALUE_OPTIONS = {
+    "-a", "-A", "-B", "-D", "-e", "-i", "-l", "-o", "-O", "-P", "-R",
+    "-t", "-T", "-U", "-w",
+}
+WGET_SHORT_BOOLEAN_FLAGS = set("bcdEFHhkmNnpqrSvVx")
+
+
+def authentication_path_argument_indexes(command, arguments):
+    """CLI が内容を出力せず認証に使うパス引数を返す。"""
+    options = {
+        "kubectl": {"--kubeconfig", "--certificate-authority", "--client-certificate", "--client-key"},
+        "oc": {"--kubeconfig", "--certificate-authority", "--client-certificate", "--client-key"},
+        "helm": {"--kubeconfig", "--kube-ca-file", "--registry-config", "--repository-config"},
+        "ssh": {"-i", "-F"},
+        "scp": {"-i", "-F"},
+        "sftp": {"-i", "-F"},
+        "npm": {"--userconfig", "--globalconfig"},
+        "pnpm": {"--userconfig", "--globalconfig"},
+        "curl": {"--netrc-file", "-E", "--cert", "--key", "--cacert", "--capath", "--proxy-cert", "--proxy-key", "--proxy-cacert"},
+        "wget": {"--load-cookies", "--certificate", "--private-key", "--ca-certificate"},
+    }.get(command, set())
+    if command == "openssl" and arguments[:1] in (["s_client"], ["s_server"]):
+        options = {"-key", "-cert", "-CAfile", "-CApath"}
+    if not options:
+        return set()
+    value_options = set(options)
+    boolean_options = {"--help", "--version"}
+    short_boolean_flags = set()
+    if command in {"kubectl", "oc", "helm"}:
+        value_options |= KUBECTL_REMOTE_CHILD_VALUE_OPTIONS
+        boolean_options |= {
+            "--insecure-skip-tls-verify", "--insecure-skip-tls-verify-backend",
+            "--all-namespaces", "--all", "--watch", "--debug", "--wait",
+        }
+        short_boolean_flags = set("Ahiqtw")
+        if command == "helm":
+            value_options |= {
+                "--kube-apiserver", "--kube-as-group", "--kube-as-user",
+                "--kube-context", "--kube-tls-server-name", "--kube-token",
+                "--repository-cache", "--values", "--set", "--set-string",
+                "--set-file", "--timeout", "--version",
+            }
+    elif command in {"npm", "pnpm"}:
+        value_options |= NPM_VALUE_OPTIONS
+        boolean_options |= NPM_BOOLEAN_OPTIONS
+        short_boolean_flags = {
+            option[1:]
+            for option in boolean_options
+            if len(option) == 2 and option.startswith("-")
+        }
+    elif command in {"ssh", "scp", "sftp"}:
+        value_options |= {
+            "ssh": {"-B", "-b", "-c", "-D", "-E", "-e", "-I", "-J", "-L", "-l", "-m", "-O", "-o", "-P", "-p", "-Q", "-R", "-S", "-W", "-w"},
+            "scp": {"-c", "-D", "-J", "-l", "-o", "-P", "-S", "-X"},
+            "sftp": {"-B", "-b", "-c", "-D", "-J", "-l", "-o", "-P", "-R", "-S", "-s"},
+        }[command]
+        short_boolean_flags = set({
+            "ssh": "1246AaCfGgKkMNnqsTtVvXxYy",
+            "scp": "346ABCOpqRrsTv",
+            "sftp": "46AaCfNpqrv",
+        }[command])
+    elif command == "curl":
+        value_options |= CURL_SHORT_VALUE_OPTIONS | {
+            "--url", "--request", "--write-out", "--output", "--output-dir",
+            "--data", "--data-raw", "--data-binary", "--data-urlencode",
+            "--json", "--form", "--form-string", "--header", "--proxy-header",
+            "--upload-file", "--config", "--user", "--proxy", "--proxy-user",
+            "--cookie", "--cookie-jar", "--user-agent", "--referer",
+            "--connect-timeout", "--max-time", "--retry", "--resolve",
+        }
+        boolean_options |= {
+            "--silent", "--show-error", "--fail", "--fail-with-body", "--location",
+            "--head", "--insecure", "--verbose", "--compressed", "--netrc",
+            "--netrc-optional", "--globoff", "--get",
+        }
+        short_boolean_flags = CURL_SHORT_BOOLEAN_FLAGS
+    elif command == "wget":
+        value_options |= WGET_SHORT_VALUE_OPTIONS | {
+            "--input-file", "--config", "--output-document", "--output-file",
+            "--directory-prefix", "--header", "--method", "--body-data",
+            "--body-file", "--post-data", "--post-file", "--user-agent",
+            "--timeout", "--tries",
+        }
+        boolean_options |= {
+            "--quiet", "--verbose", "--no-verbose", "--continue", "--spider",
+            "--no-check-certificate", "--recursive", "--timestamping",
+        }
+        short_boolean_flags = WGET_SHORT_BOOLEAN_FLAGS
+    elif command == "openssl":
+        value_options |= {
+            "-connect", "-accept", "-bind", "-servername", "-verify", "-cipher",
+            "-ciphersuites", "-alpn", "-sigalgs", "-groups", "-keylogfile",
+            "-proxy", "-port", "-starttls", "-pass", "-verifyCAfile",
+        }
+        boolean_options |= {
+            "-help", "-quiet", "-brief", "-showcerts", "-verify_return_error",
+            "-no_ign_eof", "-ign_eof", "-tls1_2", "-tls1_3", "-4", "-6",
+        }
+
+    indexes = set()
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        if argument == "--":
+            break
+        if not argument.startswith("-") or argument == "-":
+            if command in {"ssh", "scp", "sftp"}:
+                break
+            index += 1
+            continue
+        option, separator, _value = argument.partition("=")
+        if option in value_options:
+            if option in options:
+                if separator:
+                    indexes.add(index)
+                elif index + 1 < len(arguments):
+                    indexes.add(index + 1)
+            index += 1 if separator else 2
+            continue
+        if option in boolean_options:
+            index += 1
+            continue
+        parsed = docker_short_option_cluster(
+            argument, value_options, short_boolean_flags
+        )
+        if parsed is None:
+            # 未知 option が後続を値として消費する可能性があれば免除しない。
+            break
+        option, joined = parsed
+        if option in options:
+            if joined is not None:
+                indexes.add(index)
+            elif index + 1 < len(arguments):
+                indexes.add(index + 1)
+        index += 2 if option and joined is None else 1
+    return indexes
+
+
 def credential_path_argument_roles(command, arguments):
     """標準コマンドの path 引数を read / change / non-file に分ける。"""
     reads = set()
     changes = set()
-    non_files = set()
+    non_files = authentication_path_argument_indexes(command, arguments)
+
+    if command in {"ls", "stat", "du"}:
+        non_files.update(range(len(arguments)))
+        if command == "du":
+            reads.update(option_value_argument_indexes(arguments, {"--files0-from"}))
+            non_files.difference_update(reads)
+    elif command in {"chmod", "chown", "chgrp"}:
+        changes.update(range(len(arguments)))
 
     if command in {"echo", "printf"}:
         non_files.update(range(len(arguments)))
@@ -4722,25 +4957,15 @@ def jq_file_ingress_references(command, arguments):
 
 def curl_file_ingress_references(arguments):
     direct_file_options = {
-        "-K", "--config", "-T", "--upload-file", "-E", "--cert", "--key",
-        "--cacert", "--capath", "--netrc-file", "--proxy-cert", "--proxy-key",
-        "--proxy-cacert",
+        "-K", "--config", "-T", "--upload-file",
     }
     references = option_values_with_joined(arguments, direct_file_options)
     references.extend(
         clustered_option_values(
             arguments,
-            {"-E", "-K", "-T"},
-            {
-                "-A", "-b", "-c", "-C", "-d", "-D", "-e", "-E", "-F",
-                "-h", "-H", "-K", "-m", "-o", "-P", "-Q", "-r", "-t", "-T",
-                "-u", "-U", "-w", "-x", "-X", "-y", "-Y", "-z",
-            },
-            {
-                "#", "0", "1", "2", "3", "4", "6", "a", "B", "f", "g",
-                "G", "i", "I", "j", "J", "k", "l", "L", "M", "n", "N",
-                "O", "p", "q", "R", "s", "S", "v", "V", "Z",
-            },
+            {"-K", "-T"},
+            CURL_SHORT_VALUE_OPTIONS,
+            CURL_SHORT_BOOLEAN_FLAGS,
         )
     )
     at_file_options = {
@@ -4765,29 +4990,28 @@ def wget_file_ingress_references(arguments):
     references = option_values_with_joined(
         arguments,
         {
-            "-i", "--input-file", "--config", "--load-cookies", "--certificate",
-            "--private-key", "--ca-certificate",
+            "-i", "--input-file", "--config",
         },
     )
     references.extend(
         clustered_option_values(
             arguments,
             {"-i"},
-            {"-a", "-A", "-B", "-D", "-e", "-i", "-l", "-o", "-O", "-P", "-R", "-t", "-T", "-U", "-w"},
-            {"b", "c", "d", "E", "F", "H", "h", "k", "m", "N", "n", "p", "q", "r", "S", "v", "V", "x"},
+            WGET_SHORT_VALUE_OPTIONS,
+            WGET_SHORT_BOOLEAN_FLAGS,
         )
     )
     return references
 
 
 def openssl_file_ingress_references(arguments):
-    return option_values_with_joined(
-        arguments,
-        {
-            "-in", "-key", "-inkey", "-cert", "-CAfile", "-CApath", "-config",
-            "-extfile", "-signkey", "-untrusted", "-chain", "-certfile",
-        },
-    )
+    options = {
+        "-in", "-key", "-inkey", "-cert", "-CAfile", "-CApath", "-config",
+        "-extfile", "-signkey", "-untrusted", "-chain", "-certfile",
+    }
+    if arguments[:1] in (["s_client"], ["s_server"]):
+        options -= {"-key", "-cert", "-CAfile", "-CApath"}
+    return option_values_with_joined(arguments, options)
 
 
 def ssh_keygen_file_ingress_references(arguments):
@@ -4870,6 +5094,105 @@ def git_status_outputs_patch(arguments, command_index):
     return False
 
 
+GIT_DIFF_VALUE_OPTIONS = {
+    "--output", "--src-prefix", "--dst-prefix", "--line-prefix",
+    "--stat-width", "--stat-name-width", "--stat-graph-width", "--stat-count",
+    "--diff-filter", "--find-object", "--anchored", "--word-diff-regex",
+    "--ignore-matching-lines", "--inter-hunk-context",
+    "--rotate-to", "--skip-to", "--date", "--encoding",
+    "--decorate-refs", "--decorate-refs-exclude", "--since-as-filter",
+    "--max-count", "--skip", "--since", "--after", "--until", "--before",
+    "--author", "--committer", "--grep", "--exclude", "--glob",
+    "-S", "-G", "-O", "-I", "-n", "-L",
+}
+
+
+def git_diff_outputs_only_metadata(arguments, command_index):
+    """diff / log / show の出力形式を、指定順と値付き option に沿って判定する。"""
+    command = arguments[command_index]
+    if command not in {"diff", "diff-files", "diff-index", "diff-tree", "log", "show"}:
+        return False
+    option_arguments = arguments[command_index + 1 :]
+    if "--" in option_arguments:
+        option_arguments = option_arguments[: option_arguments.index("--")]
+    if any(contains_expansion_or_marker(argument) for argument in option_arguments):
+        return False
+    metadata = command == "log"
+    patch = False
+    explicit_format = False
+    merge_diff = False
+    metadata_options = {
+        "--name-only", "--name-status", "--stat", "--numstat", "--shortstat",
+        "--dirstat", "--dirstat-by-file", "--cumulative", "--summary", "--raw",
+        "--quiet",
+    }
+    patch_options = {
+        "--patch", "--patch-with-raw", "--patch-with-stat", "--word-diff",
+        "--color-words", "--check", "--cc", "--dd", "--remerge-diff",
+        "--unified", "--binary", "--function-context",
+    }
+    index = command_index + 1
+    while index < len(arguments):
+        argument = arguments[index]
+        if argument == "--":
+            break
+        option, separator, _value = argument.partition("=")
+        if option == "--diff-merges":
+            if not separator:
+                index += 1
+                if index >= len(arguments):
+                    return False
+                _value = arguments[index]
+            merge_diff = _value not in {"off", "none"}
+            index += 1
+            continue
+        if option in {"--no-diff-merges", "-m"}:
+            merge_diff = False
+            index += 1
+            continue
+        value_option = option in GIT_DIFF_VALUE_OPTIONS or (
+            option.startswith("--")
+            and option not in metadata_options | patch_options | {"--no-patch"}
+            and any(name.startswith(option) for name in GIT_DIFF_VALUE_OPTIONS)
+        )
+        if value_option:
+            if option in {"-L", "--word-diff-regex"}:
+                patch = True
+            if option.startswith("--stat-"):
+                metadata = True
+                explicit_format = True
+            index += 1 if separator else 2
+            continue
+        if any(
+            argument.startswith(option) and len(argument) > len(option)
+            for option in GIT_DIFF_VALUE_OPTIONS
+            if len(option) == 2
+        ):
+            if argument.startswith("-L"):
+                patch = True
+            index += 1
+            continue
+        if option == "--no-patch":
+            metadata, patch = True, False
+            explicit_format = True
+        elif option in metadata_options:
+            metadata = True
+            explicit_format = True
+        elif option.startswith("--") and any(
+            name.startswith(option) for name in patch_options
+        ):
+            patch = True
+        elif argument.startswith("-") and not argument.startswith("--"):
+            for flag in argument[1:]:
+                if flag == "s":
+                    metadata, patch = True, False
+                    explicit_format = True
+                elif flag in {"p", "u", "c", "U", "W", "r", "t"}:
+                    patch = True
+        index += 1
+    return metadata and not patch and (not merge_diff or explicit_format)
+
+
 def git_metadata_only_pathspec_indexes(arguments, indexes=None, words=None):
     """内容を読まない Git 操作の path / object 引数を返す。"""
     if indexes is None:
@@ -4879,6 +5202,14 @@ def git_metadata_only_pathspec_indexes(arguments, indexes=None, words=None):
     if not words:
         return set()
     command = words[0]
+    if git_diff_outputs_only_metadata(arguments, indexes[0]):
+        if "--" in arguments:
+            return set(range(arguments.index("--") + 1, len(arguments)))
+        return set(
+            positional_argument_indexes(
+                arguments, GIT_VALUE_OPTIONS | GIT_DIFF_VALUE_OPTIONS
+            )[1:]
+        )
     if command in {"status", "check-attr", "ls-tree"}:
         if command == "status" and git_status_outputs_patch(arguments, indexes[0]):
             return set()
@@ -4905,6 +5236,8 @@ def git_literal_content_pathspecs(arguments):
     """本文を出す標準 Git 操作に直接書かれた literal pathspec を返す。"""
     indexes = positional_argument_indexes(arguments, GIT_VALUE_OPTIONS)
     words = [arguments[index] for index in indexes]
+    if words and git_diff_outputs_only_metadata(arguments, indexes[0]):
+        return []
     status_with_patch = bool(
         words
         and words[0] == "status"
@@ -5123,6 +5456,56 @@ def exact_local_help_invocation(arguments, protected_forms):
         and arguments[-1] in {"--help", "-h"}
         and tuple(arguments[:-1]) in protected_forms
     )
+
+
+def gh_help_requested(arguments):
+    """値として消費される --help と、Cobra の help flag を区別する。"""
+    if any(contains_expansion_or_marker(argument) for argument in arguments):
+        return False
+    words = subcommand_words(arguments, GH_VALUE_OPTIONS)
+    api = words[:1] == ["api"]
+    value_options = GH_VALUE_OPTIONS | {"--json", "--git-protocol", "--scopes"}
+    if api:
+        value_options |= {"-t", "-p", "--preview"}
+    elif words[:1] == ["auth"]:
+        value_options |= {"-h", "--user", "-u"}
+    boolean_options = {
+        "--help", "--active", "--show-token", "--paginate", "--slurp",
+        "--include", "--silent", "--verbose", "--web", "--clipboard",
+        "--insecure-storage", "--skip-ssh-key", "--with-token",
+    }
+    short_boolean = {"i"} if api else {"t", "w"}
+    help_requested = False
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        if argument == "--":
+            break
+        if argument.startswith("--"):
+            option, separator, value = argument.partition("=")
+            if option in value_options:
+                index += 1 if separator else 2
+                continue
+            if option not in boolean_options:
+                return False
+            if option == "--help":
+                help_requested = not separator or value.casefold() in {"true", "t", "1"}
+        elif argument.startswith("-") and argument != "-":
+            cursor = 1
+            while cursor < len(argument):
+                option = "-" + argument[cursor]
+                if option in value_options:
+                    if cursor + 1 == len(argument):
+                        index += 1
+                    break
+                if argument[cursor] not in short_boolean:
+                    return False
+                value = argument[cursor + 1 :]
+                if value.startswith("="):
+                    break
+                cursor += 1
+        index += 1
+    return help_requested
 
 
 def secret_tool_help_invocation(command, arguments):
@@ -5493,6 +5876,17 @@ def environment_name_holds_secret_value(name):
 
 def environment_value_reveals_credential(name, value):
     """既知または未知の値が、認証情報を環境へ渡す形かを返す。"""
+    if name == "GOOGLE_CREDENTIALS":
+        if value is None:
+            return True
+        if not value:
+            return False
+        path = expand_home(value)
+        return not (
+            not path_contains_expansion(path)
+            and not any(character in path for character in "\x00\r\n{}")
+            and (os.path.isabs(path) or path.startswith(("./", "../")) or path.endswith(".json"))
+        )
     if name in PROXY_PARAMETER_NAMES:
         return value is None or bool(value) and proxy_value_contains_credentials(value)
     if not environment_name_holds_secret_value(name):
@@ -5501,9 +5895,12 @@ def environment_value_reveals_credential(name, value):
 
 
 def inherited_execution_environment():
-    """危険な実行差し替え変数だけを、秘密値を保持せず継承する。"""
+    """非秘密の実行設定を、再代入と区別して継承する。"""
     inherited = {}
     for name in os.environ:
+        if name == "DOCKER_BUILDKIT":
+            inherited[name] = os.environ[name]
+            continue
         if not (
             name in INHERITED_EXEC_ENV_NAMES
             or name.startswith(INHERITED_EXEC_ENV_PREFIXES)
@@ -5517,7 +5914,7 @@ def inherited_execution_environment():
                 if option in os.environ[name].split(":")
             )
         else:
-            inherited[name] = (
+            inherited[name] = InheritedEnvironmentValue(
                 INHERITED_NONEMPTY_MARKER if os.environ[name] else ""
             )
     return inherited
@@ -5572,6 +5969,8 @@ def container_environment_spec_reveals_secret(name, value):
         # NAME だけならホストの同名変数を暗黙に継承する。
         return name_is_credential_variable(name) or name in PROXY_PARAMETER_NAMES
 
+    if name == "GOOGLE_CREDENTIALS":
+        return environment_value_reveals_credential(name, value)
     if name in CREDENTIAL_PATH_PARAMETER_NAMES:
         # NAME=VALUE はコンテナ内のパスを設定するだけで、ホスト内容を渡さない。
         return False
@@ -5750,7 +6149,7 @@ def container_command_input_references(arguments):
     option_inputs = (
         (("load",), {"-i", "--input"}),
         (("image", "load"), {"-i", "--input"}),
-        (("compose",), {"-f", "--file", "--project-directory"}),
+        (("compose",), {"-f", "--file"}),
         (("compose", "run"), {"--env-from-file"}),
         (("buildx", "bake"), {"-f", "--file"}),
         (("buildx", "create"), {"--buildkitd-config"}),
@@ -5768,10 +6167,6 @@ def container_command_input_references(arguments):
         if prefix in {("stack", "deploy"), ("stack", "config")}:
             values = [part for value in values for part in value.split(",")]
         files.extend(values)
-        if prefix == ("compose",):
-            directories.extend(
-                option_values_with_joined(arguments, {"--project-directory"})
-            )
 
     is_build_command = any(
         tuple(words[: len(prefix)]) == prefix
@@ -5944,20 +6339,6 @@ def container_directory_ingress_references(
     )
     references.extend(command_directories)
 
-    # build / buildx build / image build の位置引数。未知オプションの値が混ざっても、
-    # 実在するローカルディレクトリだけを後段で走査する。
-    for expected in DOCKER_BUILD_SUBCOMMANDS:
-        if tuple(build_words[: len(expected)]) == expected:
-            operands = build_words[len(expected) :]
-            if operands:
-                references.append(operands[-1])
-            break
-
-    # 追加 build context は NAME=PATH の右辺がホスト側の参照になる。
-    for value in file_option_values(arguments, {"--build-context"}):
-        _name, separator, context = value.partition("=")
-        references.append(context if separator else value)
-
     for field, _subkeys, override in bake_overrides(arguments):
         if field in {"context", "contexts"}:
             references.append(override)
@@ -5976,7 +6357,162 @@ def container_directory_ingress_references(
     return references
 
 
-def directory_ingress_references_credentials(reference):
+def container_build_contexts(arguments, build_words):
+    """直接指定した build context と、その Dockerfile を返す。"""
+    contexts = []
+    for expected in DOCKER_BUILD_SUBCOMMANDS:
+        if tuple(build_words[: len(expected)]) != expected:
+            continue
+        operands = build_words[len(expected) :]
+        if operands:
+            context = operands[-1]
+            dockerfiles = pflag_option_values(
+                arguments,
+                {"-f", "--file"},
+                DOCKER_VALUE_OPTIONS | DOCKER_BUILD_VALUE_OPTIONS,
+                DOCKER_BUILD_SHORT_BOOLEAN_FLAGS,
+            )
+            dockerfile = (
+                dockerfiles[-1]
+                if dockerfiles
+                else os.path.join(expand_home(context), "Dockerfile")
+            )
+            contexts.append((context, dockerfile))
+        break
+
+    for value in file_option_values(arguments, {"--build-context"}):
+        _name, separator, context = value.partition("=")
+        contexts.append((context if separator else value, None))
+    return contexts
+
+
+def dockerignore_pattern(pattern):
+    """Docker の glob を、パス区切りと ** を区別した正規表現へ変換する。"""
+    expression = []
+    index = 0
+    while index < len(pattern):
+        character = pattern[index]
+        index += 1
+        if character == "*":
+            if index < len(pattern) and pattern[index] == "*":
+                index += 1
+                if index < len(pattern) and pattern[index] == "/":
+                    index += 1
+                suffix_match = index == 2 and not any(
+                    member in "*?[]\\" for member in pattern[index:]
+                )
+                expression.append(
+                    ".*" if index == len(pattern) or suffix_match else "(?:.*/)?"
+                )
+            else:
+                expression.append("[^/]*")
+        elif character == "?":
+            expression.append("[^/]")
+        elif character == "\\":
+            if index == len(pattern):
+                raise ValueError("invalid dockerignore escape")
+            expression.append(re.escape(pattern[index]))
+            index += 1
+        elif character == "[":
+            characters = []
+            if index < len(pattern) and pattern[index] == "^":
+                characters.append("^")
+                index += 1
+            start = index
+            while index < len(pattern) and pattern[index] != "]":
+                member = pattern[index]
+                index += 1
+                if member == "\\":
+                    if index == len(pattern):
+                        raise ValueError("invalid dockerignore character class")
+                    member = re.escape(pattern[index])
+                    index += 1
+                elif member in {"[", "^"}:
+                    member = re.escape(member)
+                characters.append(member)
+            if index == len(pattern) or index == start:
+                raise ValueError("invalid dockerignore character class")
+            expression.append("(?!/)[" + "".join(characters) + "]")
+            index += 1
+        else:
+            expression.append(re.escape(character))
+    return re.compile("".join(expression), re.S)
+
+
+def build_context_ignore_patterns(context, dockerfile, *, use_dockerfile_ignore=True):
+    """実際に使われる ignore file だけを、保護パスでないことを確かめて読む。"""
+    ignore_file = os.path.join(context, ".dockerignore")
+    if dockerfile and dockerfile != "-" and "://" not in dockerfile:
+        if path_contains_expansion(dockerfile):
+            return []
+        dockerfile = expand_home(dockerfile)
+        if not os.path.isabs(dockerfile):
+            dockerfile = os.path.join(WORKING_DIRECTORY, dockerfile)
+        dockerfile = normpath(dockerfile)
+        if argument_is_credential_path(dockerfile, path_context=True):
+            raise ValueError("protected Dockerfile")
+        if os.path.basename(dockerfile) == "Dockerfile":
+            names = os.listdir(os.path.dirname(dockerfile))
+            if "Dockerfile" not in names and "dockerfile" in names:
+                dockerfile = os.path.join(os.path.dirname(dockerfile), "dockerfile")
+                if argument_is_credential_path(dockerfile, path_context=True):
+                    raise ValueError("protected Dockerfile")
+        specific_ignore = dockerfile + ".dockerignore"
+        if use_dockerfile_ignore and os.path.lexists(specific_ignore):
+            ignore_file = specific_ignore
+    if not os.path.lexists(ignore_file):
+        return []
+    if argument_is_credential_path(ignore_file, path_context=True):
+        raise ValueError("protected dockerignore")
+    if not os.path.isfile(ignore_file):
+        raise ValueError("dockerignore is not a regular file")
+
+    patterns = []
+    with open(ignore_file, encoding="utf-8-sig") as source:
+        for line in source:
+            if line.startswith("#"):
+                continue
+            pattern = line.strip()
+            if not pattern:
+                continue
+            negate = pattern.startswith("!")
+            if negate:
+                pattern = pattern[1:].strip()
+                if not pattern:
+                    raise ValueError("empty dockerignore exception")
+            pattern = normpath(pattern).lstrip("/")
+            if pattern == ".":
+                continue
+            patterns.append((negate, pattern, dockerignore_pattern(pattern)))
+    return patterns
+
+
+def build_context_path_is_ignored(relative, patterns):
+    """親ディレクトリへの一致を含め、最後に一致した ignore rule を適用する。"""
+    parts = relative.split("/")
+    paths = ["/".join(parts[:length]) for length in range(1, len(parts) + 1)]
+    ignored = False
+    for negate, _pattern, compiled in patterns:
+        if any(compiled.fullmatch(path) for path in paths):
+            ignored = not negate
+    return ignored
+
+
+def build_context_may_reinclude_directory(relative, patterns):
+    """否定ルールが配下を再包含しうる場合だけ、除外ディレクトリへ降りる。"""
+    for negate, pattern, _compiled in patterns:
+        if not negate:
+            continue
+        prefix = re.split(r"[\\*?\[]", pattern, maxsplit=1)[0]
+        directory = relative + "/"
+        if prefix.startswith(directory) or directory.startswith(prefix):
+            return True
+    return False
+
+
+def directory_ingress_references_credentials(
+    reference, *, use_dockerignore=False, dockerfile=None, use_dockerfile_ignore=True
+):
     """ローカル ingress の配下に既知の認証情報名があるかを名前だけで調べる。"""
     if not reference or reference == "-" or "://" in reference:
         return False
@@ -5998,12 +6534,26 @@ def directory_ingress_references_credentials(reference):
         raise error
 
     try:
+        patterns = (
+            build_context_ignore_patterns(
+                resolved, dockerfile, use_dockerfile_ignore=use_dockerfile_ignore
+            )
+            if use_dockerignore
+            else []
+        )
         for current, directories, files in os.walk(
             resolved, followlinks=False, onerror=raise_walk_error
         ):
             for name in directories + files:
                 candidate = os.path.join(current, name)
                 relative = os.path.relpath(candidate, resolved)
+                if patterns and build_context_path_is_ignored(relative, patterns):
+                    if (
+                        name in directories
+                        and not build_context_may_reinclude_directory(relative, patterns)
+                    ):
+                        directories.remove(name)
+                    continue
                 folded_name = name.casefold()
                 if (
                     basename_is_credential(folded_name)
@@ -6018,7 +6568,7 @@ def directory_ingress_references_credentials(reference):
                     )
                 ):
                     return True
-    except OSError:
+    except (OSError, UnicodeError, ValueError, re.error):
         # Docker に渡す範囲を確認できない場合は内容を送らせない。
         return True
     return False
@@ -6315,21 +6865,29 @@ def git_injects_command(arguments, assignments):
         if name in GIT_EXEC_ENV_VARS or name.startswith(GIT_EXEC_ENV_PREFIXES):
             return True
 
-    pending = False
+    pending = None
     for argument in arguments:
         if pending:
-            pending = False
-            if config_key_injects_command(argument):
+            setting = (
+                argument.split("=", 1)[0]
+                if pending == "--config-env"
+                else argument
+            )
+            pending = None
+            if config_key_injects_command(setting):
                 return True
             continue
         # clone / submodule は --config も同じ効果を持つ
-        if argument in {"-c", "--config"}:
-            pending = True
+        if argument in {"-c", "--config", "--config-env"}:
+            pending = argument
             continue
         # -c<key>=<value> / --config=<key>=<value> の連結形式
         for prefix in ("-c", "--config=", "--config-env="):
             if argument.startswith(prefix) and len(argument) > len(prefix):
-                if config_key_injects_command(argument[len(prefix) :]):
+                setting = argument[len(prefix) :]
+                if prefix == "--config-env=":
+                    setting = setting.split("=", 1)[0]
+                if config_key_injects_command(setting):
                     return True
     return False
 
@@ -6340,7 +6898,19 @@ def config_key_injects_command(setting):
     include.path / includeIf.*.path は、読み込ませた先で alias や
     credential.helper、core.hooksPath を定義できるため同じ扱いにする。
     """
-    key = setting.split("=", 1)[0].strip().casefold()
+    key, separator, value = setting.partition("=")
+    key = key.strip().casefold()
+    if separator:
+        if key == "core.pager" and value in {"", "cat"}:
+            return False
+        if key == "core.fsmonitor" and value.casefold() in {
+            "", "0", "1", "false", "true", "no", "yes", "off", "on"
+        }:
+            return False
+        if key == "ssh.variant" and value.casefold() in {
+            "ssh", "plink", "putty", "tortoiseplink", "simple", "auto"
+        }:
+            return False
     if key in GIT_EXEC_CONFIG_KEYS or key.startswith("alias."):
         return True
     if key.startswith(GIT_INCLUDE_CONFIG_PREFIXES):
@@ -6934,84 +7504,88 @@ def interpreter_cluster_code(command, token):
     return code, False
 
 
-def interpreter_code_arguments(command, arguments):
-    """インタプリタへ直接渡されたコード本体を取り出す。"""
+def interpreter_code_entries(command, arguments):
+    """コードの argv 位置と内容、標準入力からコードを読むかを返す。"""
     options = INTERPRETER_CODE_OPTIONS.get(command)
     if not options:
-        return []
+        return [], False
 
     code = []
-    pending = False
-    for argument in arguments:
-        if pending:
-            code.append(argument)
-            pending = False
-            continue
-        if argument in options:
-            pending = True
-            continue
-        # --eval=CODE のように `=` で連結された形式
+    reads_stdin = True
+    file_code = False
+    uncertain_value = False
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        if argument == "--":
+            index += 1
+            if index >= len(arguments):
+                break
+            argument = arguments[index]
+            if command in INTERPRETER_POSITIONAL_CODE and not code and not file_code:
+                code.append((index, argument))
+            reads_stdin = argument == "-"
+            break
+        if argument == "-" or not argument.startswith("-"):
+            if uncertain_value:
+                uncertain_value = False
+                index += 1
+                continue
+            if command in INTERPRETER_POSITIONAL_CODE and not code and not file_code:
+                code.append((index, argument))
+            reads_stdin = argument == "-"
+            break
+        # Python は -m / -c / スクリプト名以降をプログラムの argv にする。
+        if command in {"python", "python3"} and argument.startswith("-m"):
+            reads_stdin = False
+            break
         name, separator, value = argument.partition("=")
-        if separator and name in options:
-            code.append(value)
-            continue
-        # `-e'CODE'` / `-pe 'CODE'` / `-we 'CODE'` のような短縮オプションの塊
-        if argument.startswith("-") and not argument.startswith("--"):
-            cluster_code, cluster_pending = interpreter_cluster_code(
-                command, argument
-            )
-            code.extend(cluster_code)
-            pending = cluster_pending
+        pending = False
+        if name in options:
+            if separator:
+                code.append((index, value))
+            else:
+                pending = True
+        elif argument.startswith("--"):
+            if name in INTERPRETER_LONG_VALUE_OPTIONS.get(command, ()):
+                file_code = file_code or name == "--file"
+                index += 1 if separator else 2
+                continue
+            if not separator and name not in INTERPRETER_LONG_BOOLEAN_OPTIONS:
+                # 未知のオプションの値をスクリプト名と決めつけない。
+                uncertain_value = True
+        else:
+            cluster_code, pending = interpreter_cluster_code(command, argument)
+            code.extend((index, value) for value in cluster_code)
+            if not cluster_code and not pending:
+                for position, letter in enumerate(argument[1:], 1):
+                    if letter in INTERPRETER_VALUE_LETTERS.get(command, ""):
+                        if letter == "m" and command in {"python", "python3"}:
+                            return code, False
+                        file_code = file_code or (
+                            letter == "f" and command in {"awk", "gawk", "php"}
+                        )
+                        if position == len(argument) - 1:
+                            index += 1
+                        break
+        if pending:
+            index += 1
+            if index < len(arguments):
+                code.append((index, arguments[index]))
+        if code and command in {"python", "python3"}:
+            break
+        index += 1
+    return code, reads_stdin and not code and not file_code
 
-    if command in INTERPRETER_POSITIONAL_CODE and not code:
-        # awk はコード本体が第 1 位置引数。-f はファイル指定なので対象外
-        if "-f" not in arguments and not any(
-            argument.startswith("-f") for argument in arguments
-        ):
-            for argument in arguments:
-                if not argument.startswith("-"):
-                    code.append(argument)
-                    break
-    return code
+
+def interpreter_code_arguments(command, arguments):
+    """インタプリタへ直接渡されたコード本体を取り出す。"""
+    return [code for _index, code in interpreter_code_entries(command, arguments)[0]]
 
 
 def interpreter_code_argument_indexes(command, arguments):
     """インタプリタへ直接渡されたコード本体の argv 位置を返す。"""
-    options = INTERPRETER_CODE_OPTIONS.get(command)
-    if not options:
-        return set()
-
-    indexes = set()
-    pending = False
-    for index, argument in enumerate(arguments):
-        if pending:
-            indexes.add(index)
-            pending = False
-            continue
-        if argument in options:
-            pending = True
-            continue
-        name, separator, _value = argument.partition("=")
-        if separator and name in options:
-            indexes.add(index)
-            continue
-        if argument.startswith("-") and not argument.startswith("--"):
-            cluster_code, cluster_pending = interpreter_cluster_code(
-                command, argument
-            )
-            if cluster_code:
-                indexes.add(index)
-            pending = cluster_pending
-
-    if command in INTERPRETER_POSITIONAL_CODE and not indexes:
-        if "-f" not in arguments and not any(
-            argument.startswith("-f") for argument in arguments
-        ):
-            for index, argument in enumerate(arguments):
-                if not argument.startswith("-"):
-                    indexes.add(index)
-                    break
-    return indexes
+    return {index for index, _code in interpreter_code_entries(command, arguments)[0]}
 
 
 def interpreter_reads_stdin_script(command, arguments):
@@ -7020,17 +7594,7 @@ def interpreter_reads_stdin_script(command, arguments):
     `python3 -` のような明示指定と、スクリプトもコードも与えられていない
     呼び出し (`python3 <<EOF`) の両方が対象になる。
     """
-    if command not in INTERPRETER_CODE_OPTIONS:
-        return False
-    if interpreter_code_arguments(command, arguments):
-        return False
-    for argument in arguments:
-        if argument == "-":
-            return True
-        if not argument.startswith("-"):
-            # スクリプトファイルや awk のプログラムが指定されている
-            return False
-    return True
+    return interpreter_code_entries(command, arguments)[1]
 
 
 def interpreter_name(command):
@@ -7211,6 +7775,181 @@ def editor_shell_escape(command, arguments):
     return False
 
 
+def interpreter_executable_code(command, code):
+    """静的な文字列とコメントを除き、展開・添字・モジュール参照は残す。"""
+    if command in {"python", "python3"}:
+        try:
+            tree = ast.parse(code)
+        except (SyntaxError, ValueError):
+            return code
+        if any(
+            isinstance(node, (ast.Name, ast.Attribute))
+            and isinstance(node.ctx, ast.Load)
+            and (
+                (getattr(node, "id", None) or getattr(node, "attr", None))
+                in INTERPRETER_DYNAMIC_DISPATCH_IDENTIFIERS.get(command, ())
+                or isinstance(node, ast.Attribute)
+                and node.attr in {
+                    "__globals__", "__dict__", "f_builtins", "f_globals", "f_locals",
+                }
+            )
+            for node in ast.walk(tree)
+        ):
+            return ast.unparse(tree)
+        if any(
+            isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Constant)
+            for node in ast.walk(tree)
+        ):
+            return code
+        indexed_nodes = {
+            id(child)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Subscript)
+            for child in ast.walk(node.slice)
+        }
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, (str, bytes))
+                and id(node) not in indexed_nodes
+            ):
+                node.value = ""
+        return ast.unparse(tree)
+
+    output = list(code)
+    index = 0
+    bracket_depth = 0
+    parenthesis_depth = 0
+    module_depth = None
+    callable_literals = []
+    while index < len(code):
+        character = code[index]
+        comment = None
+        if command in {"node", "php"}:
+            if code.startswith("//", index):
+                comment = "\n"
+            elif code.startswith("/*", index):
+                comment = "*/"
+            elif character == "/":
+                if command == "node" and re.search(
+                    r"(?<![\w$])\d+(?:\.\d+)?\s*$", "".join(output[:index])
+                ):
+                    index += 1
+                    continue
+                # 正規表現・除算を区別できない場合は全文の検査を維持する。
+                return code
+        if character == "#" and command in {"awk", "gawk", "ruby", "perl", "php"}:
+            if not (command == "php" and code.startswith("#[", index)):
+                comment = "\n"
+        if command == "osascript" and code.startswith("--", index):
+            comment = "\n"
+        if command == "osascript" and code.startswith("(*", index):
+            return code
+        if command in {"ruby", "perl"} and (
+            index == 0 or code[index - 1] == "\n"
+        ) and character == "=":
+            return code
+        if comment is not None:
+            end = code.find(comment, index + 2 if comment == "*/" else index)
+            end = len(code) if end < 0 else end + (2 if comment == "*/" else 0)
+            output[index:end] = " " * (end - index)
+            index = end
+            continue
+        if command in {"ruby", "perl"} and character in {"/", "%"}:
+            return code
+        if command == "perl" and re.match(r"(?:q[qwrx]?|[msy])\W", code[index:]):
+            return code
+        if command == "php" and code.startswith("<<<", index):
+            return code
+        quotes = {'"'} if command in {"awk", "gawk", "osascript"} else {"'", '"'}
+        if command == "node":
+            quotes.add("`")
+        if character not in quotes:
+            if command == "node":
+                if (
+                    module_depth is not None
+                    and not character.isspace()
+                    and character != ")"
+                ):
+                    return code
+                if character == "(":
+                    parenthesis_depth += 1
+                    if module_depth is None and re.search(
+                        r"(?<![\w$])(?:import|require|getBuiltinModule)"
+                        r"(?:['\"]\s*\])?\s*$",
+                        "".join(output[:index]),
+                    ):
+                        module_depth = parenthesis_depth
+                elif character == ")":
+                    if module_depth == parenthesis_depth:
+                        module_depth = None
+                    parenthesis_depth = max(0, parenthesis_depth - 1)
+            if bracket_depth and (
+                character in "+._$" or character.isalpha()
+            ):
+                return code
+            if character == "[":
+                bracket_depth += 1
+            elif character == "]":
+                bracket_depth = max(0, bracket_depth - 1)
+            index += 1
+            continue
+        end = index + 1
+        while end < len(code):
+            if code[end] == "\\":
+                end += 2
+            elif code[end] == character:
+                end += 1
+                break
+            else:
+                end += 1
+        literal = code[index:end]
+        if bracket_depth and "\\" in literal:
+            return code
+        interpolates = (
+            (command == "node" and character == "`" and "${" in literal)
+            or (command == "ruby" and character == '"' and "#{" in literal)
+            or (command in {"perl", "php"} and character == '"' and "$" in literal)
+            or (command == "perl" and character == '"' and "@" in literal)
+        )
+        if interpolates:
+            return code
+        # 添字の文字列は obj["constructor"] のような動的参照にも使われる。
+        indexed = bracket_depth > 0
+        module_reference = module_depth is not None or (
+            command == "node"
+            and re.search(r"(?<![\w$])(?:import|from)\s*$", "".join(output[:index]))
+        )
+        if not indexed and not module_reference:
+            output[index:end] = " " * (end - index)
+            if command == "php":
+                callable_literals.append((index, end))
+        index = end
+    executable = "".join(output)
+    for start, end in callable_literals:
+        if re.match(r"\s*(?:\)\s*)*\(", executable[end:]):
+            output[start:end] = code[start:end]
+    executable = "".join(output)
+    if (
+        code_contains_identifier(
+            executable.casefold(), INTERPRETER_DYNAMIC_DISPATCH_IDENTIFIERS.get(command, ())
+        )
+        or command == "node" and re.search(
+            r"(?<![\w$])getBuiltinModule(?![\w$])"
+            r"(?!\s*(?:['\"]\s*\])?\s*\()",
+            executable,
+        )
+        or command == "php" and re.search(
+            r"\$(?:[\w$]+|\{[^{}]*\})"
+            r"(?:\s*(?:->|\?->)\s*(?:\w+|\{[^{}]*\}))*"
+            r"\s*(?:\)\s*)*\(",
+            executable,
+        )
+    ):
+        return code
+    return executable
+
+
 def code_starts_process(command, code_arguments):
     """渡されたコードが外部コマンドを起動する形かどうかを判定する。
 
@@ -7225,7 +7964,7 @@ def code_starts_process(command, code_arguments):
     patterns = INTERPRETER_EXEC_PATTERNS
     language_patterns = INTERPRETER_LANGUAGE_PATTERNS.get(command, ())
     for code in code_arguments:
-        lowered = code.casefold()
+        lowered = interpreter_executable_code(command, code).casefold()
         if any(literal in lowered for literal in literals):
             return True
         if code_contains_identifier(lowered, identifiers):
@@ -7269,10 +8008,13 @@ def code_contains_identifier(lowered_code, identifiers):
     return False
 
 
-def code_builds_target_dynamically(code_arguments):
+def code_builds_target_dynamically(command, code_arguments):
     """実行対象を実行時に組み立てるコードかどうかを判定する。"""
     return any(
-        code_contains_identifier(code.casefold(), INTERPRETER_OBFUSCATION_IDENTIFIERS)
+        code_contains_identifier(
+            interpreter_executable_code(command, code).casefold(),
+            INTERPRETER_OBFUSCATION_IDENTIFIERS,
+        )
         for code in code_arguments
     )
 
@@ -7784,6 +8526,26 @@ def find_parameter_expansion_end(text, start):
     raise ShellScanError("unterminated parameter expansion")
 
 
+def skip_heredoc_bodies(text, start, pending, reject_continuations=False):
+    """ヘッダー直後から、出現順のヒアドキュメント終端まで進める。"""
+    index = start
+    for delimiter, strip_tabs, quoted in pending:
+        while index < len(text):
+            newline = text.find("\n", index)
+            end = len(text) if newline < 0 else newline + 1
+            line = text[index:end].rstrip("\r\n")
+            if reject_continuations and not quoted and (
+                (len(line) - len(line.rstrip("\\"))) % 2
+            ):
+                raise ShellScanError("continued heredoc line in substitution")
+            index = end
+            if (line.lstrip("\t") if strip_tabs else line) == delimiter:
+                break
+        else:
+            raise ShellScanError("unterminated heredoc")
+    return index
+
+
 def find_parenthesized_end(text, start):
     """$( / <( / >( の内容開始位置から、対応する ) の直後を返す。"""
     depth = 1
@@ -7792,6 +8554,7 @@ def find_parenthesized_end(text, start):
     at_command_start = True
     coproc_name_pending = False
     time_command_pending = False
+    pending_heredocs = []
     command_prefixes = {
         "if",
         "then",
@@ -7837,12 +8600,28 @@ def find_parenthesized_end(text, start):
             )
         ):
             newline = text.find("\n", index)
-            index = len(text) if newline < 0 else newline + 1
+            index = len(text) if newline < 0 else newline
             at_command_start = True
             continue
-        if text.startswith("<<", index) and not text.startswith("<<<", index):
-            # ネストしたヒアドキュメントを安全に読み飛ばせない場合は拒否する
-            raise ShellScanError("heredoc in command substitution is unsupported")
+        if character == "\n" and pending_heredocs:
+            index = skip_heredoc_bodies(
+                text, index + 1, pending_heredocs, reject_continuations=True
+            )
+            pending_heredocs.clear()
+            at_command_start = True
+            continue
+        if text.startswith("<<<", index):
+            index += 3
+            continue
+        if text.startswith("<<", index):
+            index += 2
+            strip_tabs = text.startswith("-", index)
+            index += int(strip_tabs)
+            delimiter, quoted, index = parse_heredoc_word(text, index)
+            if not delimiter:
+                raise ShellScanError("missing heredoc delimiter")
+            pending_heredocs.append((delimiter, strip_tabs, quoted))
+            continue
         if (
             time_command_pending
             and character == "-"
@@ -8041,6 +8820,8 @@ def find_parenthesized_end(text, start):
             at_command_start = False
             index += 1
             if depth == 0:
+                if pending_heredocs:
+                    raise ShellScanError("unterminated heredoc in substitution")
                 return index
         elif character in ";&|\n":
             coproc_name_pending = False
@@ -8200,15 +8981,18 @@ def decode_literal_punctuation(value):
 
 
 def mask_arithmetic_for_heredocs(command):
-    """算術式内の << をヒアドキュメント演算子と誤認しないよう、改行以外を空白化する。"""
+    """算術式・コマンド置換内の << を外側の演算子と混同しないよう隠す。"""
     masked = list(command)
     quote = None
     index = 0
+    pending_heredocs = []
     while index < len(command):
         character = command[index]
         if quote == "'":
             if character == "'":
                 quote = None
+            elif character in "\r\n":
+                masked[index] = " "
             index += 1
             continue
         if quote == '"':
@@ -8217,32 +9001,58 @@ def mask_arithmetic_for_heredocs(command):
             elif character == '"':
                 quote = None
                 index += 1
-            elif command.startswith("$((", index):
-                closing = find_arithmetic_end(command, index + 3)
+            elif command.startswith("$(", index):
+                closing = (
+                    find_arithmetic_end(command, index + 3)
+                    if command.startswith("$((", index)
+                    else find_parenthesized_end(command, index + 2)
+                )
                 for position in range(index, closing):
-                    if command[position] not in "\r\n":
-                        masked[position] = " "
+                    masked[position] = " "
                 index = closing
             else:
+                if character in "\r\n":
+                    masked[index] = " "
                 index += 1
             continue
 
-        if character == "\\":
+        if character == "\n" and pending_heredocs:
+            index = skip_heredoc_bodies(command, index + 1, pending_heredocs)
+            pending_heredocs.clear()
+        elif character == "#" and (
+            index == 0 or command[index - 1].isspace()
+            or command[index - 1] in ";&|()<>"
+        ):
+            newline = command.find("\n", index)
+            index = len(command) if newline < 0 else newline
+        elif character == "\\":
             index += 2
         elif character in {"'", '"'}:
             quote = character
             index += 1
-        elif command.startswith("$((", index):
-            closing = find_arithmetic_end(command, index + 3)
+        elif command.startswith(("$(", "<(", ">("), index):
+            closing = (
+                find_arithmetic_end(command, index + 3)
+                if command.startswith("$((", index)
+                else find_parenthesized_end(command, index + 2)
+            )
             for position in range(index, closing):
-                if command[position] not in "\r\n":
-                    masked[position] = " "
+                masked[position] = " "
             index = closing
+        elif command.startswith("<<<", index):
+            index += 3
+        elif command.startswith("<<", index):
+            index += 2
+            strip_tabs = command.startswith("-", index)
+            index += int(strip_tabs)
+            delimiter, quoted, index = parse_heredoc_word(command, index)
+            if not delimiter:
+                raise ShellScanError("missing heredoc delimiter")
+            pending_heredocs.append((delimiter, strip_tabs, quoted))
         elif command.startswith("((", index):
             closing = find_arithmetic_end(command, index + 2)
             for position in range(index, closing):
-                if command[position] not in "\r\n":
-                    masked[position] = " "
+                masked[position] = " "
             index = closing
         else:
             index += 1
@@ -8374,27 +9184,29 @@ def heredocs_on_line(line):
 
 def strip_heredoc_bodies(command):
     """本文をトークンから除き、各本文と引用有無を出現順で返す。"""
-    lines = command.splitlines(True)
-    scan_lines = mask_arithmetic_for_heredocs(command).splitlines(True)
+    scan_command = mask_arithmetic_for_heredocs(command)
     output = []
     heredoc_regions = []
     index = 0
-    while index < len(lines):
-        header = lines[index]
-        output.append(header)
-        pending = heredocs_on_line(scan_lines[index])
-        index += 1
+    while index < len(command):
+        newline = scan_command.find("\n", index)
+        end = len(command) if newline < 0 else newline + 1
+        output.append(command[index:end])
+        pending = heredocs_on_line(scan_command[index:end])
+        index = end
 
         for delimiter, strip_tabs, quoted in pending:
             body = []
             found = False
-            while index < len(lines):
-                line = lines[index]
+            while index < len(command):
+                newline = command.find("\n", index)
+                end = len(command) if newline < 0 else newline + 1
+                line = command[index:end]
                 comparison = line.rstrip("\r\n")
                 if strip_tabs:
                     comparison = comparison.lstrip("\t")
                 output.append("\n" if line.endswith(("\n", "\r")) else "")
-                index += 1
+                index = end
                 if comparison == delimiter:
                     found = True
                     break
@@ -9208,6 +10020,101 @@ def split_env_string(value):
         raise ShellScanError("invalid env split-string: " + str(error))
 
 
+def unwrap_sudo(arguments):
+    """sudo のオプション・代入を消費し、子コマンド・確認要否・cwd を返す。"""
+    value_options = {
+        "-a", "--auth-type", "-C", "--close-from", "-c", "--login-class",
+        "-D", "--chdir", "-g", "--group", "-h", "--host", "-p", "--prompt",
+        "-R", "--chroot", "-r", "--role", "-t", "--type", "-T",
+        "--command-timeout", "-U", "--other-user", "-u", "--user",
+    }
+    flag_options = {
+        "--askpass", "--bell", "--background", "--preserve-env", "--edit",
+        "--set-home", "--login", "--remove-timestamp", "--reset-timestamp",
+        "--list", "--non-interactive", "--no-update", "--preserve-groups",
+        "--stdin", "--shell", "--validate", "--help", "--version",
+    }
+    flags = set()
+    assignments = []
+    directory = None
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        if argument == "--":
+            index += 1
+            break
+        if ASSIGNMENT_RE.match(argument):
+            assignments.append(argument)
+            index += 1
+            continue
+        if "=" in argument and not argument.startswith(("/", "=", "-")):
+            raise ShellScanError("unsupported sudo environment assignment")
+        if not argument.startswith("-") or argument == "-":
+            break
+        if command_word_is_dynamic(argument):
+            raise ShellScanError("dynamic sudo option")
+        if argument == "-h" and index + 1 == len(arguments):
+            return assignments, False, directory
+        option, separator, value = argument.partition("=")
+        value_option = None
+        if option in value_options:
+            value_option = option
+            if not separator:
+                if index + 1 >= len(arguments):
+                    raise ShellScanError("sudo option is missing its argument")
+                index += 1
+                value = arguments[index]
+        elif option in flag_options:
+            flags.add(option)
+        elif argument.startswith("--"):
+            raise ShellScanError("unsupported sudo option")
+        else:
+            for offset, flag in enumerate(argument[1:]):
+                short = "-" + flag
+                if short in value_options:
+                    value_option = short
+                    value = argument[offset + 2 :]
+                    if offset + 2 == len(argument):
+                        if index + 1 >= len(arguments):
+                            raise ShellScanError("sudo option is missing its argument")
+                        index += 1
+                        value = arguments[index]
+                    break
+                if flag not in "ABbEeHiKklnNPSsVv":
+                    raise ShellScanError("unsupported sudo option")
+                flags.add(short)
+        if value_option in {"-D", "--chdir"}:
+            if path_contains_expansion(value):
+                raise ShellScanError("dynamic sudo working directory")
+            directory = resolve_against_working_directory(expand_home(value))
+        elif value_option in {"-R", "--chroot"} and value != "/":
+            raise ShellScanError("sudo chroot command paths cannot be resolved")
+        index += 1
+    if flags & {"--help", "--version", "-V"}:
+        return assignments, False, directory
+    if flags & {"--stdin", "-S"}:
+        raise ShellScanError("sudo password input must use the terminal or authentication helper")
+    if flags & {"--list", "-l", "--validate", "-v", "--remove-timestamp", "-K"}:
+        return assignments, True, directory
+    child = arguments[index:]
+    if not child and flags & {"--reset-timestamp", "-k"} and not flags & {
+        "--login", "--shell", "-i", "-s"
+    }:
+        return assignments, True, directory
+    if flags & {"--edit", "-e"}:
+        return [*assignments, "sudoedit", *child], True, directory
+    if not child or flags & {"--login", "--shell", "-i", "-s"}:
+        if not child:
+            return [*assignments, "sh"], True, directory
+        # sudo の shell mode は英数字・_・-・$ 以外をエスケープして連結する。
+        script = " ".join(
+            re.sub(r"([^a-zA-Z0-9_$-])", r"\\\1", argument)
+            for argument in child
+        )
+        return [*assignments, "sh", "-c", script], True, directory
+    return [*assignments, *child], True, directory
+
+
 def unwrap_env(
     arguments,
     split_depth=0,
@@ -9782,6 +10689,7 @@ def shell_startup_inputs(
         environment[name]
         for name in ("BASH_ENV", "ENV")
         if environment.get(name)
+        and not isinstance(environment[name], InheritedEnvironmentValue)
     ]
     inputs.extend(
         INHERITED_NONEMPTY_MARKER
@@ -9790,7 +10698,8 @@ def shell_startup_inputs(
     )
     if command == "zsh":
         if "ZDOTDIR" in environment:
-            inputs.append(environment["ZDOTDIR"] or INHERITED_NONEMPTY_MARKER)
+            if not isinstance(environment["ZDOTDIR"], InheritedEnvironmentValue):
+                inputs.append(environment["ZDOTDIR"] or INHERITED_NONEMPTY_MARKER)
         elif "ZDOTDIR" in tainted_environment:
             inputs.append(INHERITED_NONEMPTY_MARKER)
         elif "HOME" in environment:
@@ -10590,6 +11499,7 @@ class CommandScanner:
             name
             for name in set(before) | set(after)
             if before.get(name, missing) != after.get(name, missing)
+            or type(before.get(name, missing)) is not type(after.get(name, missing))
         }
 
     def invalidate_environment_changes(
@@ -11278,6 +12188,7 @@ class CommandScanner:
         stdin_is_external=False,
         persist_assignments=True,
     ):
+        global WORKING_DIRECTORY
         stdin_commands = stdin_commands or []
         original_argv = argv
         self.inspect_parameter_assignments(original_argv)
@@ -11343,6 +12254,44 @@ class CommandScanner:
                 argv = unwrap_builtin_options(arguments)
             elif command == "exec":
                 argv = unwrap_exec_options(arguments)
+            elif command_cf == "sudo":
+                if any(
+                    contains_sensitive_parameter(value)
+                    for value in (
+                        arguments
+                        + list(effective_environment.values())
+                        + list(stdin_commands)
+                    )
+                ):
+                    add_reason(self.reasons, CREDENTIAL_VARIABLE_REASON)
+                if environment_override_is_nonempty(
+                    SUDO_EXEC_ENV_VARS, effective_environment,
+                    effective_tainted_environment,
+                ):
+                    add_reason(self.reasons, SUDO_EXEC_REASON)
+                argv, requires_confirmation, directory = unwrap_sudo(arguments)
+                if requires_confirmation:
+                    add_reason(self.confirmations, SUDO_CONFIRM_REASON)
+                sudo_assignments, sudo_child = self.split_leading_assignments(argv)
+                if not sudo_child:
+                    self.validate_assignments(sudo_assignments, persist=False)
+                    return None
+                previous_directory = WORKING_DIRECTORY
+                previous_environment = self.exported_environment
+                previous_tainted_environment = self.tainted_environment
+                try:
+                    if directory is not None:
+                        WORKING_DIRECTORY = directory
+                    self.exported_environment = effective_environment
+                    self.tainted_environment = effective_tainted_environment
+                    return self.inspect_argv(
+                        argv, depth + 1, stdin_commands, stdin_is_external,
+                        persist_assignments=False,
+                    )
+                finally:
+                    WORKING_DIRECTORY = previous_directory
+                    self.exported_environment = previous_environment
+                    self.tainted_environment = previous_tainted_environment
             elif command_cf == "env":
                 env_assignments = []
                 argv = unwrap_env(
@@ -11456,25 +12405,11 @@ class CommandScanner:
         elif command_cf == "gh":
             # 値を取るオプションを消費してから、位置引数 (サブコマンド) の並びを見る
             candidates = subcommand_word_candidates(arguments, GH_VALUE_OPTIONS, 2)
-            token_help = exact_local_help_invocation(
-                arguments,
-                {
-                    ("auth", "token"),
-                    ("auth", "git-credential"),
-                    ("auth", "status", "--show-token"),
-                    ("auth", "status", "--show-token=true"),
-                },
-            )
-            subcommand_help = bool(
-                arguments
-                and arguments[-1] in {"--help", "-h"}
-                and any(words for words in candidates)
-            )
-            local_help = token_help or subcommand_help
+            local_help = gh_help_requested(arguments)
             shows_token = boolean_option_enabled(
                 arguments, {"--show-token"}, short_flags={"t"}
             )
-            if not token_help and (
+            if not local_help and (
                 subcommand_candidates_match(candidates, ("auth", "token"))
                 or subcommand_candidates_match(candidates, ("auth", "git-credential"))
                 or (
@@ -11487,7 +12422,7 @@ class CommandScanner:
                 )
             ):
                 add_reason(self.reasons, GH_TOKEN_REASON)
-            if gh_api_reveals_secret(candidates, arguments):
+            if not local_help and gh_api_reveals_secret(candidates, arguments):
                 add_reason(self.reasons, GH_API_SECRET_REASON)
             # `--` の後ろは git / ssh のオプションになり、ここでは検査できない
             if not local_help and "--" in arguments and any(
@@ -11503,7 +12438,7 @@ class CommandScanner:
             # 読み取りと分かる形以外は、外部の状態を変えうるものとして確認へ回す
             if not local_help and gh_changes_external_state(arguments):
                 add_reason(self.confirmations, EXTERNAL_STATE_CONFIRM_REASON)
-            if gh_writes_through_api(candidates, arguments):
+            if not local_help and gh_writes_through_api(candidates, arguments):
                 # gh api は外部の状態をそのまま書き換えられる
                 add_reason(self.confirmations, DESTRUCTIVE_CONFIRM_REASON)
             if environment_override_is_nonempty(
@@ -11600,13 +12535,18 @@ class CommandScanner:
                 AWS_SSM_NO_WITH_DECRYPTION_OPTIONS,
             )
             exposes_decrypted_parameter = decrypts_parameter and not (
-                exits_after_version or generates_cli_skeleton
+                exits_after_version or generates_cli_skeleton or any(
+                    aws_help_invocation(arguments, expected)
+                    for expected in decrypt_subcommands
+                )
             )
             exposes_codeartifact_login_token = subcommand_candidates_match(
                 candidates, ("codeartifact", "login")
             ) and aws_option_enabled(arguments, AWS_CODEARTIFACT_DRY_RUN_OPTIONS)
             exposes_codeartifact_login_token = (
-                exposes_codeartifact_login_token and not exits_after_version
+                exposes_codeartifact_login_token
+                and not exits_after_version
+                and not aws_help_invocation(arguments, ("codeartifact", "login"))
             )
             deploy_iam_user_arn = aws_last_option_value(
                 arguments, AWS_DEPLOY_IAM_USER_ARN_OPTIONS
@@ -11668,7 +12608,10 @@ class CommandScanner:
             if (
                 git_injects_command(arguments, ())
                 or environment_override_is_nonempty(
-                    GIT_EXEC_ENV_VARS,
+                    GIT_EXEC_ENV_VARS - {
+                        name for name in {"GIT_PAGER", "PAGER"}
+                        if effective_environment.get(name) == "cat"
+                    },
                     effective_environment,
                     effective_tainted_environment,
                     GIT_EXEC_ENV_PREFIXES,
@@ -11769,6 +12712,23 @@ class CommandScanner:
                 )
             ):
                 add_reason(self.reasons, DOCKER_MOUNT_REASON)
+            use_dockerfile_ignore = build_words[:1] == ["buildx"] or (
+                "DOCKER_BUILDKIT" not in effective_tainted_environment
+                and effective_environment.get("DOCKER_BUILDKIT")
+                in {None, "", "1", "t", "T", "true", "True", "TRUE"}
+            )
+            if any(
+                directory_ingress_references_credentials(
+                    reference,
+                    use_dockerignore=command_cf == "docker",
+                    dockerfile=dockerfile,
+                    use_dockerfile_ignore=use_dockerfile_ignore,
+                )
+                for reference, dockerfile in container_build_contexts(
+                    docker_arguments, build_words
+                )
+            ):
+                add_reason(self.reasons, DOCKER_MOUNT_REASON)
             for name, value in container_environment_specs(docker_arguments):
                 if container_environment_spec_reveals_secret(name, value):
                     add_reason(self.reasons, DOCKER_ENV_REASON)
@@ -11827,7 +12787,7 @@ class CommandScanner:
                 add_reason(self.reasons, CREDENTIAL_FILE_REASON)
             elif code_starts_process(interpreter_cf, code_arguments):
                 add_reason(self.reasons, INTERPRETER_EXEC_REASON)
-            elif code_builds_target_dynamically(code_arguments):
+            elif code_builds_target_dynamically(interpreter_cf, code_arguments):
                 add_reason(self.reasons, INTERPRETER_OBFUSCATION_REASON)
             elif reads_stdin_code and stdin_is_external:
                 # 内容を見られない標準入力からスクリプトを読む形
@@ -12006,8 +12966,13 @@ class CommandScanner:
                 add_reason(self.reasons, CREDENTIAL_VARIABLE_REASON)
                 break
 
-        if command_cf == "sudo":
-            add_reason(self.reasons, SUDO_REASON)
+        if command_cf == "sudoedit":
+            add_reason(self.confirmations, SUDO_CONFIRM_REASON)
+            if environment_override_is_nonempty(
+                SUDO_EXEC_ENV_VARS, effective_environment,
+                effective_tainted_environment,
+            ):
+                add_reason(self.reasons, SUDO_EXEC_REASON)
         elif command_cf == "rm":
             for argument in arguments:
                 if argument == "--":
@@ -12288,7 +13253,8 @@ def main():
         return 2
 
     # Codex の PreToolUse は ask を扱わないため、deny のみ共通で強制する。
-    # 確認対象は共通規約に委ね、Claude Code では従来どおり ask を返す。
+    # Claude Code は Auto では classifier、bypassPermissions では deny、
+    # それ以外では ask として確認対象を扱う。
     is_codex_event = isinstance(event.get("turn_id"), str)
 
     # 拒否理由があれば確認では通さない
@@ -12306,7 +13272,7 @@ def main():
             ]
             if denied:
                 print_decision_json(command, "deny", denied)
-        else:
+        elif event.get("permission_mode") != "auto":
             print_decision_json(command, "ask", scanner.confirmations)
     return 0
 

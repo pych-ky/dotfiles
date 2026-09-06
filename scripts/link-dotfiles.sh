@@ -40,6 +40,7 @@ usage() {
 Usage: ./scripts/link-dotfiles.sh [--dry-run] [-h | --help]
 
 Create symlinks from this repository into $HOME.
+The Codex Browser config is copied as a regular file because Codex rejects symlinks for this path.
 Existing regular files and directories are moved to ~/.dotfiles-backup/<timestamp>[-<sequence>]/ first.
 
 Options:
@@ -94,6 +95,54 @@ report_link() {
   local verb='linked'
   ((dry_run)) && verb='would link'
   printf '%s: %s -> %s\n' "$verb" "$1" "$2"
+}
+
+# Codex が symlink を拒否する設定を通常ファイルとして配置
+copy_regular_file() {
+  local source_relative="$1"
+  local target_relative="${2:-$1}"
+  local source="$repo_dir/$source_relative"
+  local target="$HOME/$target_relative"
+
+  if [[ ! -f "$source" || -L "$source" ]]; then
+    printf 'missing regular source: %s\n' "$source" >&2
+    return 1
+  fi
+
+  if [[ -f "$target" && ! -L "$target" ]] && cmp -s "$source" "$target"; then
+    printf 'ok: %s (regular copy of %s)\n' "$target" "$source"
+    return 0
+  fi
+
+  run mkdir -p "$(dirname "$target")" || return
+
+  if [[ -L "$target" ]]; then
+    run rm "$target" || return
+  elif [[ -e "$target" ]]; then
+    local backup
+    ensure_backup_dir || return
+    backup="$(backup_path "$target")"
+    run mkdir -p "$(dirname "$backup")" || return
+    run mv -n "$target" "$backup" || return
+    if ((!dry_run)) && [[ -e "$target" || -L "$target" ]]; then
+      printf 'error: backup destination already exists: %s\n' "$backup" >&2
+      return 1
+    fi
+    backup_created=1
+
+    local compare_target="$backup"
+    ((dry_run)) && compare_target="$target"
+    if [[ -e "$compare_target" ]] && ! cmp -s "$compare_target" "$source"; then
+      backup_diffs+=("$target (backup: $backup)")
+    fi
+  fi
+
+  run cp -p "$source" "$target" || return
+  if ((dry_run)); then
+    printf 'would copy: %s <- %s\n' "$target" "$source"
+  else
+    printf 'copied: %s <- %s\n' "$target" "$source"
+  fi
 }
 
 # $HOME からの相対パスをバックアップ先における同じ相対パスへ変換
@@ -340,10 +389,8 @@ main() {
     ".config/mise/config.toml"
     # AI エージェント
     ".config/agents/AGENTS.md"
-    ".codex/browser/config.toml"
     ".claude/CLAUDE.md"
     ".claude/settings.json"
-    ".claude/keybindings.json"
     ".claude/hooks/pre-bash-guard.py"
     ".claude/hooks/pre-bash-guard.sh"
     ".claude/hooks/statusline.sh"
@@ -366,6 +413,11 @@ main() {
     failed_items+=(".claude/hooks/inject-guidelines-context.sh (obsolete symlink)")
   fi
 
+  # 廃止した Claude Code のキー設定リンクを、自リポジトリ由来の場合だけ除去
+  if ! remove_obsolete_symlink ".claude/keybindings.json"; then
+    failed_items+=(".claude/keybindings.json (obsolete symlink)")
+  fi
+
   # 旧構成で作成した認証 CLI 用 rule のリンクだけを除去する。
   if ! remove_obsolete_symlink ".config/codex/rules/authenticated-cli.rules" ".codex/rules/authenticated-cli.rules"; then
     failed_items+=(".codex/rules/authenticated-cli.rules (obsolete symlink)")
@@ -376,6 +428,11 @@ main() {
       failed_items+=("$file")
     fi
   done
+
+  # Browser の信頼済み設定ブリッジは対象パスの symlink を拒否する
+  if ! copy_regular_file ".codex/browser/config.toml"; then
+    failed_items+=(".codex/browser/config.toml")
+  fi
 
   # 共通ルールの正本を Codex の参照先にもリンク
   if ! link_file ".config/agents/AGENTS.md" ".codex/AGENTS.md"; then
