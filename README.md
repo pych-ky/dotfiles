@@ -25,7 +25,7 @@ git clone <このリポジトリ> && cd dotfiles
 
 1. `sudo` 認証を行う
 2. `macos/defaults.sh` で macOS 設定を適用する
-3. `scripts/link-dotfiles.sh` でシンボリックリンクを展開する
+3. `scripts/link-dotfiles.sh` で設定ファイルを展開する
 4. Homebrew を導入する。
    未導入時は Xcode Command Line Tools も導入する
 5. 不足する CLI・GUI アプリをインストールし、ログイン項目を追加・削除する
@@ -67,6 +67,7 @@ git clone <このリポジトリ> && cd dotfiles
 - 同じ秒の再実行は連番で別世代にし、スクリプトが生成した最新 5 世代だけを保持する
 - 同じ `HOME` への並行実行は排他ロックで直列化する
 - 既存のシンボリックリンクはリンク先が異なる場合のみ張り替える
+- `~/.codex/browser/config.toml` は Codex がシンボリックリンクを拒否するため、通常ファイルとしてコピーする
 - Karabiner が変更を検知できるよう、`.config/karabiner` はディレクトリごとリンクする
 - 共通エージェントルールは `.config/agents/AGENTS.md` を正本とし、`~/.config/agents/AGENTS.md` と `~/.codex/AGENTS.md` から参照する
 - Codex の基本設定を `sudo` で `/etc/codex/config.toml` にリンクし、端末固有の `~/.codex/config.toml` で上書き可能にする
@@ -129,13 +130,14 @@ ghtkn auth   # デバイスフローで認証する
 - `gh auth token` / `gh auth git-credential` / `ghtkn get` / `ghtkn exec` / `ghtkn git-credential` の直接実行はトークンの取り出しになるため、AI エージェントには許可しない
 - `gh` を `ghtkn exec` で包む端末固有 wrapper は `auth` サブコマンドを対象外にする。`GH_TOKEN` が注入された状態では、`gh auth login` が通常の保存済み認証を更新できない
 - Git / `gh` / `aws` は個別の allow rule を使わず、ほかのコマンドと同じ既定 Allow の実行経路で動かす。
-  Codex は「保護付きフルアクセス」、Claude Code は `auto` の classifier を使い、filesystem sandbox を無効化して credential helper、CLI 設定、認証キャッシュを通常どおり利用できるようにする。Auto 以外のモードでは bare `Bash` allow が有効になる
+  Codex は「保護付きフルアクセス」、Claude Code は `auto` の classifier を使い、filesystem sandbox を無効化して credential helper、CLI 設定、認証キャッシュを通常どおり利用できるようにする。Claude Code に bare `Bash` allow は設定しない
   - `gh` は gh 自身が保管先からトークンを読む。
     トークンはエージェントへ渡らないため、`gh pr list` などは通常どおり使える。
     ただしこれは `gh auth login` が保管した**別系統のトークン**であり、ghtkn 経由ではない。
     認証を ghtkn へ一本化するには `gh` 用の broker か wrapper が別途要る（未実装）
   - AI エージェントから AWS プロファイルを選ぶときは `aws --profile <name> ...` と明示する。`aws-use` は利用者の対話シェルでログインと既定プロファイルの永続化を行うための関数とする
   - AWS の設定と認証キャッシュは AWS CLI 自身から読み書きできる。ログインや設定変更は認証・外部状態の変更として事前確認する
+  - Google の認証ファイルは `GOOGLE_APPLICATION_CREDENTIALS` で指定する。`GOOGLE_CREDENTIALS` は JSON も持ちうるため、Codex では継承時に除外する
 - CodeCommit のプロファイル固有設定は公開側に置かない。AWS CLI 同梱の `codecommit credential-helper` は Git の子プロセスとして同じ認証経路を利用できるが、直接実行は認証情報の出力になるため拒否する。`git-remote-codecommit` はこのリポジトリでは導入していない
 - 共通の PreToolUse ガードは、認証ファイルの直接読み取り、秘密値の出力、既知の検査迂回を拒否する。
   `terraform console` と、`--` 以降を git / ssh へ素通しする `gh repo clone` / `gh codespace ssh` は拒否するが、未知のサブコマンドを一律には拒否しない
@@ -229,6 +231,53 @@ brew bundle cleanup --file=macos/Brewfile             # Brewfile にないパッ
   現在の設定を書き出して該当キーだけ差し替えてから読み込む（同じ辞書にある他の表示設定を失わないため）
 - 電源管理（`pmset`）の変更は、認証済みの `sudo`（`sudo -n`）で実行する
 - 日本語入力、外観（ダークモード）、ファンクションキーの設定は再ログイン後に反映される
+
+### キーボード
+
+macOS 共通のキー変換は Karabiner、ターミナルの処理は WezTerm、エディタと統合ターミナルの処理は VS Code で管理する。
+以下の `Cmd` は OS に送るキーを表し、Windows の左 Ctrl の位置から操作できる。
+
+| 対象 | キー・物理位置 | 操作 |
+| --- | --- | --- |
+| Mac 共通 | 左 Control / Option / Command | Command / Control / Option に変更 |
+| Mac 共通 | Caps Lock | Control |
+| Mac 共通 | 右 Command / Option | かな / 英数 |
+| Mac 共通 | Option+Tab / Option+Shift+Tab | アプリ切り替え / 逆順 |
+| Mac 共通 | Cmd+Y | やり直し |
+| Mac 共通 | Print Screen | 範囲指定スクリーンショット |
+| Finder | F2 | 名前変更 |
+| Chrome・Edge・Firefox・Safari | F5 | 再読み込み |
+| Chrome・Edge・Firefox | Shift+F5 | キャッシュを無視して再読み込み |
+| WezTerm・VS Code 統合ターミナル | Cmd+C | 選択中はコピー、未選択時は処理中断 |
+| WezTerm・VS Code 統合ターミナル | Cmd+A / E / R | 行頭 / 行末 / 履歴検索 |
+| WezTerm・VS Code 統合ターミナル | Cmd+Shift+A | スクロールバック全体をコピー |
+| VS Code エディタ | Cmd+[ / ] | インデントを浅く / 深く |
+| VS Code エディタ | Home / End、Cmd+Home / End | 行頭・行末 / ファイル先頭・末尾（Shift 併用で選択） |
+| VS Code エディタ | Cmd+← / → | 単語移動（Shift 併用で選択） |
+| VS Code エディタ | Cmd+Backspace / Delete | 前 / 後の単語を削除 |
+
+- VS Code の `keybindings.json` は Settings Sync で管理し、リポジトリには含めない。
+  Mac 向け追加設定は `isMac` 条件で限定し、Windows の標準キー設定を維持する
+- 左修飾キーの共通変換は Mac 配列を前提とする。外付けキーボードは Mac モードで使用する。
+  Windows 配列だけのキーボードでは、Karabiner の機器別 Simple Modifications で
+  `left_command → left_control`、`left_option → left_option` を指定する
+- Keychron の F13、Windows 側の右上中央の右 Alt、日本語入力切り替え、RGB・Bluetooth 操作は維持する
+
+#### Keychron K8 Pro 本体の移行
+
+移行用レイアウトは `macos/keychron_k8_pro_ansi_rgb.layout.json`。
+Mac の修飾キーと右 Command / Option は標準の信号に戻し、位置の変更は Karabiner に任せる。
+Mac の Fn+F10 / F11 / F12 はミュート / 音量を下げる / 上げる、Windows の Caps Lock は Control にする。
+Mac のスクリーンショットキーは Print Screen を送り、Karabiner が元の範囲指定操作に変換する。
+
+1. USB 接続し、本体を Cable・Mac モードにする
+2. [VIA](https://usevia.app/) の Save + Load から移行用レイアウトを読み込む。
+   機種定義が必要な場合は、[Keychron 公式配布](https://www.keychron.com/pages/firmware-and-json-files-of-the-keychron-qmk-k-pro-and-k-max-series-keyboards)の K8 Pro ANSI RGB v1.7 を使う
+3. Karabiner の Keychron 機器設定にある、左 Control / Option / Command を同じキーへ変換する
+   3 件の Simple Modifications を削除する（現在は本体の旧配列との二重変換を防ぐために残している）
+4. 左 Ctrl 位置でのコピー、かな・英数、F13、Fn 音量操作を確認する
+
+元の Downloads 配下のレイアウトは変更していない。元に戻す場合は旧レイアウトを読み込み、手順 3 の同一キー変換を戻す。
 
 ### 非公開 Codex Custom Pets
 
@@ -338,12 +387,10 @@ cd "$HOME/src/pych/agent-skills"
 
 ### AI エージェントの外部サービス
 
-- Claude.ai の Settings > Connectors で GitHub を接続する。この接続は、この環境では Claude Code の MCP として自動提供されない
-- Claude Code からの GitHub 操作には、キーチェーン経由で認証済みの `gh` CLI を使う。
-  `bootstrap.sh` は公式 GitHub プラグインも導入するが、PAT の環境変数を要求するため無効化したままにする
+- Codex CLI と Claude Code からの GitHub 操作には、`git` とキーチェーン経由で認証済みの `gh` CLI を使う
 - Claude Code の Linear と Microsoft Docs の公式プラグインは `bootstrap.sh` が導入して有効化する。Linear は端末ごとに OAuth 認証する
-- ChatGPT の Settings > Plugins で Linear と GitHub を Install し、それぞれ Connect する。
-  `.config/codex/config.toml` は両方の canonical plugin ID を有効化するが、アカウントへの導入と接続は行わない
+- ChatGPT の Linear プラグインはアカウント単位で Install / Connect し、対応するデスクトップ画面で共有する。初回の OAuth 認証は手動で完了する
+- Codex CLI の Linear プラグインは `bootstrap.sh` が導入し、`.config/codex/config.toml` が canonical plugin ID を有効化する。未認証の場合は導入時に OAuth 認証を完了する
 
 ## 非公開設定（dotfiles-private）
 
@@ -372,10 +419,11 @@ AI エージェント（Claude Code / Codex）に対する方針は次の一点�
 そのため、コマンド名だけで一律に拒否せず、秘密値を出力するサブコマンドとそうでないサブコマンドを分けています。
 
 - `.config/agents/AGENTS.md`: 共通の規約。行わないこと・行ってよいこと・確認してから行うことを分けて定義する
-- `.claude/settings.json`: `auto` の利用、Auto 以外での Bash の既定 Allow、filesystem sandbox の無効化、秘密値を出力する操作の deny、ホーム以下にある既知名の認証情報ファイルに対する組み込み `Read` の禁止
+- `.claude/settings.json`: `auto` の利用、Bash の個別 allow の不使用、filesystem sandbox の無効化、秘密値を出力する操作の deny、ホーム以下にある既知名の認証情報ファイルに対する組み込み `Read` の禁止
 - `.claude/hooks/pre-bash-guard.py`: Claude Code と Codex の Bash 実行前に同じ判断を強制し、さらに検査の迂回経路（設定注入・インタプリタ経由の実行・ラッパー経由の実行・コンテナへの受け渡し）と、認証情報ファイルを引数に取る操作を拒否する。
-  不可逆な操作と外部・ホストの状態変更は、Claude Code では `ask` を返して確認へ回す（`bypassPermissions` では deny になる）。Codex の PreToolUse は `ask` 非対応のため、hard deny だけをフックで強制し、操作前の確認は共通規約に従う
-- `.config/codex/config.toml` / `.codex/browser/config.toml`: ルート全体の読み書きを既定 Allow とし、CLI が内部利用する設定・認証ストア、秘密鍵、keystore、service-account、環境ファイルは filesystem deny の対象外にする。Codex / Claude Code 自身の認証・履歴と shell 履歴だけを固定 deny にし、通常の CLI 設定環境変数を継承して秘密値だけを除外する。ブラウザ操作・履歴・ファイル転送は常時確認とし、CDP フルアクセスは無効にする
+  起動元の非秘密な認証・実行設定は継承し、IDE の `GIT_ASKPASS` / `GIT_EDITOR` などの存在や非空だけで通常の CLI 操作を拒否しない。エージェントによる実行設定の明示的な差し替えは検査する
+  不可逆な操作と外部・ホストの状態変更は、Claude Code の Auto では classifier に委ね、`bypassPermissions` では原則 deny、それ以外では `ask` を返す。Codex の PreToolUse は `ask` 非対応のため、hard deny だけをフックで強制し、操作前の確認は共通規約に従う
+- `.config/codex/config.toml` / `.codex/browser/config.toml`: ルート全体の読み書きを既定 Allow とし、CLI が内部利用する設定・認証ストア、秘密鍵、keystore、service-account、環境ファイルは filesystem deny の対象外にする。Codex / Claude Code 自身の認証・履歴と shell 履歴だけを固定 deny にし、通常の CLI 設定環境変数を継承して秘密値だけを除外する。ブラウザのサイト操作・履歴取得・ファイル転送は `never_ask` で自動承認し、CDP フルアクセスは無効にする
   CLI 設定や認証ストアの直接取得は共通規約と PreToolUse で拒否する
   ワークスペース内の任意階層にある認証情報は `.config/agents/AGENTS.md` の禁止規約で扱う
 
@@ -393,8 +441,9 @@ codex
 - 認証情報を一時的に `export` したターミナルからは起動しない
 - 認証は credential helper・キーチェーン・認証エージェントへ委譲する
 - Codex の shell snapshot は無効化済み。Claude Code が内部利用する snapshot と、両エージェントの履歴・file history・paste cache はモデルから直接読めないよう保護する
-- Claude Code の `permissions.defaultMode` は `auto` のまま運用する。Auto では任意コード実行になる bare `Bash` allow が一時的に外れ、通常操作は classifier が承認する。Auto 以外のモードへ切り替えると bare `Bash` allow が再び有効になる。filesystem sandbox は CLI の設定・認証ストアの内部利用を妨げないよう、明示的に無効化する。
-  `permissions.ask` は空とし、settings は allow / deny に二分する。確認が要る操作はフックが `ask` を返して扱う。
+- `~/.codex-account-*` の認証情報・履歴にも、通常の Codex と同じ filesystem deny・Claude Code の `Read` deny・共通 Bash ガードを適用する
+- Claude Code の `permissions.defaultMode` は `auto` のまま運用し、Bash の個別 allow は設定しない。Auto では hard deny 以外の操作を classifier が依頼内容に照らして判断する。filesystem sandbox は CLI の設定・認証ストアの内部利用を妨げないよう、明示的に無効化する。
+  `permissions.ask` は空とし、settings は allow / deny に二分する。確認が要る操作は Auto では classifier に委ね、`bypassPermissions` では原則 deny、それ以外ではフックが `ask` を返す。
   `bypassPermissions` を明示的に選んだ場合もフックは hard deny を維持し、`ask` を返すはずだった操作は通常のインタプリタコードを除いて拒否する
   `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` は既定以外の permission mode と競合するため使わない
 

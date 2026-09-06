@@ -55,7 +55,7 @@ credential helper、認証エージェント、署名ブローカーが内部で
 - 認証情報ファイルの直接読み取り
   - `~/.ssh`、`~/.aws/credentials`、`~/.aws/config`、`~/.kube/config`、ROSA/OCM の `ocm.json`、Helm の repository / registry 認証設定、uv の credentials store、`~/.codex/auth.json`、`~/.config/gh/hosts.yml`、`~/.config/gcloud`、`~/.config/containers/auth.json`、PostgreSQL の service file、pip・curl・wget・Bundler・Composer・Poetry の認証設定、`~/.vault-token`、`~/.terraformrc`、`~/.azure`、`~/.cargo/credentials`、ユーザーおよびシステムの `Library/Keychains`、秘密鍵・KeePass・service account のファイル
   - `.git-credentials`、`.netrc`、`.pgpass`、`.npmrc`、`.pypirc`、shell の履歴。ホーム外やワークスペース内にある同名ファイルも含む
-  - Codex / Claude Code が保存する会話履歴・session transcript・file history・paste cache・shell snapshot（過去の prompt、tool output、編集前ファイル、貼り付け内容、展開済み shell 環境を含みうる）
+  - Codex / Claude Code が保存する会話履歴・session transcript・file history・paste cache・shell snapshot（過去の prompt、tool output、編集前ファイル、貼り付け内容、展開済み shell 環境を含みうる）。`~/.codex-account-*` のようなアカウント別の保存先でも、認証情報・履歴を同じ保護対象とする
   - `.env` と `.env.*`、`secrets/` や `credentials/` の配下。いずれも入れ子の位置（`app/.env` など）を含む。値を持たない雛形は `env.example` のように `.env` で始まらない名前を使う
   - terraform の state ファイル（`terraform.tfstate`、`*.tfstate.backup` など）と鍵ストア（`*.jks`、`*.keystore`）。`git show <rev>:<パス>` のような取り出し方も含む
 - 保存済みの秘密値を出力する操作
@@ -76,7 +76,7 @@ credential helper、認証エージェント、署名ブローカーが内部で
 - 上記を迂回する操作
   - `git -c core.pager=<コマンド>` などの設定注入と、同等の環境変数の前置（`GIT_SSH_COMMAND`、`GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n`、`GIT_CONFIG_PARAMETERS` など）、`include.path` による別ファイルの読み込み、URL 単位で書く `credential.<url>.helper` / `protocol.<name>.allow` / `url.<base>.insteadOf`
   - `terraform console` / `terragrunt console`（`file()` などで任意のファイル読み取りになる）
-  - 実行体や暗黙の引数を差し替える環境変数（Git の pager / editor / SSH / 設定注入、`TF_CLI_ARGS` / `TF_CLI_ARGS_<command>`、`TG_TF_PATH`、`TERRAGRUNT_TFPATH`、`GH_PAGER` / `GH_EDITOR` / `GH_BROWSER` と fallback の `PAGER` / `EDITOR` / `VISUAL` / `BROWSER`、`AWS_PAGER` / `MANPAGER`、shell の起動ファイル・オプションを変える `BASH_ENV` / `ZDOTDIR` / `SHELLOPTS`、`DOCKER_CLI_PLUGIN_EXTRA_DIRS`、`npm_config_call` / `npm_config_script_shell`）と、同じことをする CLI オプション。前置代入・継承環境・直前の `export`・条件分岐や関数の中の `export`・`set -a` / `set -k` 中の代入（`readonly` / `read` / `declare` / `printf -v` などによるものを含む）・関数呼び出しへの前置代入を問わず同じ扱いとする。CLI の仕様上、空値が pager を無効化する場合は許可する
+  - エージェントによる、実行体や暗黙の引数を差し替える環境変数（Git の pager / editor / SSH / 設定注入、`TF_CLI_ARGS` / `TF_CLI_ARGS_<command>`、`TG_TF_PATH`、`TERRAGRUNT_TFPATH`、`GH_PAGER` / `GH_EDITOR` / `GH_BROWSER` と fallback の `PAGER` / `EDITOR` / `VISUAL` / `BROWSER`、`AWS_PAGER` / `MANPAGER`、shell の起動ファイル・オプションを変える `BASH_ENV` / `ZDOTDIR` / `SHELLOPTS`、`DOCKER_CLI_PLUGIN_EXTRA_DIRS`、`npm_config_call` / `npm_config_script_shell`）の設定と、同じことをする CLI オプションの指定。前置代入・直前の `export`・条件分岐や関数の中の `export`・`set -a` / `set -k` 中の代入（`readonly` / `read` / `declare` / `printf -v` などによるものを含む）・関数呼び出しへの前置代入を問わず同じ扱いとする。CLI の仕様上、空値が pager を無効化する場合は許可する
   - `git config` による外部コマンド・別設定ファイルの永続的な注入（`git config core.hooksPath ...`、`--add include.path ...`、`git config alias.x '!コマンド'` など）
   - 無害な名前の symlink 経由での指定（実体が `.env` や `*.tfstate` なら同じ扱いとする）
   - 受け取った文字列を shell へ渡すラッパー経由の実行（`npx -c`、`npm exec -c`、`script -c`、`flock -c`、`git submodule foreach`、`mise exec -- <コマンド>`）。中身は元のコマンドと同じ基準で判断する
@@ -95,14 +95,18 @@ credential helper、認証エージェント、署名ブローカーが内部で
 
 - credential helper・認証エージェント・署名ブローカーが内部で認証する通常操作
   - `git fetch`、`git pull`、`git clone`、`git push`、`git commit`
+- 起動元から継承した非秘密の認証・実行設定の通常利用。IDE が設定する `GIT_ASKPASS` や `GIT_EDITOR`、既存の SSH・pager・editor 設定は、存在や非空だけを理由に拒否しない。エージェントによる明示的な差し替えと、秘密値の直接取得は引き続き禁止する
 - 秘密値を出力しない参照・状態確認
   - `gh auth status`（`--show-token` なし）、`ghtkn info`、`aws sts get-caller-identity`、`kubectl get pods`、`oc get pods`、`rosa list clusters`、`uv auth dir`、`vault status`
   - `security find-certificate -p` と、`security export -t certs` / `-t pubKeys`（公開証明書・公開鍵だけを明示した出力）
 - 認証情報を扱わない通常の Git・AWS・コンテナ操作
+- `git diff --name-only` / `--stat`、`git log --no-patch` など本文を出さない Git 操作。`git -c` での pager の無効化（空値 / `cat`）、`core.fsmonitor=false`、既知の `ssh.variant` と、`GIT_PAGER=cat` の指定も許可する
 - `AWS_CONFIG_FILE`、`KUBECONFIG`、`GH_CONFIG_DIR`、`DOCKER_HOST` / `DOCKER_CONFIG`、`TF_CLI_CONFIG_FILE`、`HOME` / `XDG_CONFIG_HOME` などの標準的な設定・接続先変数と、それに対応する通常の CLI オプション。これらを reader へ渡して内容を出力する操作は対象外
+- `--kubeconfig`、`ssh -i` / `-F`、`npm --userconfig`、`curl --netrc-file` など、CLI が内部の認証だけに使うファイル指定。Google のパス指定は `GOOGLE_APPLICATION_CREDENTIALS` を使う。`GOOGLE_CREDENTIALS` は明示した静的パスのみ許可し、JSON や未知の値は渡さない
 - `--raw` を伴わない `kubectl config view`、`aws configure get region` のような非秘密の設定参照
 - AWS CLI のローカル `help` / `--version`、標準 API の `--generate-cli-skeleton` と、秘密を返さないと確認できた API の `--dry-run`
 - 認証情報ファイルの内容を読まない `test -e` / `test -f` による存在確認
+- インタプリタの静的文字列・コメントと、静的な heredoc を使う通常処理。コードとして実行される部分は同じ基準で検査する
 
 ### 操作前の確認
 
@@ -113,6 +117,7 @@ credential helper、認証エージェント、署名ブローカーが内部で
 - 認証・認可、secret、依存関係、DB スキーマに影響する操作
 
 認証状態を変えるだけで秘密値を出力しない操作は、一律禁止せず、この確認を経て実行できる。
+`sudo` は配下のコマンドを同じ基準で検査し、権限を変更する実行を確認へ回す。`--help` / `--version` は確認不要とする。
 `op signin` は session token 自体を出力するため例外として禁止する。
 保護対象パスへの書き込み・移動・削除は、内容を読まないことが明確な操作に限り、この確認を経て実行できる。
 ただし、Codex の filesystem `deny` 対象は読み取り・書き込み・移動・削除が、Claude Code の `Read` deny 対象は Read / Edit / Write が技術的に拒否される。ランタイムの deny に一致する操作が必要な場合は、ユーザーが端末で行う。
@@ -149,6 +154,12 @@ credential helper、認証エージェント、署名ブローカーが内部で
 - ユーザーが明示していない限り、変更を勝手にステージングしない
 - 依頼内容と必要な検証を満たしたら終了し、自発的に追加改善を始めない
 - サブエージェントにも本ファイルの方針と作業範囲を適用する
+
+### ブラウザ操作
+
+- ブラウザの画面表示・操作では、別の明示指定がない限り、Chrome 拡張機能経由のブラウザ API を優先する
+- 別方式へ切り替える場合は理由を説明する
+- `SKILL.md` の有無だけで Chrome 操作を利用不能と判断しない
 
 ### 実装
 

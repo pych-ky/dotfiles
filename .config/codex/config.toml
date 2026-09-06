@@ -68,6 +68,14 @@ description = "AI エージェント内部データと shell 履歴を除くフ�
 "~/.codex/sessions"                           = "deny"
 "~/.codex/archived_sessions"                  = "deny"
 "~/.codex/shell_snapshots"                    = "deny"
+"~/.codex-account-*/auth.json"                = "deny"
+"~/.codex-account-*/history.jsonl"            = "deny"
+"~/.codex-account-*/sessions"                 = "deny"
+"~/.codex-account-*/sessions/**"              = "deny"
+"~/.codex-account-*/archived_sessions"        = "deny"
+"~/.codex-account-*/archived_sessions/**"     = "deny"
+"~/.codex-account-*/shell_snapshots"          = "deny"
+"~/.codex-account-*/shell_snapshots/**"       = "deny"
 "~/.claude/.credentials.json"                 = "deny"
 "~/.claude/history.jsonl"                     = "deny"
 "~/.claude/projects"                          = "deny"
@@ -103,8 +111,8 @@ set                     = { GIT_TERMINAL_PROMPT = "0", AWS_PAGER = "" }  # Git �
 # 旧来の exclude / include_only 配列とは併用できない (Codex が読み込み時に弾く)。
 # filter 名は大文字小文字を区別しないため、同名の大小文字違いは重ねない。
 # エージェントは秘密を環境変数へ設定しない新しいターミナルから起動する前提とし、
-# 秘密値と、実行体・暗黙の引数を差し替える変数を除外する。
-# `set` は filter 適用後に評価されるため、安全な空の AWS_PAGER は再設定される。
+# 秘密値だけを除外する。起動元の非秘密な認証・実行設定は継承する。
+# エージェントによる実行設定の明示的な差し替えは PreToolUse で検査する。
 [shell_environment_policy.filters]
 "*PASSWORD"                       = "exclude"
 "*PASSPHRASE"                     = "exclude"
@@ -127,53 +135,11 @@ set                     = { GIT_TERMINAL_PROMPT = "0", AWS_PAGER = "" }  # Git �
 "COMPOSER_AUTH"                   = "exclude"
 "CREDENTIALS"                     = "exclude"
 "DOCKER_AUTH_CONFIG"              = "exclude"
+# JSON とパスを兼用するため除外する。パス用途は GOOGLE_APPLICATION_CREDENTIALS を使う。
 "GOOGLE_CREDENTIALS"              = "exclude"
 "HELM_KUBETOKEN"                  = "exclude"
 "PGPASSWORD"                      = "exclude"
 "TF_TOKEN_*"                      = "exclude"
-"AWS_PAGER"                       = "exclude"
-"BASH_ENV"                        = "exclude"
-"BROWSER"                         = "exclude"
-"DOCKER_CLI_PLUGIN_EXTRA_DIRS"    = "exclude"
-"EDITOR"                          = "exclude"
-"GH_BROWSER"                      = "exclude"
-"GH_EDITOR"                       = "exclude"
-"GH_PAGER"                        = "exclude"
-"GIT_ASKPASS"                     = "exclude"
-"GIT_CONFIG"                      = "exclude"
-"GIT_CONFIG_COUNT"                = "exclude"
-"GIT_CONFIG_GLOBAL"               = "exclude"
-"GIT_CONFIG_KEY_*"                = "exclude"
-"GIT_CONFIG_PARAMETERS"           = "exclude"
-"GIT_CONFIG_SYSTEM"               = "exclude"
-"GIT_CONFIG_VALUE_*"              = "exclude"
-"GIT_EDITOR"                      = "exclude"
-"GIT_EXEC_PATH"                   = "exclude"
-"GIT_EXTERNAL_DIFF"               = "exclude"
-"GIT_PAGER"                       = "exclude"
-"GIT_PROXY_COMMAND"               = "exclude"
-"GIT_SEQUENCE_EDITOR"             = "exclude"
-"GIT_SSH"                         = "exclude"
-"GIT_SSH_COMMAND"                 = "exclude"
-"GIT_TEMPLATE_DIR"                = "exclude"
-"LESSCLOSE"                       = "exclude"
-"LESSOPEN"                        = "exclude"
-"MANPAGER"                        = "exclude"
-"PAGER"                           = "exclude"
-"SHELLOPTS"                       = "exclude"
-"SSH_ASKPASS"                     = "exclude"
-"TERRAGRUNT_AUTH_PROVIDER_CMD"    = "exclude"
-"TERRAGRUNT_IAC_ENGINE"           = "exclude"
-"TERRAGRUNT_TFPATH"               = "exclude"
-"TF_CLI_ARGS*"                    = "exclude"
-"TF_REATTACH_PROVIDERS"           = "exclude"
-"TG_AUTH_PROVIDER_CMD"            = "exclude"
-"TG_IAC_ENGINE"                   = "exclude"
-"TG_TF_PATH"                      = "exclude"
-"VISUAL"                          = "exclude"
-"ZDOTDIR"                         = "exclude"
-"npm_config_call"                 = "exclude"
-"npm_config_script_shell"         = "exclude"
 
 
 ## ============================================================================
@@ -186,6 +152,7 @@ status_line_use_colors = true  # ステータスラインの項目別色分け�
 # ステータスラインの表示項目は Codex と Claude で共用
 status_line = [
   "model-with-reasoning",  # 使用モデルと推論レベル
+  "permissions",           # 現在有効な permission profile または sandbox mode
   "current-dir",           # カレントディレクトリ
   "git-branch",            # Git ブランチ名
   "context-used",          # 使用中のコンテキスト量
@@ -193,10 +160,6 @@ status_line = [
   "weekly-limit",          # 週次の利用上限
   "fast-mode",             # Fast モードの有効/無効
 ]
-
-[tui.keymap.composer]
-submit = "ctrl-enter"  # Ctrl+Enter で送信
-
 
 ## ============================================================================
 ## 履歴
@@ -225,7 +188,7 @@ matcher = "^Bash$"
 
 [[hooks.PreToolUse.hooks]]
 type          = "command"
-command       = "$HOME/.claude/hooks/pre-bash-guard.sh"
+command       = "\"$HOME/.claude/hooks/pre-bash-guard.sh\" || exit 2"
 timeout       = 30
 statusMessage = "Bash コマンドを検査中"
 
@@ -247,7 +210,7 @@ enabled = true
 enabled = true
 
 # GitHub
-[plugins."github@openai-curated"]
+[plugins."github@openai-curated-remote"]
 enabled = true
 
 # Linear
@@ -303,8 +266,7 @@ ambient-suggestions-enabled = false  # 提案表示を無効化
 "browser-family-enabled:chrome" = true  # Composer で Chrome のブラウザ参照を有効にする
 
 # 入力操作
-composerEnterBehavior                     = "cmdAlways"       # 常に Cmd/Ctrl+Enter で送信
-hotkey-window-projectless-default-enabled = true              # グローバルホットキーでプロジェクトなしウィンドウを開く
+hotkey-window-projectless-default-enabled = true  # グローバルホットキーでプロジェクトなしウィンドウを開く
 
 # 実行中の follow-up
 followUpQueueMode = "steer"  # 実行中の follow-up で現在の turn を steer

@@ -449,8 +449,7 @@ elif claude_marketplaces="$(
 
       for claude_plugin in \
         linear@claude-plugins-official \
-        microsoft-docs@claude-plugins-official \
-        github@claude-plugins-official; do
+        microsoft-docs@claude-plugins-official; do
         if jq -e --arg plugin "$claude_plugin" \
           'any(.[]; .id == $plugin)' \
           <<<"$claude_plugins" >/dev/null; then
@@ -461,38 +460,6 @@ elif claude_marketplaces="$(
           "Claude Code plugin: $claude_plugin" \
           "$claude_executable" plugin install "$claude_plugin" --scope user
       done
-
-      if claude_plugins="$(
-        "$claude_executable" plugin list --json |
-          jq -ce '
-            if type == "array" then
-              [
-                .[]
-                | objects
-                | select(.scope == "user")
-                | select(.id? | type == "string")
-                | {id, enabled: (.enabled == true)}
-              ]
-            else
-              error("expected an array")
-            end
-          '
-      )"; then
-        if jq -e '
-          any(
-            .[];
-            .id == "github@claude-plugins-official" and .enabled
-          )
-        ' <<<"$claude_plugins" >/dev/null; then
-          run_and_record \
-            'Claude Code plugin disabled: github@claude-plugins-official' \
-            "$claude_executable" plugin disable \
-            github@claude-plugins-official --scope user
-        fi
-      else
-        status=$?
-        record_failure 'Claude Code plugin list after install' "$status"
-      fi
     else
       status=$?
       record_failure 'Claude Code plugin list' "$status"
@@ -512,6 +479,41 @@ if ! command -v codex >/dev/null 2>&1 && [[ ! -x "$HOME/.local/bin/codex" ]]; th
     https://chatgpt.com/codex/install.sh \
     /bin/sh \
     CODEX_NON_INTERACTIVE=1
+fi
+
+codex_executable="$(command -v codex 2>/dev/null || true)"
+if [[ -z "$codex_executable" && -x "$HOME/.local/bin/codex" ]]; then
+  codex_executable="$HOME/.local/bin/codex"
+fi
+
+if [[ -z "$codex_executable" ]]; then
+  record_skip 'Codex plugins (Codex CLI が使えないため)'
+elif ! command -v jq >/dev/null 2>&1; then
+  record_skip 'Codex plugins (jq が使えないため)'
+elif codex_plugins="$(
+  "$codex_executable" plugin list --json |
+    jq -ce '
+      if type == "object" and (.installed | type == "array") then
+        [.installed[] | objects | .pluginId? | strings]
+      else
+        error("expected an object with an installed array")
+      end
+    '
+)"; then
+  for codex_plugin in linear@openai-curated; do
+    if jq -e --arg plugin "$codex_plugin" \
+      'index($plugin) != null' \
+      <<<"$codex_plugins" >/dev/null; then
+      continue
+    fi
+
+    run_and_record \
+      "Codex plugin: $codex_plugin" \
+      "$codex_executable" plugin add "$codex_plugin"
+  done
+else
+  codex_plugin_list_status=$?
+  record_failure 'Codex plugin list' "$codex_plugin_list_status"
 fi
 
 # ============================================================================

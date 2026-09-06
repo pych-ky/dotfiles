@@ -3,20 +3,14 @@
   "cleanupPeriodDays": 20,
   "env": {
     "AWS_PAGER": "",
-    "BASH_ENV": "",
     "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
-    "GH_PAGER": "",
-    "GIT_PAGER": "",
-    "GIT_TERMINAL_PROMPT": "0",
-    "MANPAGER": "",
-    "PAGER": ""
+    "GIT_TERMINAL_PROMPT": "0"
   },
   "attribution": {
     "commit": ""
   },
   "permissions": {
     "allow": [
-      "Bash",
       "WebSearch",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:api.github.com)",
@@ -146,6 +140,14 @@
       "Read(~/.codex/archived_sessions/**)",
       "Read(~/.codex/shell_snapshots)",
       "Read(~/.codex/shell_snapshots/**)",
+      "Read(~/.codex-account-*/auth.json)",
+      "Read(~/.codex-account-*/history.jsonl)",
+      "Read(~/.codex-account-*/sessions)",
+      "Read(~/.codex-account-*/sessions/**)",
+      "Read(~/.codex-account-*/archived_sessions)",
+      "Read(~/.codex-account-*/archived_sessions/**)",
+      "Read(~/.codex-account-*/shell_snapshots)",
+      "Read(~/.codex-account-*/shell_snapshots/**)",
       "Read(~/.claude/.credentials.json)",
       "Read(~/.claude/history.jsonl)",
       "Read(~/.claude/projects)",
@@ -274,7 +276,7 @@
     "ask": [],
     "defaultMode": "auto"
   },
-  "model": "opus[1m]",
+  "model": "claude-fable-5-1[1m]",
   "hooks": {
     "PreToolUse": [
       {
@@ -282,7 +284,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$HOME/.claude/hooks/pre-bash-guard.sh"
+            "command": "\"$HOME/.claude/hooks/pre-bash-guard.sh\" || exit 2"
           }
         ]
       }
@@ -298,7 +300,7 @@
   "enabledPlugins": {
     "linear@claude-plugins-official": true,
     "microsoft-docs@claude-plugins-official": true,
-    "github@claude-plugins-official": false
+    "garoon@skills-dir": false
   },
   "language": "日本語",
   "sandbox": {
