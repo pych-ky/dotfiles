@@ -56,9 +56,9 @@ credential helper、認証エージェント、署名ブローカーが内部で
   - `~/.ssh`、`~/.aws/credentials`、`~/.aws/config`、`~/.kube/config`、ROSA/OCM の `ocm.json`、Helm の repository / registry 認証設定、uv の credentials store、`~/.codex/auth.json`、`~/.config/gh/hosts.yml`、`~/.config/gcloud`、`~/.config/containers/auth.json`、PostgreSQL の service file、pip・curl・wget・Bundler・Composer・Poetry の認証設定、`~/.vault-token`、`~/.terraformrc`、`~/.azure`、`~/.cargo/credentials`、ユーザーおよびシステムの `Library/Keychains`、秘密鍵・KeePass・service account のファイル
   - `.git-credentials`、`.netrc`、`.pgpass`、`.npmrc`、`.pypirc`、shell の履歴。ホーム外やワークスペース内にある同名ファイルも含む
   - Codex / Claude Code が保存する会話履歴・session transcript・file history・paste cache・shell snapshot（過去の prompt、tool output、編集前ファイル、貼り付け内容、展開済み shell 環境を含みうる）。`~/.codex-account-*` のようなアカウント別の保存先でも、認証情報・履歴を同じ保護対象とする
-  - `.env` と `.env.*`、`secrets/` や `credentials/` の配下。いずれも入れ子の位置（`app/.env` など）を含む。値を持たない雛形は `env.example` のように `.env` で始まらない名前を使う
+  - `.env` で始まるファイル、`secrets/` や `credentials/` の配下。いずれも入れ子の位置（`app/.env` など）を含む。値を持たない雛形は `env.example` のように `.env` で始まらない名前を使う
   - terraform の state ファイル（`terraform.tfstate`、`*.tfstate.backup` など）と鍵ストア（`*.jks`、`*.keystore`）。`git show <rev>:<パス>` のような取り出し方も含む
-- 保存済みの秘密値を出力する操作
+- 秘密値を取得・出力する操作。以下は代表例であり、未列挙の CLI・API でも同じ扱いとする
   - macOS キーチェーン: `security find-generic-password` / `find-internet-password` の `-w` / `-g`、`security dump-keychain`、秘密鍵や identity を含みうる `security export`。`-t certs` / `-t pubKeys` で公開物だけを明示した形は対象外
   - GitHub / git: `gh auth token`、`gh auth status --show-token`、`git credential fill`、credential helper の直接実行（`gh auth git-credential`、`ghtkn git-credential`、`docker-credential-*`）、認証付き proxy / HTTP header を含みうる `git config --list` と該当設定値の取得
   - GitHub トークン: `ghtkn get`、`ghtkn exec`、runner token・JIT 設定・GitHub App token などを返す `gh api` の POST
@@ -76,7 +76,7 @@ credential helper、認証エージェント、署名ブローカーが内部で
 - 上記を迂回する操作
   - `git -c core.pager=<コマンド>` などの設定注入と、同等の環境変数の前置（`GIT_SSH_COMMAND`、`GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n`、`GIT_CONFIG_PARAMETERS` など）、`include.path` による別ファイルの読み込み、URL 単位で書く `credential.<url>.helper` / `protocol.<name>.allow` / `url.<base>.insteadOf`
   - `terraform console` / `terragrunt console`（`file()` などで任意のファイル読み取りになる）
-  - エージェントによる、実行体や暗黙の引数を差し替える環境変数（Git の pager / editor / SSH / 設定注入、`TF_CLI_ARGS` / `TF_CLI_ARGS_<command>`、`TG_TF_PATH`、`TERRAGRUNT_TFPATH`、`GH_PAGER` / `GH_EDITOR` / `GH_BROWSER` と fallback の `PAGER` / `EDITOR` / `VISUAL` / `BROWSER`、`AWS_PAGER` / `MANPAGER`、shell の起動ファイル・オプションを変える `BASH_ENV` / `ZDOTDIR` / `SHELLOPTS`、`DOCKER_CLI_PLUGIN_EXTRA_DIRS`、`npm_config_call` / `npm_config_script_shell`）の設定と、同じことをする CLI オプションの指定。前置代入・直前の `export`・条件分岐や関数の中の `export`・`set -a` / `set -k` 中の代入（`readonly` / `read` / `declare` / `printf -v` などによるものを含む）・関数呼び出しへの前置代入を問わず同じ扱いとする。CLI の仕様上、空値が pager を無効化する場合は許可する
+  - エージェントによる実行体・暗黙の引数・起動設定の明示的な差し替え。各 CLI の pager / editor / SSH / plugin、`TF_CLI_ARGS*`、`BASH_ENV` / `ZDOTDIR` / `SHELLOPTS` などの環境変数と、同じことをする CLI オプションを含む。代入・`export`・関数経由などの指定方法を問わない。CLI の仕様上、空値が pager を無効化する場合は許可する
   - `git config` による外部コマンド・別設定ファイルの永続的な注入（`git config core.hooksPath ...`、`--add include.path ...`、`git config alias.x '!コマンド'` など）
   - 無害な名前の symlink 経由での指定（実体が `.env` や `*.tfstate` なら同じ扱いとする）
   - 受け取った文字列を shell へ渡すラッパー経由の実行（`npx -c`、`npm exec -c`、`script -c`、`flock -c`、`git submodule foreach`、`mise exec -- <コマンド>`）。中身は元のコマンドと同じ基準で判断する
@@ -100,13 +100,23 @@ credential helper、認証エージェント、署名ブローカーが内部で
   - `gh auth status`（`--show-token` なし）、`ghtkn info`、`aws sts get-caller-identity`、`kubectl get pods`、`oc get pods`、`rosa list clusters`、`uv auth dir`、`vault status`
   - `security find-certificate -p` と、`security export -t certs` / `-t pubKeys`（公開証明書・公開鍵だけを明示した出力）
 - 認証情報を扱わない通常の Git・AWS・コンテナ操作
-- `git diff --name-only` / `--stat`、`git log --no-patch` など本文を出さない Git 操作。`git -c` での pager の無効化（空値 / `cat`）、`core.fsmonitor=false`、既知の `ssh.variant` と、`GIT_PAGER=cat` の指定も許可する
+- `git diff --name-only` / `--stat`、`git log --no-patch` など、実際に本文を出さない Git 操作。`--stat` と `--patch` の併用などで本文も出る場合は、本文取得として判断する。`git -c` での pager の無効化（空値 / `cat`）、`core.fsmonitor=false`、既知の `ssh.variant` と、`GIT_PAGER=cat` の指定も許可する
 - `AWS_CONFIG_FILE`、`KUBECONFIG`、`GH_CONFIG_DIR`、`DOCKER_HOST` / `DOCKER_CONFIG`、`TF_CLI_CONFIG_FILE`、`HOME` / `XDG_CONFIG_HOME` などの標準的な設定・接続先変数と、それに対応する通常の CLI オプション。これらを reader へ渡して内容を出力する操作は対象外
 - `--kubeconfig`、`ssh -i` / `-F`、`npm --userconfig`、`curl --netrc-file` など、CLI が内部の認証だけに使うファイル指定。Google のパス指定は `GOOGLE_APPLICATION_CREDENTIALS` を使う。`GOOGLE_CREDENTIALS` は明示した静的パスのみ許可し、JSON や未知の値は渡さない
 - `--raw` を伴わない `kubectl config view`、`aws configure get region` のような非秘密の設定参照
 - AWS CLI のローカル `help` / `--version`、標準 API の `--generate-cli-skeleton` と、秘密を返さないと確認できた API の `--dry-run`
 - 認証情報ファイルの内容を読まない `test -e` / `test -f` による存在確認
 - インタプリタの静的文字列・コメントと、静的な heredoc を使う通常処理。コードとして実行される部分は同じ基準で検査する
+
+### 実行ガードとの役割分担
+
+ここでいうガードは、共通の `pre-bash-guard.py` を指す。
+
+- 規約はエージェントの行動を定め、実行ガードはコマンドに直接書かれた既知の秘密取得・実行設定の注入・重大な破壊操作を拒否する。すべての禁止事項を自動検知するものではない
+- ガードは `deny` だけを返し、該当しなければ無出力で通常の権限判定へ進む。`ask` は返さず、入力・解析の失敗は終了コード `2` で閉じる。ガードの通過は、安全性やユーザーの承認を保証しない
+- ガードは変数値や関数を模擬実行せず、保存された script の本文や間接的に生成されたコマンド・パスも追跡しない。禁止された取得を別の書き方で迂回しない
+- Docker の通常フォルダ指定では、内部の全ファイル探索や `.dockerignore` の再解析を要求しない。既知の資格情報や保管先を直接指定して持ち出すことは禁止する
+- 操作前の確認は次節に従う。ガードの `ask` 廃止とは別に扱う
 
 ### 操作前の確認
 
@@ -128,10 +138,7 @@ credential helper、認証エージェント、署名ブローカーが内部で
 `gh issue create`、`gh pr merge`、`gh repo clone` のような状態を変える操作は確認する。
 `docker` も同様に `ps` / `images` / `logs` / `compose ps` などの参照だけを確認なしとし、
 `run` / `build` / `pull` / `exec` / `compose down` / `container kill` は確認する。
-`docker inspect` / `info` / `compose config` / `compose convert` / `stack config` / `context export` / `history` / `top` / `compose top` と、
-`--no-trunc` や `json` / `{{index . "Command"}}` のような出力指定を伴う `docker ps` は参照だが、
-環境変数・ビルド引数・プロセス引数に認証情報が載りうるため実行しない。
-`--format` は安全と分かるフィールド（`{{.Names}}` など）だけを確認なしとする。
+参照操作でも、秘密値を出力する場合は「行わないこと」に従う。
 
 ### 信頼境界
 
@@ -197,7 +204,8 @@ credential helper、認証エージェント、署名ブローカーが内部で
 
 - テストを新規作成・追加しない。既存ファイルへのテストケース追加も行わない
 - テスト追加の代わりに検証用スクリプトやサンプルコードを追加せず、品質向上を理由に例外を設けない
-- 破壊的操作や認証情報取得などを模した検証用文字列は、実行コードとして解釈されるプロセス引数に直接埋め込まず、標準入力または既存の入力ファイルから渡す
+- 破壊的操作や認証情報取得などを模した検証用文字列は、シェル・インタプリタの引数や実行用ヒアドキュメントへ埋め込まない。標準入力または既存の入力ファイルからデータとして渡し、対象コマンドを実行しない
+- `pre-bash-guard.py` は標準入力の JSON から対象を受け取り、対象コマンドをシェル・Python の引数へ載せず、`subprocess`・`os.system`・`eval` などでも実行しない
 - 既存テストの削除・無効化で問題を隠さない
 - 変更後は影響範囲に応じ、既存テスト・型チェック・lint・ビルドなどを必要な範囲で実行する
 - 既存挙動を変える場合は変更前後を比較し、意図しない退行がないか確認する

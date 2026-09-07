@@ -251,7 +251,7 @@ macOS 共通のキー変換は Karabiner、ターミナルの処理は WezTerm�
 | WezTerm・VS Code 統合ターミナル | Cmd+C | 選択中はコピー、未選択時は処理中断 |
 | WezTerm・VS Code 統合ターミナル | Cmd+A / E / R | 行頭 / 行末 / 履歴検索 |
 | WezTerm・VS Code 統合ターミナル | Cmd+Shift+A | スクロールバック全体をコピー |
-| VS Code エディタ | Cmd+[ / ] | インデントを浅く / 深く |
+| VS Code エディタ | Tab / Shift+Tab | インデントを深く / 浅く（標準操作） |
 | VS Code エディタ | Home / End、Cmd+Home / End | 行頭・行末 / ファイル先頭・末尾（Shift 併用で選択） |
 | VS Code エディタ | Cmd+← / → | 単語移動（Shift 併用で選択） |
 | VS Code エディタ | Cmd+Backspace / Delete | 前 / 後の単語を削除 |
@@ -418,13 +418,13 @@ AI エージェント（Claude Code / Codex）に対する方針は次の一点�
 
 そのため、コマンド名だけで一律に拒否せず、秘密値を出力するサブコマンドとそうでないサブコマンドを分けています。
 
-- `.config/agents/AGENTS.md`: 共通の規約。行わないこと・行ってよいこと・確認してから行うことを分けて定義する
+- `.config/agents/AGENTS.md`: 共通の規約。禁止・許可・確認が必要な操作と、実行ガードの検査範囲を区別する
 - `.claude/settings.json`: `auto` の利用、Bash の個別 allow の不使用、filesystem sandbox の無効化、秘密値を出力する操作の deny、ホーム以下にある既知名の認証情報ファイルに対する組み込み `Read` の禁止
-- `.claude/hooks/pre-bash-guard.py`: Claude Code と Codex の Bash 実行前に同じ判断を強制し、さらに検査の迂回経路（設定注入・インタプリタ経由の実行・ラッパー経由の実行・コンテナへの受け渡し）と、認証情報ファイルを引数に取る操作を拒否する。
-  起動元の非秘密な認証・実行設定は継承し、IDE の `GIT_ASKPASS` / `GIT_EDITOR` などの存在や非空だけで通常の CLI 操作を拒否しない。エージェントによる実行設定の明示的な差し替えは検査する
-  不可逆な操作と外部・ホストの状態変更は、Claude Code の Auto では classifier に委ね、`bypassPermissions` では原則 deny、それ以外では `ask` を返す。Codex の PreToolUse は `ask` 非対応のため、hard deny だけをフックで強制し、操作前の確認は共通規約に従う
+- `.claude/hooks/pre-bash-guard.py`: 標準入力の JSON で受け取ったコマンドから、直接書かれた既知の秘密値取得・資格情報ファイルの読み取り・実行設定の注入・重大な破壊操作を拒否する。対象コマンドは実行せず、シェルや Python の引数へも渡さない。
+  エージェントや permission mode によらず deny だけを返し、それ以外は無出力で通常の権限判定に委ねる。入力・解析の失敗は終了コード `2` で閉じる。`rm -rf build` や通常の branch・worktree 削除は許可する
+  shell の変数値や関数の模擬実行、ファイル script、間接的な動的生成、ディレクトリ内に潜む資格情報の探索、`.dockerignore` の解析は行わない。任意コードの隔離境界ではなく、検査範囲外の禁止や操作前の確認は共通規約に従う
 - `.config/codex/config.toml` / `.codex/browser/config.toml`: ルート全体の読み書きを既定 Allow とし、CLI が内部利用する設定・認証ストア、秘密鍵、keystore、service-account、環境ファイルは filesystem deny の対象外にする。Codex / Claude Code 自身の認証・履歴と shell 履歴だけを固定 deny にし、通常の CLI 設定環境変数を継承して秘密値だけを除外する。ブラウザのサイト操作・履歴取得・ファイル転送は `never_ask` で自動承認し、CDP フルアクセスは無効にする
-  CLI 設定や認証ストアの直接取得は共通規約と PreToolUse で拒否する
+  CLI 設定や認証ストアの直接取得は共通規約で禁止し、既知の取得経路を PreToolUse で拒否する
   ワークスペース内の任意階層にある認証情報は `.config/agents/AGENTS.md` の禁止規約で扱う
 
 ### AI エージェントの起動
@@ -443,8 +443,7 @@ codex
 - Codex の shell snapshot は無効化済み。Claude Code が内部利用する snapshot と、両エージェントの履歴・file history・paste cache はモデルから直接読めないよう保護する
 - `~/.codex-account-*` の認証情報・履歴にも、通常の Codex と同じ filesystem deny・Claude Code の `Read` deny・共通 Bash ガードを適用する
 - Claude Code の `permissions.defaultMode` は `auto` のまま運用し、Bash の個別 allow は設定しない。Auto では hard deny 以外の操作を classifier が依頼内容に照らして判断する。filesystem sandbox は CLI の設定・認証ストアの内部利用を妨げないよう、明示的に無効化する。
-  `permissions.ask` は空とし、settings は allow / deny に二分する。確認が要る操作は Auto では classifier に委ね、`bypassPermissions` では原則 deny、それ以外ではフックが `ask` を返す。
-  `bypassPermissions` を明示的に選んだ場合もフックは hard deny を維持し、`ask` を返すはずだった操作は通常のインタプリタコードを除いて拒否する
+  `permissions.ask` は空とし、settings は allow / deny に二分する。フックはすべての permission mode で同じ deny を維持する
   `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` は既定以外の permission mode と競合するため使わない
 
 ## このリポジトリで管理しないもの
