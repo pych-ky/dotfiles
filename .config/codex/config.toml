@@ -48,7 +48,7 @@ default_permissions = "保護付きフルアクセス"  # AI エージェント�
 #
 # ルート全体を読み書き可能にし、外部 CLI が内部利用する認証材は deny しない。
 # Codex / Claude Code 自身の認証・履歴と shell 履歴だけを固定 deny にする。
-# その他の認証情報の直接取得は AGENTS.md と PreToolUse で拒否する。
+# その他の認証情報の直接取得は AGENTS.md で禁止し、既知の取得経路を PreToolUse で拒否する。
 # permission profile は旧 sandbox_mode / [sandbox_workspace_write] と併用しない。
 [permissions."保護付きフルアクセス"]
 description = "AI エージェント内部データと shell 履歴を除くフルアクセス"
@@ -60,7 +60,7 @@ description = "AI エージェント内部データと shell 履歴を除くフ�
 # Git、クラウド、コンテナ、パッケージ管理 CLI の設定・認証ストア、
 # 秘密鍵、keystore、service-account、環境ファイルは
 # filesystem deny に入れない。CLI 自身による通常利用を既定で許可し、
-# 内容の直接取得と秘密値を返す操作だけを PreToolUse で拒否する。
+# 内容の直接取得と秘密値を返す既知の操作を PreToolUse で拒否する。
 
 # AI エージェントの認証情報・履歴
 "~/.codex/auth.json"                          = "deny"
@@ -112,7 +112,7 @@ set                     = { GIT_TERMINAL_PROMPT = "0", AWS_PAGER = "" }  # Git �
 # filter 名は大文字小文字を区別しないため、同名の大小文字違いは重ねない。
 # エージェントは秘密を環境変数へ設定しない新しいターミナルから起動する前提とし、
 # 秘密値だけを除外する。起動元の非秘密な認証・実行設定は継承する。
-# エージェントによる実行設定の明示的な差し替えは PreToolUse で検査する。
+# コマンド中に直接指定された実行設定の差し替えを PreToolUse で検査する。
 [shell_environment_policy.filters]
 "*PASSWORD"                       = "exclude"
 "*PASSPHRASE"                     = "exclude"
