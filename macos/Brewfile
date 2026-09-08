@@ -86,6 +86,7 @@ cask "appcleaner"
 cask "licecap"
 cask "logi-options+"
 cask "maccy"
+cask "notunes"
 
 # セキュリティ / パスワード管理
 # cask "1password"
