@@ -273,11 +273,11 @@ Mac のスクリーンショットキーは Print Screen を送り、Karabiner �
 1. USB 接続し、本体を Cable・Mac モードにする
 2. [VIA](https://usevia.app/) の Save + Load から移行用レイアウトを読み込む。
    機種定義が必要な場合は、[Keychron 公式配布](https://www.keychron.com/pages/firmware-and-json-files-of-the-keychron-qmk-k-pro-and-k-max-series-keyboards)の K8 Pro ANSI RGB v1.7 を使う
-3. Karabiner の Keychron 機器設定にある、左 Control / Option / Command を同じキーへ変換する
-   3 件の Simple Modifications を削除する（現在は本体の旧配列との二重変換を防ぐために残している）
+3. Karabiner の Keychron 機器設定では、Simple Modifications を空にして共通の変換を使う
 4. 左 Ctrl 位置でのコピー、かな・英数、F13、Fn 音量操作を確認する
 
-元の Downloads 配下のレイアウトは変更していない。元に戻す場合は旧レイアウトを読み込み、手順 3 の同一キー変換を戻す。
+元の Downloads 配下のレイアウトは変更していない。元に戻す場合は旧レイアウトを読み込み、
+Karabiner の Keychron 機器設定で左 Control / Option / Command をそれぞれ同じキーへ変換する 3 件を追加する。
 
 ### 非公開 Codex Custom Pets
 
