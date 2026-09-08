@@ -223,7 +223,7 @@ brew bundle cleanup --file=macos/Brewfile             # Brewfile にないパッ
 - macOS の既定値から意図的に変える項目だけを `defaults write` で適用する。
   対象はキーボードのリピート速度、Dock、Finder、日本語入力など
 - Rectangle の設定は、エクスポート済みの `macos/rectangle.plist` を読み込んで適用する
-- `bootstrap.sh` は Rectangle と Typeless を「ログイン時に開く」へ登録し、Logi Options+ のメインアプリは同項目から除外する。
+- `bootstrap.sh` は Maccy、Rectangle、Typeless を「ログイン時に開く」へ登録し、Logi Options+ のメインアプリは同項目から除外する。
   Logi Options+ の機能は開発元のバックグラウンドサービスを使用する
 - Karabiner のルール、メニューバー表示、Keychron K8 Pro のイベント変更は `.config/karabiner/karabiner.json` で管理する。
   DriverKit、入力監視、アクセシビリティ、バックグラウンド実行の許可は端末ごとに行う
@@ -368,7 +368,7 @@ cd "$HOME/src/pych/agent-skills"
   - プライバシーとセキュリティ > フルディスクアクセス / アクセシビリティ / 入力監視（Karabiner、Logi Options+、Claude など必要なものだけ）
   - プライバシーとセキュリティ > オートメーション（ログイン項目の登録時に System Events を許可）
   - 一般 > ログイン項目と拡張機能
-    - 「ログイン時に開く」: Rectangle と Typeless があり、Logi Options+ がないことを確認
+    - 「ログイン時に開く」: Maccy、Rectangle、Typeless があり、Logi Options+ がないことを確認
     - 「アプリのバックグラウンドでのアクティビティ」: Karabiner、Logi Options+、Logitech Inc をオン
     - 拡張機能 > Driver Extensions: Karabiner DriverKit VirtualHIDDevice をオン
   - サウンド > 入出力デバイスの指定
@@ -377,6 +377,7 @@ cd "$HOME/src/pych/agent-skills"
 - Finder > 設定 > サイドバー > ホームにチェック
 - Brewfile でコメントアウトしているアプリ（ブラウザ、エディタなど）を、端末に応じた方法で導入
 - Rancher Desktop: Preferences > Application > Environment > Configure PATH を Manual にする
+- [Maccy](https://github.com/p0deje/Maccy#usage): `Cmd+Shift+C` で履歴を開く。自動貼り付けを使う場合は「Paste automatically」をオンにし、システム設定の「アクセシビリティ」で Maccy を許可する
 - Typeless: サインインし、必要な権限を許可する。「ログイン時にアプリを起動」をオン、「ドックにアプリを表示」をオフにする
 - VS Code: Settings Sync にサインイン（設定と拡張はこのリポジトリでは管理しない）。
   コマンドパレットから「Shell Command: Install 'code' command in PATH」を実行

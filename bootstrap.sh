@@ -288,6 +288,7 @@ end run
 APPLESCRIPT
 
 for login_item_app in \
+  /Applications/Maccy.app \
   /Applications/Rectangle.app \
   /Applications/Typeless.app; do
   if [[ ! -d "$login_item_app" ]]; then
