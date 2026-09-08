@@ -299,8 +299,7 @@
   },
   "enabledPlugins": {
     "linear@claude-plugins-official": true,
-    "microsoft-docs@claude-plugins-official": true,
-    "garoon@skills-dir": false
+    "microsoft-docs@claude-plugins-official": true
   },
   "language": "日本語",
   "sandbox": {
