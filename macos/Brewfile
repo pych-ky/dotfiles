@@ -85,6 +85,7 @@ cask "rectangle"
 cask "appcleaner"
 cask "licecap"
 cask "logi-options+"
+cask "maccy"
 
 # セキュリティ / パスワード管理
 # cask "1password"
