@@ -1,0 +1,21 @@
+{
+  "featureShortcutBindings": {
+    "dictationMode": [
+      "F13"
+    ],
+    "askAnythingMode": [
+      "LeftCmd+F13"
+    ],
+    "translationMode": [
+      "LeftCtrl+F13"
+    ],
+    "pasteLastTranscript": [
+      "Ctrl+Cmd+V"
+    ]
+  },
+  "preferredLanguage": "ja",
+  "enableShowAppInDock": false,
+  "translationModeTargetLanguageCodes": [
+    "en-US"
+  ]
+}
