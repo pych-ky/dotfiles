@@ -12,11 +12,11 @@
 ## ============================================================================
 
 # メインモデル
-model        = "gpt-5.6-sol"  # 通常タスク用モデル
-review_model = "gpt-5.6-sol"  # コードレビュー用モデル
+model        = "gpt-6-astra"  # 通常タスク用モデル
+review_model = "gpt-6-astra"  # コードレビュー用モデル
 
 # 推論関連
-model_reasoning_effort   = "xhigh"   # 推論の深さ (low / medium / high / xhigh)
+model_reasoning_effort   = "ultra"   # 推論の深さ
 model_reasoning_summary  = "auto"    # 推論要約の形式 (auto / concise / detailed / none)
 hide_agent_reasoning     = true      # エージェント推論過程を非表示
 show_raw_agent_reasoning = false     # 生の推論データを非表示
@@ -39,6 +39,7 @@ cli_auth_credentials_store = "file"  # CLI 認証情報の保存先 (auto / keyr
 ## ============================================================================
 
 approval_policy     = "on-request"          # 操作の承認要否 (untrusted / on-request / never)
+approvals_reviewer  = "user"                # 追加承認はユーザーに確認する
 default_permissions = "保護付きフルアクセス"
 
 
@@ -248,11 +249,17 @@ enabled = true
 ## ============================================================================
 
 [desktop]
+# モデル選択
+enabled-reasoning-efforts = ["low", "medium", "high", "xhigh", "persistent", "max", "ultra"]  # 選択肢に表示する推論強度
+
 # 提案表示
 ambient-suggestions-enabled = false  # 提案表示を無効化
 
 # ブラウザ
 "browser-family-enabled:chrome" = true  # Composer で Chrome のブラウザ参照を有効にする
+
+# Appshot
+appshotSoundEnabled = false  # 撮影時の効果音を無効化
 
 # 入力操作
 hotkey-window-projectless-default-enabled = true  # グローバルホットキーでプロジェクトなしウィンドウを開く
@@ -260,9 +267,10 @@ hotkey-window-projectless-default-enabled = true  # グローバルホットキ�
 # 実行中の follow-up
 followUpQueueMode = "steer"  # 実行中の follow-up で現在の turn を steer
 
-# Git 操作の指示
-git-commit-instructions = "コミットメッセージは過去の履歴に合わせ、プレフィックスを付けず、簡潔な日本語で記述してください。"
-git-pr-instructions     = "簡潔な日本語で記述してください。"
+# Git 操作
+git-branch-prefix       = ""  # 作成ブランチに接頭辞を付けない
+git-commit-instructions = ""  # 指示は共通 AGENTS.md に集約
+git-pr-instructions     = ""
 
 # 表示
 conversationDetailMode    = "STEPS_COMMANDS"  # 会話詳細にステップとコマンドを表示
