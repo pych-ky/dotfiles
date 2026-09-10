@@ -40,6 +40,7 @@ usage() {
 Usage: ./scripts/link-dotfiles.sh [--dry-run] [-h | --help]
 
 Create symlinks from this repository into $HOME.
+Claude settings are copied, preserving user plugin and marketplace entries.
 The Codex Browser config is copied as a regular file because Codex rejects symlinks for this path.
 Existing regular files and directories are moved to ~/.dotfiles-backup/<timestamp>[-<sequence>]/ first.
 
@@ -97,12 +98,13 @@ report_link() {
   printf '%s: %s -> %s\n' "$verb" "$1" "$2"
 }
 
-# Codex が symlink を拒否する設定を通常ファイルとして配置
+# ツールによる書き込みをリポジトリから分離する設定を通常ファイルとして配置
 copy_regular_file() {
   local source_relative="$1"
   local target_relative="${2:-$1}"
   local source="$repo_dir/$source_relative"
   local target="$HOME/$target_relative"
+  local merged_settings=
 
   if [[ ! -f "$source" || -L "$source" ]]; then
     printf 'missing regular source: %s\n' "$source" >&2
@@ -112,6 +114,32 @@ copy_regular_file() {
   if [[ -f "$target" && ! -L "$target" ]] && cmp -s "$source" "$target"; then
     printf 'ok: %s (regular copy of %s)\n' "$target" "$source"
     return 0
+  fi
+
+  # Claude の公開設定を優先し、個人のプラグイン登録だけ保持
+  if [[ "$source_relative" == .claude/settings.json && -f "$target" ]] &&
+    ! cmp -s "$source" "$target"; then
+    if ! command -v jq >/dev/null 2>&1; then
+      printf 'error: jq is required to preserve Claude plugin settings; install jq and rerun\n' >&2
+      return 1
+    fi
+    merged_settings="$(
+      jq -s '
+        .[0] as $base | .[1] as $current |
+        reduce ["enabledPlugins", "extraKnownMarketplaces"][] as $key ($base;
+          if $current | has($key) then
+            .[$key] = (($current[$key] // {}) + ($base[$key] // {}))
+          else
+            .
+          end
+        )
+      ' "$source" "$target"
+    )" || return
+    if [[ ! -L "$target" ]] &&
+      cmp -s "$target" <(printf '%s\n' "$merged_settings"); then
+      printf 'ok: %s (user plugin settings preserved)\n' "$target"
+      return 0
+    fi
   fi
 
   run mkdir -p "$(dirname "$target")" || return
@@ -132,12 +160,20 @@ copy_regular_file() {
 
     local compare_target="$backup"
     ((dry_run)) && compare_target="$target"
-    if [[ -e "$compare_target" ]] && ! cmp -s "$compare_target" "$source"; then
+    if [[ -z "$merged_settings" && -e "$compare_target" ]] &&
+      ! cmp -s "$compare_target" "$source"; then
       backup_diffs+=("$target (backup: $backup)")
     fi
   fi
 
-  run cp -p "$source" "$target" || return
+  if [[ -n "$merged_settings" ]]; then
+    if ((!dry_run)); then
+      printf '%s\n' "$merged_settings" >"$target" || return
+      chmod 600 "$target" || return
+    fi
+  else
+    run cp -p "$source" "$target" || return
+  fi
   if ((dry_run)); then
     printf 'would copy: %s <- %s\n' "$target" "$source"
   else
@@ -390,7 +426,6 @@ main() {
     # AI エージェント
     ".config/agents/AGENTS.md"
     ".claude/CLAUDE.md"
-    ".claude/settings.json"
     ".claude/hooks/pre-bash-guard.py"
     ".claude/hooks/pre-bash-guard.sh"
     ".claude/hooks/statusline.sh"
@@ -429,10 +464,11 @@ main() {
     fi
   done
 
-  # Browser の信頼済み設定ブリッジは対象パスの symlink を拒否する
-  if ! copy_regular_file ".codex/browser/config.toml"; then
-    failed_items+=(".codex/browser/config.toml")
-  fi
+  for file in .claude/settings.json .codex/browser/config.toml; do
+    if ! copy_regular_file "$file"; then
+      failed_items+=("$file")
+    fi
+  done
 
   # 共通ルールの正本を Codex の参照先にもリンク
   if ! link_file ".config/agents/AGENTS.md" ".codex/AGENTS.md"; then

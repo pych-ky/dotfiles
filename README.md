@@ -25,10 +25,10 @@ git clone <このリポジトリ> && cd dotfiles
 
 1. `sudo` 認証を行う
 2. `macos/defaults.sh` で macOS 設定を適用する
-3. `scripts/link-dotfiles.sh` で設定ファイルを展開する
-4. Homebrew を導入する。
+3. Homebrew を導入する。
    未導入時は Xcode Command Line Tools も導入する
-5. 不足する CLI・GUI アプリをインストールし、ログイン項目を追加・削除する
+4. 不足する CLI・GUI アプリをインストールする
+5. `scripts/link-dotfiles.sh` で設定ファイルを展開し、Typeless 設定とログイン項目を適用する
 6. `mise install` でグローバル開発ツール（node、go、terraform など）を導入する
 7. `scripts/setup-git.sh` で Git 共通設定を適用する
 8. `zsh-autosuggestions` と `fast-syntax-highlighting` を取得する
@@ -67,6 +67,9 @@ git clone <このリポジトリ> && cd dotfiles
 - 同じ秒の再実行は連番で別世代にし、スクリプトが生成した最新 5 世代だけを保持する
 - 同じ `HOME` への並行実行は排他ロックで直列化する
 - 既存のシンボリックリンクはリンク先が異なる場合のみ張り替える
+- `~/.claude/settings.json` は通常ファイルとして配置し、再適用時は公開設定を優先して更新する。
+  個人の `enabledPlugins` と `extraKnownMarketplaces` は公開側に同じ ID の定義がない限り保持する。
+  既存設定のマージには `jq` が必要
 - `~/.codex/browser/config.toml` は Codex がシンボリックリンクを拒否するため、通常ファイルとしてコピーする
 - Karabiner が変更を検知できるよう、`.config/karabiner` はディレクトリごとリンクする
 - 共通エージェントルールは `.config/agents/AGENTS.md` を正本とし、`~/.config/agents/AGENTS.md` と `~/.codex/AGENTS.md` から参照する
@@ -233,6 +236,18 @@ brew bundle cleanup --file=macos/Brewfile             # Brewfile にないパッ
 - 電源管理（`pmset`）の変更は、認証済みの `sudo`（`sudo -n`）で実行する
 - 日本語入力、外観（ダークモード）、ファンクションキーの設定は再ログイン後に反映される
 
+### Typeless
+
+```sh
+./macos/setup-typeless.sh
+```
+
+- `macos/typeless.json` で音声入力・Ask Anything・翻訳・直前の文字起こし貼付のショートカット、日本語指定、翻訳先の英語、Dock 非表示を管理する
+- `~/Library/Application Support/Typeless/app-settings.json` に管理項目だけを反映し、アカウント別設定や機器情報などは保持する
+- macOS と jq が必要。`bootstrap.sh` は Homebrew パッケージの導入後に実行する
+- 変更が必要な場合は Typeless を終了してから実行する。設定が一致していれば、起動中でも書き換えない
+- 旧ショートカットの移行前は設定を変更せず停止する。Typeless を一度起動・終了して移行を完了し、再実行する
+
 ### キーボード
 
 macOS 共通のキー変換は Karabiner、ターミナルの処理は WezTerm、エディタと統合ターミナルの処理は VS Code で管理する。
@@ -361,6 +376,37 @@ cd "$HOME/src/pych/agent-skills"
 ./setup.sh
 ```
 
+#### Codex から通常 ChatGPT への自動委譲
+
+`delegate-to-chatgpt` スキルは、調査・比較・要約・文章作成と、渡した資料だけで成立する設計・コードレビューで、送受信の負担よりまとまった処理を任せられる場合に選択されます。
+毎回スキルを指定する必要はありません。
+小さな処理、ローカル操作、変更の適用、実行検証、最終統合は Codex が担当します。
+
+通常 ChatGPT への内蔵送受信ツールが提供される Codex デスクトップ環境が対象です。
+ツールがない CLI などでは Codex が可能な作業を続け、Work・有料 API・ブラウザ操作へ自動で切り替えません。
+
+Codex の会話 ID ごとに、最初の委譲時に通常 ChatGPT の専用会話を新規作成します。
+新規会話・fork は送信先も分け、同じ会話の再開・アプリ再起動・コンテキスト圧縮では再利用します。
+現在の ID は実行環境の `CODEX_THREAD_ID` で確認します。
+
+`${CODEX_HOME:-$HOME/.codex}/delegate-to-chatgpt.toml` は、この運用で自動送信を許可する資料の範囲だけを保持します。
+会話の対応は `delegate-to-chatgpt/sessions/<Codex会話ID>.toml` に端末ローカルの状態として保存し、Git 管理・同期の対象にしません。
+旧固定 `thread_id` は移行の指示を確認して削除し、新しい対応へ移植しません。
+許可済みの運用と資料範囲は毎回確認せず、会話 ID・個人情報は公開 dotfiles に置きません。
+Codex の `config.toml` に独自キーも追加しません。
+
+通常 ChatGPT の新規作成を扱える内蔵ツールがなければ、以前の固定先を使わず Codex で処理します。
+現行の `create_thread` は通常 ChatGPT の新規作成に対応していません。
+ユーザーが今回用に新しく作成して指定した通常チャットは登録できます。
+単体配置と設定例は Agent Skills の `README.md`「通常 ChatGPT への自動委譲」を参照してください。
+`agent-skills/setup.sh` は Claude のクラウドルーティン同期も行うため、このスキルだけの配置では実行不要です。
+
+スキルの配置後は、新しい Codex セッションで利用可能になっていることを確認してください。
+共通の `.config/agents/AGENTS.md` には Codex 固有の手順を置きません。
+
+自動委譲は指示とスキル選択に基づく動作です。
+毎回の実行保証や利用量削減率は測定していません。
+
 ## 手動セットアップ
 
 ### システムとアプリ
@@ -379,7 +425,7 @@ cd "$HOME/src/pych/agent-skills"
 - Brewfile でコメントアウトしているアプリ（ブラウザ、エディタなど）を、端末に応じた方法で導入
 - Rancher Desktop: Preferences > Application > Environment > Configure PATH を Manual にする
 - [Maccy](https://github.com/p0deje/Maccy#usage): `Cmd+Shift+C` で履歴を開く。自動貼り付けを使う場合は「Paste automatically」をオンにし、システム設定の「アクセシビリティ」で Maccy を許可する
-- Typeless: サインインし、必要な権限を許可する。「ログイン時にアプリを起動」をオン、「ドックにアプリを表示」をオフにする
+- Typeless: サインインし、必要な権限を許可する
 - VS Code: Settings Sync にサインイン（設定と拡張はこのリポジトリでは管理しない）。
   コマンドパレットから「Shell Command: Install 'code' command in PATH」を実行
 - 各種アカウントにサインイン（1Password、Slack、Notion など）

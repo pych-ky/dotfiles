@@ -9,6 +9,9 @@
   "attribution": {
     "commit": ""
   },
+  "autoMode": {
+    "classifyAllShell": true
+  },
   "permissions": {
     "allow": [
       "WebSearch",

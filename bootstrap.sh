@@ -7,9 +7,9 @@
 # 実行内容:
 #   1. sudo 認証
 #   2. macos/defaults.sh による macOS 設定の適用
-#   3. scripts/link-dotfiles.sh による dotfiles のシンボリックリンク展開
-#   4. Homebrew の導入 (未導入時、Xcode Command Line Tools も同時に導入される)
-#   5. macos/Brewfile に基づく不足パッケージのインストールとログイン項目の追加・削除
+#   3. Homebrew の導入 (未導入時、Xcode Command Line Tools も同時に導入される)
+#   4. macos/Brewfile に基づく不足パッケージのインストール
+#   5. scripts/link-dotfiles.sh による dotfiles 展開、Typeless 設定、ログイン項目の追加・削除
 #   6. mise によるグローバル開発ツールの導入
 #   7. scripts/setup-git.sh による Git の共通設定
 #   8. zsh プラグインの取得
@@ -208,7 +208,7 @@ if [[ -z "${HOME:-}" || "$HOME" != /* ]]; then
 fi
 
 # ============================================================================
-# sudo 認証、macOS 設定、dotfiles リンク
+# sudo 認証、macOS 設定
 # ============================================================================
 
 step 'sudo'
@@ -219,16 +219,8 @@ ensure_sudo
 step 'macos/defaults.sh'
 run_and_record 'macos/defaults.sh' "$repo_dir/macos/defaults.sh"
 
-step 'scripts/link-dotfiles.sh'
-if ensure_sudo; then
-  run_and_record 'scripts/link-dotfiles.sh' "$repo_dir/scripts/link-dotfiles.sh"
-else
-  status=$?
-  record_failure 'scripts/link-dotfiles.sh sudo authorization' "$status"
-fi
-
 # ============================================================================
-# Homebrew
+# Homebrew、dotfiles リンク
 # ============================================================================
 
 step 'Homebrew'
@@ -262,9 +254,20 @@ else
   record_skip 'brew bundle (Homebrew が使えないため)'
 fi
 
+step 'scripts/link-dotfiles.sh'
+if ensure_sudo; then
+  run_and_record 'scripts/link-dotfiles.sh' "$repo_dir/scripts/link-dotfiles.sh"
+else
+  status=$?
+  record_failure 'scripts/link-dotfiles.sh sudo authorization' "$status"
+fi
+
 # 以降は管理者権限を使わないため、ここで timestamp を無効化する
 sudo -k 2>/dev/null || true
 trap - EXIT
+
+step 'macos/setup-typeless.sh'
+run_and_record 'macos/setup-typeless.sh' "$repo_dir/macos/setup-typeless.sh"
 
 step 'login items'
 
