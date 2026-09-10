@@ -18,13 +18,17 @@ class ParseError(Exception):
     pass
 
 
+class UnsupportedSyntax(Exception):
+    pass
+
+
 def deny(reason):
     raise Denied(reason)
 
 
-# CLI の既知の秘密出力と、明示的な実行差し替えだけを拒否する。
+# CLI の既知の秘密出力と、保護機構の迂回を拒否する。
 SECRET_OUTPUT_REASON = "資格情報や秘密値を直接出力・取得する操作は許可していません。"
-EXEC_OVERRIDE_REASON = "外部コマンドや実行設定の明示的な差し替えは許可していません。"
+EXEC_OVERRIDE_REASON = "保護機構や認証処理を迂回する実行設定は許可していません。"
 DESTRUCTIVE_REASON = "強制的な変更破棄、検証の迂回、ディスクの破壊は許可していません。"
 SAFE_ENV_NAMES = {
     "PATH", "HOME", "PWD", "OLDPWD", "USER", "LOGNAME", "SHELL", "TERM",
@@ -147,11 +151,13 @@ AWS_SECRET_OPERATIONS = {
     "history": {"list", "show"},
 }
 GIT_EXEC_KEYS = {
-    "core.pager", "core.editor", "core.sshcommand", "core.hookspath",
-    "core.askpass", "core.gitproxy", "core.fsmonitor", "sequence.editor",
-    "diff.external", "credential.helper", "gpg.program", "gpg.openpgp.program",
-    "filter.lfs.process", "filter.lfs.clean", "filter.lfs.smudge",
-    "uploadpack.packobjectshook", "ssh.variant",
+    "core.hookspath", "core.askpass", "credential.helper",
+    "uploadpack.packobjectshook",
+}
+GIT_COMMAND_KEYS = {
+    "core.pager", "core.editor", "core.sshcommand", "core.gitproxy",
+    "core.fsmonitor", "sequence.editor", "diff.external", "gpg.program",
+    "gpg.openpgp.program",
 }
 CONTAINER_SAFE_FIELDS = {
     "id", "ids", "name", "names", "image", "imageid", "status", "state",
@@ -189,16 +195,30 @@ def option_values(args, names):
     return values
 
 
-def has_option(args, names, short=""):
+def has_option(args, names, short="", value_options=(), negated=()):
+    found = False
+    args = iter(args)
     for argument in args:
         if argument == "--":
             break
+        if argument in value_options:
+            next(args, None)
+            continue
+        if value_options and argument.startswith("-") and not argument.startswith("--"):
+            for offset, flag in enumerate(argument[1:], 1):
+                if "-" + flag in value_options:
+                    if offset == len(argument) - 1:
+                        next(args, None)
+                    argument = argument[:offset]
+                    break
         name, separator, value = argument.partition("=")
-        if name in names and (not separator or value.casefold() not in {"false", "0", "no", "off"}):
-            return True
+        if name in negated:
+            found = False
+        elif name in names and (not separator or value.casefold() not in {"false", "0", "no", "off"}):
+            found = True
         if short and re.fullmatch(r"-[A-Za-z]+", argument) and any(flag in argument[1:] for flag in short):
-            return True
-    return False
+            found = True
+    return found
 
 
 def cli_words(command, args, extra_values=()):
@@ -248,7 +268,7 @@ def git_exec_key(key):
     )
 
 
-def inspect_git(args, words):
+def inspect_git(args, words, cwd):
     for setting in option_values(args, {"--config-env"}):
         if git_exec_key(setting.split("=", 1)[0]):
             deny(EXEC_OVERRIDE_REASON)
@@ -262,7 +282,11 @@ def inspect_git(args, words):
             continue
         if git_exec_key(key):
             deny(EXEC_OVERRIDE_REASON)
-    if has_option(args, {"--receive-pack", "--upload-pack", "--exec"}) or any(argument.startswith("--exec-path=") for argument in args):
+        if key.casefold() in GIT_COMMAND_KEYS and value:
+            scan(value, cwd)
+    for value in option_values(args, {"--receive-pack", "--upload-pack", "--exec"}):
+        scan(value, cwd)
+    if any(argument.startswith("--exec-path=") for argument in args):
         deny(EXEC_OVERRIDE_REASON)
     if has_option(args, {"--help", "-h"}):
         return
@@ -286,12 +310,26 @@ def inspect_git(args, words):
             deny(SECRET_OUTPUT_REASON)
         if not reads and not removes and any(git_exec_key(key) for key in operands):
             deny(EXEC_OVERRIDE_REASON)
-        if not reads and not removes and operands and operands[0].casefold().startswith("alias.") and any(value.startswith("!") for value in operands[1:]):
-            deny(EXEC_OVERRIDE_REASON)
+        if not reads and not removes and len(operands) > 1:
+            key, value = operands[:2]
+            if key.casefold() in GIT_COMMAND_KEYS:
+                scan(value, cwd)
+            elif key.casefold().startswith("alias.") and value.startswith("!"):
+                scan(value[1:], cwd)
     if not words:
         return
     command = words[0]
-    if command == "push" and has_option(args, {"--force", "--force-with-lease", "--force-if-includes", "--mirror", "--prune"}, "f"):
+    if command in {"push", "clean", "commit"}:
+        value_options = CLI_VALUE_OPTIONS["git"] | {
+            "commit": {"-m", "--message", "-F", "--file", "--author", "--date", "--reedit-message", "--reuse-message", "--fixup", "--squash", "--trailer", "-t", "--template", "--cleanup", "--pathspec-from-file", "-U", "--unified", "--inter-hunk-context"},
+            "clean": {"-e", "--exclude"},
+            "push": {"--repo", "--receive-pack", "--exec", "-o", "--push-option", "--recurse-submodules"},
+        }[command]
+        if has_option(args, {"--dry-run"}, "n" if command != "commit" else "", value_options, negated={"--no-dry-run"}):
+            return
+    if command == "reflog" and has_option(args, {"--dry-run"}, "n", CLI_VALUE_OPTIONS["git"], negated={"--no-dry-run"}):
+        return
+    if command == "push" and has_option(args, {"--force", "--mirror", "--prune"}, "f"):
         deny(DESTRUCTIVE_REASON)
     if command == "push" and any(word.startswith("+") for word in words[1:]):
         deny(DESTRUCTIVE_REASON)
@@ -367,7 +405,7 @@ def inspect_aws(args, words):
         deny(SECRET_OUTPUT_REASON)
 
 
-def inspect_gh(args, words):
+def inspect_gh(args, words, cwd):
     if has_option(args, {"--help", "-h"}) or words[:1] == ["help"]:
         return
     if matches_subcommand(words, {"auth token", "auth git-credential"}):
@@ -377,7 +415,8 @@ def inspect_gh(args, words):
     if words[:2] == ["config", "get"] and any(secret_name(word) for word in words[2:]):
         deny(SECRET_OUTPUT_REASON)
     if matches_subcommand(words, {"repo clone", "codespace ssh"}) and "--" in args:
-        deny(EXEC_OVERRIDE_REASON)
+        child = args[args.index("--") + 1:]
+        inspect_argv((["git", "clone"] if words[:2] == ["repo", "clone"] else ["ssh"]) + child, cwd, 1)
     if words[:1] == ["api"]:
         endpoints = cli_words("gh", args, {"-X", "--method", "-H", "--header", "-f", "-F", "--field", "--raw-field", "--input", "--jq", "-q", "--template", "-t", "--cache", "--preview"})[1:]
         for endpoint in endpoints:
@@ -388,14 +427,14 @@ def inspect_gh(args, words):
                 deny(SECRET_OUTPUT_REASON)
 
 
-def inspect_terraform(command, args, words):
-    if has_option(args, {"--tf-path", "--terragrunt-tfpath", "--shell", "--terragrunt-iam-assume-role-command"}):
-        deny(EXEC_OVERRIDE_REASON)
+def inspect_terraform(command, args, words, cwd):
+    for value in option_values(args, {"--tf-path", "--terragrunt-tfpath", "--shell", "--terragrunt-iam-assume-role-command"}):
+        scan(value, cwd)
     if has_option(args, {"--help", "-help", "-h"}):
         return
     while words and words[0] in {"run", "run-all", "stack"}:
         words = words[1:]
-    if matches_subcommand(words, {"console", "state pull", "state show"}):
+    if matches_subcommand(words, {"state pull", "state show"}):
         deny(SECRET_OUTPUT_REASON)
     if words[:1] == ["show"] and has_option(args, {"-json", "--json"}):
         deny(SECRET_OUTPUT_REASON)
@@ -428,6 +467,8 @@ def safe_container_format(value):
         return False
     for reference in references:
         reference = reference.strip()
+        if reference == ".Config.Image":
+            continue
         if not re.fullmatch(r"\.[A-Za-z][A-Za-z0-9.]*", reference):
             return False
         if any(field.casefold() not in CONTAINER_SAFE_FIELDS for field in reference[1:].split(".")):
@@ -465,7 +506,7 @@ def inspect_environment(command, args):
     if command == "printenv":
         if has_option(args, {"--help", "--version"}):
             return
-        if not words or any(word not in SAFE_ENV_NAMES for word in words):
+        if not words or any(secret_name(word) for word in words):
             deny(SECRET_OUTPUT_REASON)
     if command == "set" and not args:
         deny(SECRET_OUTPUT_REASON)
@@ -498,7 +539,7 @@ def inspect_process(command, args):
         words = cli_words(command, args)
         if matches_subcommand(words, {"export", "print", "print-cache", "dumpstate"}):
             deny(SECRET_OUTPUT_REASON)
-        if words[:1] == ["getenv"] and (len(words) < 2 or words[1] not in SAFE_ENV_NAMES):
+        if words[:1] == ["getenv"] and (len(words) < 2 or secret_name(words[1])):
             deny(SECRET_OUTPUT_REASON)
     elif command == "sysctl":
         if any(word.casefold().startswith("kern.procargs") for word in args):
@@ -520,7 +561,7 @@ def inspect_packages(command, args, words):
             deny(SECRET_OUTPUT_REASON)
 
 
-def inspect_cli(command, args):
+def inspect_cli(command, args, cwd):
     command = os.path.basename(command).casefold()
     words = cli_words(command, args)
     if command.startswith(("docker-credential-", "git-credential-")):
@@ -528,13 +569,13 @@ def inspect_cli(command, args):
     if command == "security":
         inspect_security(args, words)
     elif command == "git":
-        inspect_git(args, words)
+        inspect_git(args, words, cwd)
     elif command == "aws":
         inspect_aws(args, words)
     elif command == "gh":
-        inspect_gh(args, words)
+        inspect_gh(args, words, cwd)
     elif command in {"terraform", "terragrunt"}:
-        inspect_terraform(command, args, words)
+        inspect_terraform(command, args, words, cwd)
     elif command in {"kubectl", "oc"}:
         inspect_kubernetes(command, args, words)
     elif command in {"docker", "podman", "nerdctl"}:
@@ -543,6 +584,13 @@ def inspect_cli(command, args):
         inspect_environment(command, args)
     elif command in {"ps", "pgrep", "launchctl", "sysctl"}:
         inspect_process(command, args)
+    elif command in {"ssh", "scp", "sftp"}:
+        for setting in option_values(args, {"-o"}):
+            if "=" not in setting:
+                setting = setting.replace(" ", "=", 1)
+            name, _, value = setting.partition("=")
+            if name.casefold() in {"proxycommand", "localcommand", "remotecommand"}:
+                scan(value, cwd)
     elif command in SECRET_SUBCOMMANDS:
         if has_option(args, {"--help", "-h"}) or words[:1] == ["help"]:
             return
@@ -596,10 +644,8 @@ CREDENTIAL_LOCATIONS = (
     ".ocm.json", ".config/ocm/ocm.json", "Library/Application Support/ocm/ocm.json",
     ".config/helm/repositories.yaml", ".config/helm/registry/config.json",
     "Library/Preferences/helm/repositories.yaml", "Library/Preferences/helm/registry/config.json",
-    ".kube/config", ".codex/auth.json", ".codex/history.jsonl", ".codex/sessions",
-    ".codex/archived_sessions", ".codex/shell_snapshots", ".claude/.credentials.json",
-    ".claude/history.jsonl", ".claude/projects", ".claude/file-history",
-    ".claude/paste-cache", ".claude/shell-snapshots", ".claude/backups",
+    ".kube/config", ".codex/auth.json", ".codex/shell_snapshots",
+    ".claude/.credentials.json", ".claude/shell-snapshots", ".claude/backups",
     ".claude.json", ".claude.json.backup", ".terraform.d/credentials.tfrc.json",
     ".terraformrc", ".vault-token", ".azure", ".cargo/credentials.toml",
     ".cargo/credentials", ".curlrc", ".wgetrc", ".bundle/config",
@@ -679,7 +725,7 @@ def path_exposes_credentials(value, cwd):
     """コピー・マウントでは既知の保管先の親ディレクトリも保護する。"""
     if credential_path(value, cwd):
         return True
-    if re.search(r"(?:^|/)\.codex-account-[^/]+(?:/|$)", value, re.IGNORECASE):
+    if re.search(r"(?:^|/)\.codex-account-[^/]+/?$", value, re.IGNORECASE):
         return True
     home = os.path.expanduser("~")
     protected = [os.path.join(home, path).casefold() for path in CREDENTIAL_LOCATIONS]
@@ -1064,17 +1110,19 @@ OPERATORS = sorted(SEPARATORS | REDIRECTIONS, key=len, reverse=True)
 ASSIGNMENT = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)(?:\[[^]]*\])?\+?=(.*)$", re.S)
 PARAMETER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 EXECUTION_VARIABLES = {
-    "BASH_ENV", "ENV", "ZDOTDIR", "SHELLOPTS", "SUDO_ASKPASS", "SUDO_EDITOR",
-    "GIT_ASKPASS", "GIT_SSH", "GIT_SSH_COMMAND", "GIT_SSH_VARIANT",
-    "GIT_EDITOR", "GIT_SEQUENCE_EDITOR", "GIT_PAGER", "GIT_EXEC_PATH",
+    "BASH_ENV", "ENV", "ZDOTDIR", "SHELLOPTS", "SUDO_ASKPASS",
+    "GIT_ASKPASS", "GIT_EXEC_PATH",
     "GIT_CONFIG", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_COUNT",
     "GIT_CONFIG_PARAMETERS", "GIT_TEMPLATE_DIR",
-    "GH_PAGER", "GH_EDITOR", "GH_BROWSER", "PAGER", "EDITOR", "VISUAL", "BROWSER",
-    "AWS_PAGER", "MANPAGER", "TF_CLI_ARGS", "TG_TF_PATH", "TERRAGRUNT_TFPATH",
-    "DOCKER_CLI_PLUGIN_EXTRA_DIRS", "npm_config_call", "npm_config_script_shell",
+    "DOCKER_CLI_PLUGIN_EXTRA_DIRS",
 }
-EXECUTION_PREFIXES = ("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_", "TF_CLI_ARGS_")
-PAGERS = {"PAGER", "GIT_PAGER", "GH_PAGER", "AWS_PAGER", "MANPAGER"}
+EXECUTION_PREFIXES = ("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")
+COMMAND_VARIABLES = {
+    "SUDO_EDITOR", "GIT_SSH", "GIT_SSH_COMMAND", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR",
+    "GIT_PAGER", "GH_PAGER", "GH_EDITOR", "GH_BROWSER", "PAGER", "EDITOR", "VISUAL",
+    "BROWSER", "AWS_PAGER", "MANPAGER", "TG_TF_PATH", "TERRAGRUNT_TFPATH",
+    "npm_config_call", "npm_config_script_shell",
+}
 PROXIES = {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "FTP_PROXY", "PIP_PROXY"}
 REFERENCE_VARIABLES = {"SSH_AUTH_SOCK", "SSH_AGENT_PID", "GPG_AGENT_INFO", "DOCKER_HOST"}
 
@@ -1313,7 +1361,7 @@ def shell_tokens(text, literal=False):
     return tokens, nested
 
 
-def inspect_assignment(value):
+def inspect_assignment(value, cwd):
     match = ASSIGNMENT.match(value)
     if not match:
         return
@@ -1323,11 +1371,9 @@ def inspect_assignment(value):
             deny("GOOGLE_CREDENTIALS には静的なファイルパスだけを指定してください。")
         return
     if name in EXECUTION_VARIABLES or name.startswith(EXECUTION_PREFIXES):
-        if name in PAGERS and not content:
-            return
-        if name in {"PAGER", "GIT_PAGER"} and content == "cat":
-            return
-        deny("実行設定・起動ファイルの明示的な差し替えは許可していません。")
+        deny(EXEC_OVERRIDE_REASON)
+    if name in COMMAND_VARIABLES and content:
+        scan(content, cwd)
     if name.upper() in PROXIES:
         if "@" in content:
             deny("proxy の認証情報を引数へ載せることは許可していません。")
@@ -1367,9 +1413,9 @@ WRAPPER_FLAGS = {
 UNKNOWN_ARGUMENT = "\0"
 
 
-def unwrap(command, args, cwd):
+def unwrap(command, args, cwd, inherited_assignments):
     args = list(args)
-    replacements, index = [], 0
+    assignments, replacements, index = [], [], 0
     while index < len(args):
         arg = args[index]
         if arg == "--":
@@ -1388,7 +1434,9 @@ def unwrap(command, args, cwd):
         if command == "xargs" and arg.startswith("-i"):
             arg = args[index] = "-I" + arg[2:]
         if ASSIGNMENT.match(arg):
-            inspect_assignment(arg)
+            inspect_assignment(arg, cwd)
+            if arg.startswith(("TF_CLI_ARGS=", "TF_CLI_ARGS_")):
+                assignments.append(arg)
             index += 1
             continue
         if not arg.startswith("-") or arg == "-":
@@ -1403,7 +1451,7 @@ def unwrap(command, args, cwd):
                         expanded.append(arg[offset + 1:])
                     break
                 if short not in WRAPPER_FLAGS[command]:
-                    raise ParseError("unsupported wrapper option")
+                    raise UnsupportedSyntax("unsupported wrapper option")
                 expanded.append(short)
             args[index:index + 1] = expanded
             arg = args[index]
@@ -1414,18 +1462,22 @@ def unwrap(command, args, cwd):
                 if index >= len(args):
                     raise ParseError("wrapper option argument is missing")
                 value = args[index]
+            if command == "env" and option in {"-u", "--unset"}:
+                inherited_assignments.pop(value, None)
             if command == "arch" and option == "-e":
-                inspect_assignment(value)
+                inspect_assignment(value, cwd)
             if command == "xargs" and option in {"-I", "-J", "--replace"}:
                 if not value:
                     raise ParseError("empty xargs replacement")
                 replacements.append((option, value))
             if option in {"-D", "--chdir"} or command == "env" and option == "-C":
                 if "$" in value:
-                    raise ParseError("dynamic working directory")
+                    raise UnsupportedSyntax("dynamic working directory")
                 cwd = os.path.abspath(os.path.join(cwd, os.path.expanduser(value)))
+        elif command == "env" and arg in {"-i", "--ignore-environment"}:
+            inherited_assignments.clear()
         elif arg not in WRAPPER_FLAGS[command]:
-            raise ParseError("unsupported wrapper option")
+            raise UnsupportedSyntax("unsupported wrapper option")
         index += 1
     if command == "timeout" and index < len(args):
         index += 1
@@ -1444,7 +1496,7 @@ def unwrap(command, args, cwd):
                     child[position] = UNKNOWN_ARGUMENT
             else:
                 child[1:] = [UNKNOWN_ARGUMENT if value in arg else arg for arg in child[1:]]
-    return child, cwd
+    return assignments + child if child else [], cwd
 
 
 INTERPRETERS = {"python", "python3", "node", "ruby", "perl", "php", "awk", "gawk"}
@@ -1515,12 +1567,12 @@ def inspect_code(language, code, cwd, depth=0):
     if depth > 32:
         raise ParseError("nested code limit exceeded")
     if UNKNOWN_ARGUMENT in code:
-        raise ParseError("dynamic inline code")
+        raise UnsupportedSyntax("dynamic inline code")
     if language in {"python", "python3"}:
         try:
             tree = ast.parse(code)
         except (SyntaxError, ValueError) as error:
-            raise ParseError("invalid inline Python") from error
+            raise UnsupportedSyntax("unsupported inline Python") from error
         aliases = {}
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -1536,7 +1588,9 @@ def inspect_code(language, code, cwd, depth=0):
             if isinstance(node, ast.Call) and qualified_name(node.func) in {"getattr", "builtins.getattr"}:
                 if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant) and isinstance(node.args[1].value, str):
                     return qualified_name(node.args[0]) + "." + node.args[1].value
-                raise ParseError("dynamic attribute name")
+            if isinstance(node, ast.Call) and qualified_name(node.func) in {"__import__", "builtins.__import__"}:
+                if node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
+                    return node.args[0].value
             return ""
 
         for node in ast.walk(tree):
@@ -1548,15 +1602,37 @@ def inspect_code(language, code, cwd, depth=0):
             name = qualified_name(node.func)
             if name in {"getattr", "builtins.getattr"}:
                 name = qualified_name(node)
-            if (
-                name in {"eval", "exec", "__import__", "builtins.eval", "builtins.exec", "builtins.__import__"}
-                or name.startswith("subprocess.")
-                or re.match(r"os\.(?:system|popen|exec\w*|spawn\w*|posix_spawnp?)$", name)
-            ):
-                deny("直接コードからのプロセス起動・コードの再評価は許可していません。")
-            literals = [item.value for item in node.args if isinstance(item, ast.Constant) and isinstance(item.value, str)]
-            if name in {"os.getenv", "os.environ.get"} and (not literals or secret_name(literals[0])):
-                deny("コードからの秘密環境変数の取得は許可していません。")
+            process_args = node.args[1:] if name.startswith("os.spawn") else node.args
+            argument = process_args[0] if process_args else next((item.value for item in node.keywords if item.arg == "args"), None)
+            try:
+                if name in {"eval", "exec", "builtins.eval", "builtins.exec"}:
+                    if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
+                        inspect_code(language, argument.value, cwd, depth + 1)
+                elif name in {"subprocess.Popen", "subprocess.run", "subprocess.call", "subprocess.check_call", "subprocess.check_output", "subprocess.getoutput", "subprocess.getstatusoutput"}:
+                    options = {item.arg: item.value.value for item in node.keywords if isinstance(item.value, ast.Constant)}
+                    child_cwd = os.path.normpath(os.path.join(cwd, options["cwd"])) if isinstance(options.get("cwd"), str) else cwd
+                    child = argument.elts if isinstance(argument, (ast.List, ast.Tuple)) else [argument]
+                    if child and all(isinstance(item, ast.Constant) and isinstance(item.value, str) for item in child):
+                        child = [item.value for item in child]
+                        if options.get("shell") or name in {"subprocess.getoutput", "subprocess.getstatusoutput"}:
+                            child = [options.get("executable") or "/bin/sh", "-c"] + child
+                        elif isinstance(options.get("executable"), str):
+                            child[0] = options["executable"]
+                        inspect_argv(child, child_cwd, depth + 1)
+                elif re.match(r"os\.(?:system|popen|exec\w*|spawn\w*|posix_spawnp?)$", name):
+                    if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
+                        if name in {"os.system", "os.popen"}:
+                            scan(argument.value, cwd, depth + 1)
+                        elif len(process_args) > 1:
+                            child = process_args[1].elts if isinstance(process_args[1], (ast.List, ast.Tuple)) else process_args[1:]
+                            if all(isinstance(item, ast.Constant) and isinstance(item.value, str) for item in child):
+                                inspect_argv([argument.value] + [item.value for item in child[1:]], cwd, depth + 1)
+            except UnsupportedSyntax:
+                pass
+            if name in {"os.getenv", "os.environ.get"}:
+                key = node.args[0] if node.args else next((item.value for item in node.keywords if item.arg == "key"), None)
+                if isinstance(key, ast.Constant) and isinstance(key.value, str) and secret_name(key.value):
+                    deny("コードからの秘密環境変数の取得は許可していません。")
             if (
                 name in {"dict", "list", "print"}
                 and any(qualified_name(item) == "os.environ" for item in node.args)
@@ -1577,17 +1653,75 @@ def inspect_code(language, code, cwd, depth=0):
                     deny("コードによる認証情報ファイルの直接読み取りは許可していません。")
         return
     executable, strings = mask_code(language, code, cwd, depth)
-    calls = r"\b(?:eval|exec|execSync|execFile|execFileSync|spawn|spawnSync|system|popen|require|load|shell_exec|passthru|proc_open|pcntl_exec|call_user_func(?:_array)?)\s*\("
-    bare_calls = language in {"ruby", "perl"} and re.search(
-        r"\b(?:system|exec|spawn|popen|eval|require|load|send|public_send|__send__)\b(?!\s*[:=])", executable
+    calls = (
+        r"\b(eval|exec|execSync|execFile|execFileSync|spawn|spawnSync|system|popen|shell_exec|passthru|proc_open)"
+        r"\s*\(?\s*__string_(\d+)__(?:\s*,\s*\[([^\]]*)\])?(?:\s*,\s*\{([^{}]*)\})?"
     )
-    if re.search(calls, executable) or bare_calls or re.search(r"\bchild_process\b", executable):
-        deny("直接コードからのプロセス起動・コードの再評価は許可していません。")
-    for match in re.finditer(r"\b(?:open|readFile|readFileSync|file_get_contents|readfile|read)\s*\(?\s*__string_(\d+)__", executable):
+    for match in re.finditer(calls, executable):
+        name, literal, array, options = match.groups()
+        value = strings[int(literal)]
+        shell, child_cwd = False, cwd
+        for key, setting in re.findall(r"([A-Za-z_0-9]+)\s*:\s*([A-Za-z_0-9]+)", options or ""):
+            key_literal = re.fullmatch(r"__string_(\d+)__", key)
+            if key_literal:
+                key = strings[int(key_literal.group(1))]
+            if key == "shell":
+                shell = setting == "true" or setting.startswith("__string_")
+            if key == "cwd" and language == "node":
+                directory = re.fullmatch(r"__string_(\d+)__", setting)
+                if directory:
+                    child_cwd = os.path.normpath(os.path.join(cwd, strings[int(directory.group(1))]))
+        child = []
+        if array is not None:
+            child = (
+                [strings[int(index)] for index in re.findall(r"__string_(\d+)__", array)]
+                if re.fullmatch(r"\s*(?:__string_\d+__\s*,?\s*)*", array)
+                else None
+            )
+        elif language == "node" and name in {"execFile", "execFileSync", "spawn", "spawnSync"} and options is None:
+            if re.match(r"\s*,", executable[match.end():]):
+                child = None
+        arguments = None
+        if language in {"ruby", "perl"} and name in {"system", "exec", "spawn"}:
+            arguments = re.match(r"(?:\s*,\s*__string_\d+__)+(?=\s*(?:,?\s*\)|;|\n|$))", executable[match.end():])
+            if arguments:
+                child = [strings[int(index)] for index in re.findall(r"__string_(\d+)__", arguments.group())]
+            elif re.match(r"\s*,", executable[match.end():]):
+                child = None
+        try:
+            if name == "eval":
+                inspect_code(language, value, cwd, depth + 1)
+            elif child is None:
+                continue
+            elif shell:
+                scan(" ".join([value] + child), child_cwd, depth + 1)
+            elif (
+                array is not None or arguments is not None
+                or name in {"execFile", "execFileSync", "spawnSync"}
+                or name == "spawn" and language != "ruby"
+            ):
+                inspect_argv([value] + child, child_cwd, depth + 1)
+            else:
+                scan(value, child_cwd, depth + 1)
+        except UnsupportedSyntax:
+            pass
+    for match in re.finditer(r"\b(?:open|readFile|readFileSync|file_get_contents|readfile|read|file|filebase64)\s*\(?\s*(?:pathexpand\s*\(\s*)?__string_(\d+)__", executable):
         if credential_path(strings[int(match.group(1))], cwd):
             deny("コードによる認証情報ファイルの直接読み取りは許可していません。")
-    if re.search(r"\b(?:process\.env|ENV|_ENV)\b", executable):
-        deny("コードからの環境変数取得は許可していません。")
+    for match in re.finditer(r"\b(?:process\.env|ENV|_ENV)\b", executable):
+        access = re.match(r"\s*(?:\.([A-Za-z_][A-Za-z_0-9]*)|[\[{]\s*(?:__string_(\d+)__|([A-Za-z_][A-Za-z_0-9]*))\s*[\]}])", executable[match.end():])
+        if not access:
+            deny("環境変数の一括取得は許可していません。")
+        attribute, literal, key = access.groups()
+        if attribute in {"fetch", "get"}:
+            call = re.match(r"\s*\(?\s*__string_(\d+)__", executable[match.end() + access.end():])
+            if not call:
+                continue
+            name = strings[int(call.group(1))]
+        else:
+            name = strings[int(literal)] if literal is not None else attribute or key
+        if secret_name(name):
+            deny("コードからの秘密環境変数の取得は許可していません。")
 
 
 def interpreter_input(command, args):
@@ -1655,28 +1789,33 @@ def interpreter_input(command, args):
 
 def script_uses_stdin(path):
     if UNKNOWN_ARGUMENT in path:
-        raise ParseError("dynamic script path")
+        raise UnsupportedSyntax("dynamic script path")
     if path in {"/dev/stdin", "/dev/fd/0", "/proc/self/fd/0"}:
         return True
     if re.match(r"^/(?:dev|proc/(?:self|\d+))/fd/", path):
-        raise ParseError("uninspected script file descriptor")
+        raise UnsupportedSyntax("uninspected script file descriptor")
     return False
 
 
 def inspect_argv(argv, cwd, depth, stdin=None, external=False):
     if depth > 32:
         raise ParseError("nested command limit exceeded")
+    assignments = {}
     while argv and ASSIGNMENT.match(argv[0]):
-        inspect_assignment(argv.pop(0))
+        assignment = argv.pop(0)
+        inspect_assignment(assignment, cwd)
+        name, value = ASSIGNMENT.match(assignment).groups()
+        if name == "TF_CLI_ARGS" or name.startswith("TF_CLI_ARGS_"):
+            assignments[name] = value
     if not argv:
         return
     command = os.path.basename(argv[0]).casefold()
     args = argv[1:]
     if "$" in command or "`" in command or UNKNOWN_ARGUMENT in command:
-        raise ParseError("dynamic command name")
+        raise UnsupportedSyntax("dynamic command name")
     for arg in args:
         if command in {"export", "readonly", "declare", "typeset", "local", "env", "sudo"}:
-            inspect_assignment(arg)
+            inspect_assignment(arg, cwd)
     if (
         command in {"read", "mapfile", "readarray"}
         and any(arg in EXECUTION_VARIABLES for arg in args)
@@ -1693,21 +1832,36 @@ def inspect_argv(argv, cwd, depth, stdin=None, external=False):
                 value = arg.partition("=")[2] if joined else args[index + 1]
                 split, nested = shell_tokens(value)
                 if nested or any(not isinstance(word, Word) for word in split):
-                    raise ParseError("unsupported env split string")
+                    raise UnsupportedSyntax("unsupported env split string")
                 args = args[:index] + [word.value for word in split] + args[index + (1 if joined else 2):]
                 break
     if command in WRAPPER_VALUES:
-        child, child_cwd = unwrap(command, args, cwd)
+        child, child_cwd = unwrap(command, args, cwd, assignments)
         if command == "env" and not child and not has_option(args, {"--help", "--version"}):
             deny("環境変数の一括出力は許可していません。")
         if child:
+            child = [name + "=" + value for name, value in assignments.items()] + child
             if command == "xargs":
                 inspect_argv(child, child_cwd, depth + 1, None, True)
             else:
                 inspect_argv(child, child_cwd, depth + 1, stdin, external)
         return
-    inspect_cli(command, args)
+    if command in {"terraform", "terragrunt"}:
+        words = cli_words(command, args)
+        while words and words[0] in {"run", "run-all", "stack"}:
+            words = words[1:]
+        if words:
+            additional = []
+            for name in ("TF_CLI_ARGS", "TF_CLI_ARGS_" + words[0]):
+                split, nested = shell_tokens(assignments.get(name, ""))
+                if not nested and all(isinstance(word, Word) and not word.parameters for word in split):
+                    additional.extend(word.value for word in split)
+            position = args.index(words[0]) + 1
+            args = args[:position] + additional + args[position:]
+    inspect_cli(command, args, cwd)
     inspect_paths(command, args, cwd)
+    if command in {"terraform", "terragrunt"} and "console" in cli_words(command, args) and stdin is not None:
+        inspect_code("terraform", stdin, cwd, depth + 1)
     if command == "rm" and has_option(args, {"--recursive"}, "rR"):
         for target in args:
             if target.startswith("-") or UNKNOWN_ARGUMENT in target:
@@ -1750,13 +1904,13 @@ def inspect_argv(argv, cwd, depth, stdin=None, external=False):
                     deny("認証情報ファイルをスクリプトとして読み込むことは許可していません。")
                 if script_uses_stdin(arg):
                     if external:
-                        deny("内容を検査できない入力のシェル実行は許可していません。")
+                        raise UnsupportedSyntax("uninspected shell input")
                     if stdin is not None:
                         scan(stdin, cwd, depth + 1)
                 return
             index += 1
         if external:
-            deny("内容を検査できない入力をシェルとして実行することは許可していません。")
+            raise UnsupportedSyntax("uninspected shell input")
         if stdin is not None:
             scan(stdin, cwd, depth + 1)
     elif command in {"eval", "trap"}:
@@ -1770,7 +1924,7 @@ def inspect_argv(argv, cwd, depth, stdin=None, external=False):
             deny("認証情報ファイルの source は許可していません。")
         if args and script_uses_stdin(args[0]):
             if external:
-                deny("内容を検査できない入力の source は許可していません。")
+                raise UnsupportedSyntax("uninspected source input")
             if stdin is not None:
                 scan(stdin, cwd, depth + 1)
     elif command == "osascript":
@@ -1807,7 +1961,7 @@ def inspect_argv(argv, cwd, depth, stdin=None, external=False):
         code, module, script = interpreter_input(language, args)
         if module is not None:
             if UNKNOWN_ARGUMENT in module[0]:
-                raise ParseError("dynamic Python module")
+                raise UnsupportedSyntax("dynamic Python module")
             if module[0] in {"pip", "pip3"}:
                 inspect_argv(module, cwd, depth + 1)
             return
@@ -1816,7 +1970,7 @@ def inspect_argv(argv, cwd, depth, stdin=None, external=False):
         else:
             uses_stdin = not script or script == "-" or script_uses_stdin(script)
             if uses_stdin and external:
-                raise ParseError("uninspected interpreter input")
+                raise UnsupportedSyntax("uninspected interpreter input")
             if uses_stdin and stdin is not None:
                 inspect_code(language, stdin, cwd)
             if credential_path(script, cwd):
@@ -1827,7 +1981,7 @@ def scan(text, cwd, depth=0, input_text=None, input_external=False):
     if depth > 32:
         raise ParseError("nested command limit exceeded")
     if UNKNOWN_ARGUMENT in text:
-        raise ParseError("dynamic shell code")
+        raise UnsupportedSyntax("dynamic shell code")
     tokens, nested = shell_tokens(text)
     spelling = [token.value if isinstance(token, Word) and not token.quoted else token for token in tokens]
     bomb = [":", "(", ")", "{", ":", "|", ":", "&", "}"]
@@ -1880,7 +2034,10 @@ def scan(text, cwd, depth=0, input_text=None, input_external=False):
         if not presence and any(sensitive_parameter(name) for word in words for name in word.parameters):
             deny("秘密値を持つ環境変数の明示展開は許可していません。")
         if argv and argv[0] not in {"for", "select", "case", "in", "esac", "fi", "done", "function"}:
-            inspect_argv(argv, cwd, depth, stdin, external)
+            try:
+                inspect_argv(argv, cwd, depth, stdin, external)
+            except UnsupportedSyntax:
+                pass
             if argv[:1] == ["cd"] and len(argv) == 2 and "$" not in argv[1]:
                 cwd = os.path.abspath(os.path.join(cwd, os.path.expanduser(argv[1])))
         unit = []

@@ -39,19 +39,20 @@ cli_auth_credentials_store = "file"  # CLI 認証情報の保存先 (auto / keyr
 ## ============================================================================
 
 approval_policy     = "on-request"          # 操作の承認要否 (untrusted / on-request / never)
-default_permissions = "保護付きフルアクセス"  # AI エージェント内部データと shell 履歴を除くフルアクセスを既定にする
+default_permissions = "保護付きフルアクセス"
 
 
 ## ============================================================================
-## 既定許可と AI エージェント内部データの保護
+## 既定許可と認証情報・shell 履歴の保護
 ## ============================================================================
 #
 # ルート全体を読み書き可能にし、外部 CLI が内部利用する認証材は deny しない。
-# Codex / Claude Code 自身の認証・履歴と shell 履歴だけを固定 deny にする。
+# Codex / Claude Code 自身の認証情報と shell 履歴・snapshot を固定 deny にする。
+# 会話履歴・session transcript・file history・paste cache の調査は許可する。
 # その他の認証情報の直接取得は AGENTS.md で禁止し、既知の取得経路を PreToolUse で拒否する。
 # permission profile は旧 sandbox_mode / [sandbox_workspace_write] と併用しない。
 [permissions."保護付きフルアクセス"]
-description = "AI エージェント内部データと shell 履歴を除くフルアクセス"
+description = "AI エージェントの認証情報と shell 履歴・snapshot を除くフルアクセス"
 
 [permissions."保護付きフルアクセス".filesystem]
 ":root" = "write"
@@ -62,25 +63,13 @@ description = "AI エージェント内部データと shell 履歴を除くフ�
 # filesystem deny に入れない。CLI 自身による通常利用を既定で許可し、
 # 内容の直接取得と秘密値を返す既知の操作を PreToolUse で拒否する。
 
-# AI エージェントの認証情報・履歴
+# AI エージェントの認証情報・shell snapshot
 "~/.codex/auth.json"                          = "deny"
-"~/.codex/history.jsonl"                      = "deny"
-"~/.codex/sessions"                           = "deny"
-"~/.codex/archived_sessions"                  = "deny"
 "~/.codex/shell_snapshots"                    = "deny"
 "~/.codex-account-*/auth.json"                = "deny"
-"~/.codex-account-*/history.jsonl"            = "deny"
-"~/.codex-account-*/sessions"                 = "deny"
-"~/.codex-account-*/sessions/**"              = "deny"
-"~/.codex-account-*/archived_sessions"        = "deny"
-"~/.codex-account-*/archived_sessions/**"     = "deny"
 "~/.codex-account-*/shell_snapshots"          = "deny"
 "~/.codex-account-*/shell_snapshots/**"       = "deny"
 "~/.claude/.credentials.json"                 = "deny"
-"~/.claude/history.jsonl"                     = "deny"
-"~/.claude/projects"                          = "deny"
-"~/.claude/file-history"                      = "deny"
-"~/.claude/paste-cache"                       = "deny"
 "~/.claude/shell-snapshots"                   = "deny"
 "~/.claude.json"                              = "deny"
 "~/.claude.json.backup"                       = "deny"
@@ -112,7 +101,7 @@ set                     = { GIT_TERMINAL_PROMPT = "0", AWS_PAGER = "" }  # Git �
 # filter 名は大文字小文字を区別しないため、同名の大小文字違いは重ねない。
 # エージェントは秘密を環境変数へ設定しない新しいターミナルから起動する前提とし、
 # 秘密値だけを除外する。起動元の非秘密な認証・実行設定は継承する。
-# コマンド中に直接指定された実行設定の差し替えを PreToolUse で検査する。
+# コマンドに直接書かれた秘密取得を PreToolUse で検査する。
 [shell_environment_policy.filters]
 "*PASSWORD"                       = "exclude"
 "*PASSPHRASE"                     = "exclude"
