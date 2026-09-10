@@ -72,6 +72,7 @@ git clone <このリポジトリ> && cd dotfiles
 - 共通エージェントルールは `.config/agents/AGENTS.md` を正本とし、`~/.config/agents/AGENTS.md` と `~/.codex/AGENTS.md` から参照する
 - Codex の基本設定を `sudo` で `/etc/codex/config.toml` にリンクし、端末固有の `~/.codex/config.toml` で上書き可能にする
 - Codex の hooks / permissions は起動時に読み込まれるため、リンク後は Codex を終了して新しいセッションを開始する
+- 端末固有設定の旧 `sandbox_mode` / `[sandbox_workspace_write]` は削除する。`sandbox_mode` が残ると `default_permissions` が使われない（[公式仕様](https://learn.chatgpt.com/docs/permissions)）
 - 管理対象の正確な一覧は `scripts/link-dotfiles.sh` を参照する
 
 ### Git 共通設定
@@ -110,7 +111,7 @@ GitHub へは HTTPS で接続し、通常の認証は `gh auth git-credential` �
 - 組織固有の URL に限り、非公開側（`~/.gitconfig.local`）で helper を空値でリセットして `!ghtkn git-credential` に切り替える。組織名や対象 URL は公開側に置かない
 - [ghtkn](https://github.com/suzuki-shunsuke/ghtkn) の helper は GitHub App の User Access Token（有効期間 8 時間）を Git へ直接渡す
 - ghtkn 本体は mise が導入する（`.config/mise/config.toml`）。Homebrew では管理しない
-- 認証は**利用者が明示的に**開始する。AI エージェントから実行する場合は事前確認を経る
+- 認証は利用者の依頼または承認に基づいて開始する。承認済みの操作は確認を繰り返さない
 
 ```sh
 gh auth login --hostname github.com --git-protocol https
@@ -136,11 +137,11 @@ ghtkn auth   # デバイスフローで認証する
     ただしこれは `gh auth login` が保管した**別系統のトークン**であり、ghtkn 経由ではない。
     認証を ghtkn へ一本化するには `gh` 用の broker か wrapper が別途要る（未実装）
   - AI エージェントから AWS プロファイルを選ぶときは `aws --profile <name> ...` と明示する。`aws-use` は利用者の対話シェルでログインと既定プロファイルの永続化を行うための関数とする
-  - AWS の設定と認証キャッシュは AWS CLI 自身から読み書きできる。ログインや設定変更は認証・外部状態の変更として事前確認する
+  - AWS の設定と認証キャッシュは AWS CLI 自身から読み書きできる。ログインは利用者の依頼または承認に基づいて行い、通常の非秘密設定は依頼の範囲内で変更する
   - Google の認証ファイルは `GOOGLE_APPLICATION_CREDENTIALS` で指定する。`GOOGLE_CREDENTIALS` は JSON も持ちうるため、Codex では継承時に除外する
 - CodeCommit のプロファイル固有設定は公開側に置かない。AWS CLI 同梱の `codecommit credential-helper` は Git の子プロセスとして同じ認証経路を利用できるが、直接実行は認証情報の出力になるため拒否する。`git-remote-codecommit` はこのリポジトリでは導入していない
 - 共通の PreToolUse ガードは、認証ファイルの直接読み取り、秘密値の出力、既知の検査迂回を拒否する。
-  `terraform console` と、`--` 以降を git / ssh へ素通しする `gh repo clone` / `gh codespace ssh` は拒否するが、未知のサブコマンドを一律には拒否しない
+  通常のモジュール読み込み、子プロセス起動、非秘密の実行設定、未知のサブコマンドは、それ自体を理由に拒否しない
 
 ### グローバルフック
 
@@ -383,7 +384,7 @@ cd "$HOME/src/pych/agent-skills"
   コマンドパレットから「Shell Command: Install 'code' command in PATH」を実行
 - 各種アカウントにサインイン（1Password、Slack、Notion など）
 - GitHub の通常の認証を `gh auth login` で用意する。
-  URL 限定の ghtkn helper を使う端末では、非公開側の設定に従って `ghtkn init` / `ghtkn auth` も実行する。AI エージェントから実行する場合は確認を経る
+  URL 限定の ghtkn helper を使う端末では、非公開側の設定に従って `ghtkn init` / `ghtkn auth` も実行する。AI エージェントからは利用者の依頼または承認に基づいて実行する
 - 個別インストーラからプリンタドライバを導入
 
 ### AI エージェントの外部サービス
@@ -414,17 +415,17 @@ cd "$HOME/src/pych/agent-skills"
 
 AI エージェント（Claude Code / Codex）に対する方針は次の一点です。設計と判断の記録は [SECURITY.md](SECURITY.md) を参照してください。
 
-> 認証情報の平文を、モデル・会話コンテキスト・tool output・ログ・AI が読めるファイル・環境変数・引数・標準入力へ渡さない。
-> 一方で、credential helper・認証エージェント・署名ブローカーが内部で認証する通常の Git・AWS・コンテナ操作は制限しない。
+> クレデンシャルをモデル・会話コンテキスト・tool output へ直接取り出さず、ファイル・ログ・環境変数・引数・標準入力への書き出しで迂回しない。
+> credential helper・認証エージェント・署名ブローカー・認証済み CLI が内部で認証情報を利用・保管する通常操作は許可する。
 
-そのため、コマンド名だけで一律に拒否せず、秘密値を出力するサブコマンドとそうでないサブコマンドを分けています。
+コマンド名や実行機能だけで一律に拒否せず、秘密値の取得と重大な破壊操作を制限します。IP アドレス・ユーザー名・ホスト名・MAC アドレスと、過去の会話・セッション履歴は必要に応じて参照できます。
 
 - `.config/agents/AGENTS.md`: 共通の規約。禁止・許可・確認が必要な操作と、実行ガードの検査範囲を区別する
 - `.claude/settings.json`: `auto` の利用、Bash の個別 allow の不使用、filesystem sandbox の無効化、秘密値を出力する操作の deny、ホーム以下にある既知名の認証情報ファイルに対する組み込み `Read` の禁止
-- `.claude/hooks/pre-bash-guard.py`: 標準入力の JSON で受け取ったコマンドから、直接書かれた既知の秘密値取得・資格情報ファイルの読み取り・実行設定の注入・重大な破壊操作を拒否する。対象コマンドは実行せず、シェルや Python の引数へも渡さない。
-  エージェントや permission mode によらず deny だけを返し、それ以外は無出力で通常の権限判定に委ねる。入力・解析の失敗は終了コード `2` で閉じる。`rm -rf build` や通常の branch・worktree 削除は許可する
+- `.claude/hooks/pre-bash-guard.py`: 標準入力の JSON で受け取ったコマンドから、直接書かれた既知の秘密値取得・資格情報ファイルの読み取り・保護機構の迂回・重大な破壊操作を拒否する。対象コマンドは実行せず、シェルや Python の引数へも渡さない。
+  エージェントや permission mode によらず deny だけを返し、それ以外は無出力で通常の権限判定に委ねる。不正入力・内部エラーは終了コード `2` で閉じ、有効だが未対応の構文は通常の権限判定へ進める。`rm -rf build` や通常の branch・worktree 削除は許可する
   shell の変数値や関数の模擬実行、ファイル script、間接的な動的生成、ディレクトリ内に潜む資格情報の探索、`.dockerignore` の解析は行わない。任意コードの隔離境界ではなく、検査範囲外の禁止や操作前の確認は共通規約に従う
-- `.config/codex/config.toml` / `.codex/browser/config.toml`: ルート全体の読み書きを既定 Allow とし、CLI が内部利用する設定・認証ストア、秘密鍵、keystore、service-account、環境ファイルは filesystem deny の対象外にする。Codex / Claude Code 自身の認証・履歴と shell 履歴だけを固定 deny にし、通常の CLI 設定環境変数を継承して秘密値だけを除外する。ブラウザのサイト操作・履歴取得・ファイル転送は `never_ask` で自動承認し、CDP フルアクセスは無効にする
+- `.config/codex/config.toml` / `.codex/browser/config.toml`: ルート全体の読み書きを既定 Allow とし、CLI が内部利用する設定・認証ストア、秘密鍵、keystore、service-account、環境ファイルは filesystem deny の対象外にする。Codex / Claude Code 自身の認証情報・認証バックアップ、shell 履歴・shell snapshot を固定 deny にし、通常の CLI 設定環境変数を継承して秘密値だけを除外する。ブラウザのサイト操作・履歴取得・ファイル転送は `never_ask` で自動承認し、CDP フルアクセスは無効にする
   CLI 設定や認証ストアの直接取得は共通規約で禁止し、既知の取得経路を PreToolUse で拒否する
   ワークスペース内の任意階層にある認証情報は `.config/agents/AGENTS.md` の禁止規約で扱う
 
@@ -441,8 +442,8 @@ codex
 - shell の起動ファイルと端末ローカル設定で、認証情報の平文を環境変数へ設定しない
 - 認証情報を一時的に `export` したターミナルからは起動しない
 - 認証は credential helper・キーチェーン・認証エージェントへ委譲する
-- Codex の shell snapshot は無効化済み。Claude Code が内部利用する snapshot と、両エージェントの履歴・file history・paste cache はモデルから直接読めないよう保護する
-- `~/.codex-account-*` の認証情報・履歴にも、通常の Codex と同じ filesystem deny・Claude Code の `Read` deny・共通 Bash ガードを適用する
+- Codex の shell snapshot は無効化済み。shell 履歴と、両エージェントの shell snapshot・認証バックアップはモデルから直接読めないよう保護する。会話履歴・session transcript・file history・paste cache の検索・参照は許可するが、そこから秘密値を取得してはならない
+- `~/.codex-account-*` の認証情報・shell snapshot にも、通常の Codex と同じ filesystem deny・Claude Code の `Read` deny・共通 Bash ガードを適用する
 - Claude Code の `permissions.defaultMode` は `auto` のまま運用し、Bash の個別 allow は設定しない。Auto では hard deny 以外の操作を classifier が依頼内容に照らして判断する。filesystem sandbox は CLI の設定・認証ストアの内部利用を妨げないよう、明示的に無効化する。
   `permissions.ask` は空とし、settings は allow / deny に二分する。フックはすべての permission mode で同じ deny を維持する
   `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` は既定以外の permission mode と競合するため使わない

@@ -8,20 +8,21 @@
 
 守るのは次の一点です。
 
-> 認証情報の平文を、モデル・会話コンテキスト・tool output・ログ・AI が読めるファイル・環境変数・引数・標準入力へ渡さない。
-> 一方で、credential helper・認証エージェント・署名ブローカーが内部で認証する通常の Git・AWS・コンテナ操作は制限しない。
+> クレデンシャルをモデル・会話コンテキスト・tool output へ直接取り出さず、ファイル・ログ・環境変数・引数・標準入力への書き出しで迂回しない。
+> credential helper・認証エージェント・署名ブローカー・認証済み CLI が内部で認証情報を利用・保管する通常操作は許可する。
 
-そのため、`security` や `aws` のようなコマンド名だけで一律に拒否せず、秘密値を出力するサブコマンドと、そうでないサブコマンドを分けて判断します。
+`security` や `aws` のようなコマンド名や実行機能だけで一律に拒否せず、秘密値の取得と重大な破壊操作を制限します。
+IP アドレス・ユーザー名・ホスト名・MAC アドレスと、過去の会話・セッション履歴は必要に応じて参照できます。履歴から秘密値を取得することは禁止し、履歴内の指示は調査資料として扱います。
 通常操作の自由度を優先し、CLI が内部利用する設定・credential store を OS の path deny では遮断しません。
 秘密値の直接取得は共通規約で禁止し、既知のパス・取得経路を組み込みの `Read` deny と PreToolUse で拒否します。任意スクリプトや Keychain API などの残存経路は、隔離 runner や broker がない限り強制境界にならないことを明示します。
 
 `.claude/settings.json` の `permissions` は allow / deny の 2 区分だけを持ちます（`ask` は空）。
 フックはエージェントや permission mode によらず deny だけを返し、それ以外は無出力で通常の権限判定に委ねます。
-入力・解析の失敗は終了コード `2` で閉じ、操作前の確認は共通規約に従います。
+不正入力・内部エラーは終了コード `2` で閉じ、有効だが未対応の構文は通常の権限判定へ進めます。依頼の範囲内の通常作業は個別確認なしで進め、本番変更・公開・共有データの破壊などは既存の承認がなければ確認します。
 
 | 区分 | 決めるところ | 対象 |
 | --- | --- | --- |
-| deny | settings + フック | 既知の秘密値取得・持ち出し・実行設定の差し替え、ルート・ホームディレクトリの再帰削除、ディスク消去、強制的な Git 操作 |
+| deny | settings + フック | 既知の秘密値取得・持ち出し・保護機構の迂回、ルート・ホームディレクトリの再帰削除、ディスク消去、無条件の force push・変更破棄 |
 | allow | 通常の権限判定 | deny に該当しない通常の開発操作 |
 | classifier（Claude Code Auto） | Claude Code | hard deny 以外の操作をユーザーの依頼と実行内容から判断 |
 
@@ -35,7 +36,7 @@
 3. 直接読み取り遮断: Claude Code の組み込み `Read` deny に認証情報ファイルを登録し、さらにフックが既知の reader や入力オプションによる直接読み取りを拒否する。
    `Read` deny は同じパスへの Edit / Write と、Claude Code が認識できる `cat` / `head` / `tail` / `sed` などの Bash ファイル操作も拒否する。任意スクリプトや CLI 内部からの間接アクセスには適用しない。
    GitHub、AWS、SSH、Kubernetes、コンテナ、クラウド、パッケージ管理などの CLI 設定・credential store と macOS Keychain は通常操作に必要なため、Claude Code の Bash と Codex の filesystem policy から利用可能にする。直接取得は共通規約で禁止し、既知の取得経路を PreToolUse で拒否する。
-   ROSA/OCM、Helm repository / registry、uv credentials store、PostgreSQL の password / service file、pip・curl・wget・Bundler・Composer・Poetry の認証設定、shell 履歴、Codex / Claude Code の会話履歴・session transcript・file history・paste cache・shell snapshot、ユーザーおよびシステムの macOS Keychain、KeePass、service account の既知ファイルも同じ対象にする。
+   ROSA/OCM、Helm repository / registry、uv credentials store、PostgreSQL の password / service file、pip・curl・wget・Bundler・Composer・Poetry の認証設定、shell 履歴、Codex / Claude Code の shell snapshot・認証バックアップ、ユーザーおよびシステムの macOS Keychain、KeePass、service account の既知ファイルも同じ対象にする。
    `.git-credentials`、`.netrc`、`.pgpass`、`.npmrc`、`.pypirc` と既知の token store は、ホーム以下と、セッションの起動・現在ディレクトリ直下にある同名パスを対象にする。ホーム外では Claude Code をプロジェクトルートから起動する。
    AWS・Kubernetes・コンテナ・GitHub・OCM・Helm・uv・PostgreSQL・パッケージ管理などの標準環境変数で保存先を差し替えた場合も、内容読み取りだけを拒否し、`test -e` / `test -f` は許可する
    `rsync --password-file` と `file://` / `fileb://` の指定も通常のパス指定として扱う
@@ -46,8 +47,8 @@
    標準 SSH 秘密鍵名の静的 deny は exact basename に限定し、`.pub` を巻き込まない。フックは `.pub` を判別できるため、`id_ed25519_work` のような接尾辞付き秘密鍵も拒否する
    認証情報パスの一覧を変更するときは、適用範囲に応じて共通規約、Claude Code の `Read` deny、フックを更新する。Codex の filesystem deny には外部 CLI が利用しうる認証材を追加しない
 4. 既定許可: Codex はルート全体の読み書きとネットワークを許可する「保護付きフルアクセス」権限プロファイルを既定とする。
-   Codex / Claude Code 自身の認証・履歴と shell 履歴だけを固定 deny にする。`~/.codex-account-*` の認証情報・履歴にも filesystem deny・Claude Code の `Read` deny・共通 Bash ガードを適用する。`.env`、秘密鍵、keystore、service-account などは Docker Compose、TLS、署名、クラウド CLI が内部利用しうるため path deny に入れず、直接取得だけをフックと規約で拒否する。
-   Codex の filesystem `deny` は読み取りだけでなく書き込み・移動・削除も拒否する。AI エージェント内部データの固定 deny を更新する必要がある場合は、Codex へ承認して実行させるのではなくユーザーが端末で行う。
+   Codex / Claude Code 自身の認証情報・認証バックアップ、shell 履歴・shell snapshot を固定 deny にする。`~/.codex-account-*` の認証情報・shell snapshot にも filesystem deny・Claude Code の `Read` deny・共通 Bash ガードを適用する。会話履歴・session transcript・file history・paste cache は固定 deny にしない。`.env`、秘密鍵、keystore、service-account などは Docker Compose、TLS、署名、クラウド CLI が内部利用しうるため path deny に入れず、直接取得だけをフックと規約で拒否する。
+   Codex の filesystem `deny` は読み取りだけでなく書き込み・移動・削除も拒否する。固定 deny の対象データを更新する必要がある場合は、ユーザーが端末で行う。
    Git / `gh` / `aws` を含む CLI に個別の allow rule は置かず、設定と認証キャッシュの読み書きも同じ権限プロファイルで実行する。秘密値を返す既知の呼び出しと直接読み取りは共通の PreToolUse ガードで拒否する。
    外部 CLI が利用しうる認証情報と秘密鍵は path policy の強制境界ではなく、`AGENTS.md` と PreToolUse で直接読み取らない。
    環境変数は `inherit = "all"` とする。`TOKEN_FILE` などの非秘密パスまで巻き込む既定除外は使わず、`[shell_environment_policy.filters]` で秘密値名だけを除外する。起動元の非秘密な認証・実行設定と認証ファイルの保存先を継承し、CLI の通常利用を妨げない
@@ -62,20 +63,20 @@
 
 - 引用、コマンド区切り、パイプ、明示的なコマンド置換、`sh -c` などの文字列、主要な wrapper の子コマンドを検査する。
   shell の変数値・算術評価・関数呼び出し・taint は模擬実行しない。CLI の未知オプションを複数の解釈へ展開しない
-  `xargs` の入力で実行コードが変わる指定や、検査できない FD からの script / source は解析不能として拒否する
+  入力で実行コードが変わる `xargs` や FD からの script / source など、未対応の構文は通常の権限判定へ委ねる
 - Keychain、GitHub、AWS、クラウド、パッケージ管理などの既知の秘密出力 CLI、環境変数一覧、shell 履歴、秘密値を含みうるプロセス・コンテナ出力を拒否する。
   credential helper が内部で認証する通常操作、秘密を出さない認証状態変更、`sudo` 自体、外部状態の変更だけでは拒否しない
 - 入力パスはイベントの `cwd` を基準に正規化し、既知の資格情報パスと symlink の実体を照合する。
   `.env` で始まる名前は雛形も含めて保護する。雛形には `env.example` のような名前を使う。
   コピー・マウントでは既知の保管先の親も対象にするが、ディレクトリの再帰走査や `.dockerignore` の評価は行わない。通常フォルダの指定ごとに、エージェントが全件探索を代行する運用にも置き換えない
-- 実行設定の明示的な注入と、直接渡したコード内の既知のプロセス起動・再評価 API、資格情報の直接読み取りを拒否する。
-  起動元から継承する通常設定を一律に拒否せず、各言語の実行結果や間接的な動的生成は追跡しない
-- ルート・ホームディレクトリの再帰削除、ディスク消去、force push、hard reset、強制 clean、検証フックの迂回などを拒否する。
-  `rm -rf build`、通常の branch・worktree 削除はフックでは許可する
+- 直接渡したコードや実行設定からも、既知の秘密値取得・資格情報の直接読み取り・保護機構の迂回を検査する。
+  モジュール読み込み、子プロセス起動、非秘密の環境変数・実行設定は、それ自体を理由に拒否しない。各言語の実行結果や間接的な動的生成は追跡しない
+- ルート・ホームディレクトリの再帰削除、ディスク消去、無条件の force push、hard reset、強制 clean、検証フックの迂回などを拒否する。
+  `rm -rf build`、通常の branch・worktree 削除、dry-run、`git push --force-with-lease` は通常の権限判定へ委ねる
 
 **このフックは既知の危険操作を止める補助ガードであり、任意コードの隔離境界ではない。**
 ファイルに保存された script、通常ファイルの `source`、間接的に生成したコマンド・パス、ディレクトリ内に潜む資格情報、独自 API・未知 CLI による取得は検査対象外とする。
-構文や入力の検査が失敗した場合は exit `2` で閉じるが、解析できたコマンド全体の安全性を保証するものではない。
+不正入力・内部エラーは exit `2` で閉じ、有効だが未対応の構文は通常の権限判定へ進める。解析できたコマンド全体の安全性を保証するものではない。
 秘密値へ到達できないことを保証するには、秘密を返さない broker、別ユーザー、コンテナ、VM などの隔離が必要になる。
 
 フックによる既知操作の拒否は [Claude Code の拡張方法](https://code.claude.com/docs/en/permissions#extend-permissions-with-hooks)に沿う。
@@ -102,7 +103,7 @@
   SSO の非秘密設定だけなら全文禁止は保守的な制限だが、ガードはファイル内容で例外判定しない。AWS CLI による内部利用と、`aws configure get region` のような非秘密の項目参照は許可する
 - Codex は認証 CLI 用の command rule を置かず、「保護付きフルアクセス」をすべてのコマンドの既定とする。
   Codex の PreToolUse も共通のフックで deny だけを強制する。
-  外部状態の変更確認は `.config/agents/AGENTS.md` と明示的なユーザー指示に依存し、改ざん耐性のある実行時境界ではない
+  本番変更・公開・共有データの破壊などの確認は `.config/agents/AGENTS.md` と既存のユーザー承認に従い、改ざん耐性のある実行時境界ではない
 - Claude Code の `Read` deny に `~/**/.env.*` を残す。
   Codex は Docker Compose などの内部利用を妨げないよう、ワークスペースの `.env` を filesystem deny に入れない。直接読み取りはフックと `AGENTS.md` で禁止する
 - `Bash(...)` のパターンでは `*` を末尾にだけ置く。
@@ -132,7 +133,7 @@
   `aws-env` を廃止したため一時認証情報はシェルに載らないが、AWS CLI 自体は既定の実行経路から SSO キャッシュを使う。
   CLI を認証済み環境から分離する署名ブローカーはまだ無い。
   `credential_process` が生の認証情報を AI 制御下のプロセスへ返すだけの構成は、最終解としない
-  起動元から継承した非秘密の認証・実行設定の内容はフックで検査せず、利用者が管理する設定として信頼する。エージェントが明示する差し替えと秘密値の直接取得を検査する。`AWS_PAGER=""` は非対話実行のため維持する。`~/.aws/login` や CLI alias を含む AWS 管理下のパスは、通常の CLI 利用を優先して filesystem deny には入れない
+  起動元から継承した非秘密の認証・実行設定の内容はフックで検査せず、利用者が管理する設定として信頼する。エージェントが明示する設定は、秘密値の直接取得や保護機構の迂回を検査する。`AWS_PAGER=""` は非対話実行のため維持する。`~/.aws/login` や CLI alias を含む AWS 管理下のパスは、通常の CLI 利用を優先して filesystem deny には入れない
 - AI 専用の隔離 Docker デーモン、または VM。
   現在の `docker` はホストのソケットへ接続する。フックは既知の資格情報・保管先・socket を直接渡す指定を拒否するが、通常フォルダ内の資格情報や Compose ファイルの中身までは調べない。
   通常フォルダを build context や mount に指定した場合の資格情報の混入は、残存リスクとして受容している
@@ -142,7 +143,7 @@
   `terraform plan` / `apply` などはプロバイダのプラグインバイナリを実行するため、原理的には任意のコードが動く。
   限定した wrapper／ブローカー、または隔離 runner を用意するまでの残存リスクとして受容している
 - インタプリタへ渡したコードの検査。
-  直接記述された既知の危険 API は拒否するが、間接的な呼び出しや動的生成を網羅せず、deny に該当しないコードはフックでは許可する。最終的には OS レベルの隔離が要る
+  直接記述された既知の秘密取得などは拒否するが、間接的な呼び出しや動的生成を網羅せず、deny に該当しないコードはフックでは許可する。最終的には OS レベルの隔離が要る
 - AI エージェントからの GitHub 認証。
   通常の Git helper と `gh` は `gh auth login` の認証を使い、組織固有 URL の Git helper だけは非公開側で ghtkn に切り替える。
   現在は通常 CLI が保管先へ到達できるようにしており、認証だけを仲介する broker / wrapper には分離していない。
