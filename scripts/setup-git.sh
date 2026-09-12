@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-#
-# ============================================================================
-# 全端末で共通にする Git 設定を適用するスクリプト
-# ============================================================================
+# 全端末で共通にする Git 設定を適用する。
 
 set -euo pipefail
 
@@ -53,8 +50,7 @@ if ((10#$git_major < 2 || (10#$git_major == 2 && 10#$git_minor < 37))); then
 fi
 
 # 端末やツール固有の設定を残し、共通化する項目だけを更新する。
-# user.name / user.email は個人情報を公開リポジトリに置かないため、
-# 非公開側 (~/.gitconfig.local) で設定する
+# 個人情報の user.name / user.email は非公開側 (~/.gitconfig.local) で設定する。
 git config --global --replace-all user.useConfigOnly true
 git config --global --replace-all fetch.prune true
 git config --global --replace-all init.defaultBranch 'main'
@@ -65,10 +61,8 @@ git config --global --replace-all transfer.credentialsInUrl 'die'
 git config --global --replace-all pull.ff 'only'
 git config --global --replace-all merge.conflictStyle 'zdiff3'
 
-# identity は非公開側 (~/.gitconfig.local) が正本。
-# 後述の include.path は ~/.gitconfig の末尾に追加されるため、非公開側の値が優先される。
-# ただし旧版が --global に書き込んだ値が残ると、非公開側を取得できない端末で
-# 古い identity が使われるため、正本がある場合に限り重複を削除する
+# identity は ~/.gitconfig.local を正本とし、末尾の include で優先する。
+# 正本がある場合だけ global の重複を削除し、非公開側を取得できない端末で古い identity が使われるのを防ぐ。
 gitconfig_local="$HOME/.gitconfig.local"
 if [[ -f "$gitconfig_local" ]] &&
   git config --file "$gitconfig_local" --get user.email >/dev/null 2>&1; then
@@ -85,12 +79,8 @@ else
     "$gitconfig_local" >&2
 fi
 
-# GitHub の通常の認証は gh の credential helper に委譲する。
-# 組織固有の URL 限定 ghtkn helper は非公開側 (~/.gitconfig.local) で設定する。
-# 認証そのもの (gh auth login) は利用者が明示的に実行する。
-#
-# system 設定 (osxkeychain など) や旧 ghtkn helper が継承されるため、空 helper で
-# 一度リセットしてから gh helper だけを追加する (helper の二重登録を避ける)
+# GitHub は gh helper に委譲し、継承した helper を空設定でリセットして二重登録を防ぐ。
+# 組織固有 URL の ghtkn helper は ~/.gitconfig.local に置き、gh auth login は利用者の依頼または承認に基づいて実行する。
 git config --global --replace-all 'credential.https://github.com.helper' ''
 git config --global --add \
   'credential.https://github.com.helper' '!gh auth git-credential'
@@ -98,40 +88,25 @@ git config --global --replace-all 'credential.https://github.com.useHttpPath' tr
 
 if ! command -v gh >/dev/null 2>&1; then
   printf 'warning: gh is not installed; default GitHub HTTPS authentication will not work\n' >&2
-  printf '         install it, then run `gh auth login` yourself (do not let an agent run it)\n' >&2
+  printf "         install it, then run \`gh auth login\` (agents need a user request or approval)\n" >&2
 fi
 
-# 組織固有の Git 設定 (includeIf や credential helper の上書きなど) の受け皿。
-# 端末固有の他の include を消さないよう、未登録のときだけ追加する。
-# ファイルが存在しない間、include は無視される
+# 組織固有の includeIf や helper 上書き用。ほかの include を残して未登録時だけ追加する。
+# ファイルが存在しない間は Git が無視する。
 if ! git config --global --get-all include.path 2>/dev/null |
-  grep -qxF '~/.gitconfig.local'; then
-  git config --global --add include.path '~/.gitconfig.local'
+  grep -qxF \~/.gitconfig.local; then
+  git config --global --add include.path \~/.gitconfig.local
 fi
 
-# ----------------------------------------------------------------------------
-# グローバルフック (core.hooksPath)
-# ----------------------------------------------------------------------------
-#
-# core.hooksPath を設定すると Git は各リポジトリの .git/hooks を参照しなくなるため、
-# 個別のフックを直接指定すると、リポジトリ固有フックと Git LFS のフックが
-# 動かなくなる。そこで振り分け用のディレクトリを作り、そこを参照させる。
-#
-#   すべてのフック -> git-hooks/dispatch
-#                     (secretlint + denylist 検査 -> リポジトリ固有フック -> Git LFS)
-#
-# dispatch から git-hooks/deny-private-strings を呼べるよう、同じディレクトリへ
-# 配置する (各フックは dirname $0 を基準に参照する)。
+# core.hooksPath で隠れるリポジトリ固有フックと Git LFS は dispatch が実行する。
+# secretlint/denylist 検査 → リポジトリ固有フック → Git LFS の順に呼ぶ。
+# dispatch は dirname $0 を基準に参照するため、deny-private-strings を同じディレクトリへ配置する。
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 hooks_dir="$HOME/.local/share/dotfiles/git-hooks"
 
-# 対象を指すシンボリックリンクを作成する (既存の異なるリンクや実体は置き換える)。
-#
-# リンク先が存在しない場合に ln はリンクを作れてしまい、Git は壊れたリンクの
-# フックを「無い」ものとして警告なしに飛ばす。それを検出できずに
-# core.hooksPath を切り替えると、全リポジトリのフックが無言で止まるため、
-# ここで実体を確認して失敗させる (呼び出し側は set -e で中断する)
+# フックをリンクし、異なる既存リンクや実体は置き換える。
+# Git は壊れたリンクを無警告で無視するため、参照先の実行権を検証して core.hooksPath 変更前に失敗させる。
 link_hook() {
   local source="$1"
   local target="$hooks_dir/$2"
@@ -157,8 +132,7 @@ if mkdir -p "$hooks_dir"; then
     link_hook "$repo_dir/git-hooks/dispatch" "$hook"
   done
 
-  # 使わなくなった中継フックへのリンクを片付ける。
-  # 参照先が消えると、Git は壊れたリンクのフックを警告なしに飛ばす
+  # 不要になった中継フックのリンクを除去する
   obsolete_hook="$hooks_dir/_local-hook-exec"
   if [[ -L "$obsolete_hook" ]]; then
     rm -- "$obsolete_hook"

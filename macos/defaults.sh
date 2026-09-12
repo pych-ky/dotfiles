@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
-#
-# ============================================================================
-# macOS システム設定のうちデフォルトから変更している項目を適用するスクリプト
-# ============================================================================
-#
-# 現行環境でデフォルト値から意図的に変更していた項目のみを対象とする。
+# macOS 設定のうち、デフォルトから意図的に変更した項目を適用する。
 # 冪等なので何度実行してもよい。一部の項目は再ログイン後に反映される。
 
 set -euo pipefail
@@ -67,10 +62,8 @@ restore_rectangle_on_exit() {
   exit "$status"
 }
 
-# デスクトップのアイコンの並べ方を設定
-# (DesktopViewSettings は入れ子の辞書で、defaults write では同じ辞書にある
-#  アイコンサイズなどの表示設定ごと置き換わるため、現在の設定を書き出して
-#  該当キーだけ差し替えてから読み込む)
+# デスクトップの並べ方だけを変更し、アイコンサイズなどの表示設定を保持する。
+# defaults write は辞書全体を置き換えるため、既存の plist を編集して読み込む。
 set_desktop_arrangement() {
   local value="$1"
   local keypath
@@ -95,9 +88,7 @@ set_desktop_arrangement() {
   printf '%s' "$plist" | defaults import com.apple.finder -
 }
 
-# ============================================================================
 # キーボード
-# ============================================================================
 
 # キーのリピート速度を最速に、リピート入力認識までの時間を最短に
 defaults write NSGlobalDomain KeyRepeat -int 2
@@ -116,9 +107,7 @@ defaults write NSGlobalDomain NSAutomaticPeriodSubstitutionEnabled -bool false
 # インライン予測テキストを無効化
 defaults write NSGlobalDomain NSAutomaticInlinePredictionEnabled -bool false
 
-# ============================================================================
 # 日本語入力 (再ログイン後に反映)
-# ============================================================================
 
 # ライブ変換を無効化
 defaults write com.apple.inputmethod.Kotoeri JIMPrefLiveConversionKey -bool false
@@ -132,9 +121,7 @@ defaults write com.apple.inputmethod.Kotoeri JIMPrefAutocorrectionKey -bool fals
 # 句読点で変換を無効化
 defaults write com.apple.inputmethod.Kotoeri JIMPrefConvertWithPunctuationKey -bool false
 
-# ============================================================================
 # マウス / トラックパッド
-# ============================================================================
 
 # ナチュラルスクロールを無効化
 defaults write NSGlobalDomain com.apple.swipescrolldirection -bool false
@@ -142,16 +129,12 @@ defaults write NSGlobalDomain com.apple.swipescrolldirection -bool false
 # マウスの軌跡の速さ (好みに応じて調整)
 defaults write NSGlobalDomain com.apple.mouse.scaling -float 3
 
-# ============================================================================
 # 外観 (再ログイン後に完全反映)
-# ============================================================================
 
 # ダークモード
 defaults write NSGlobalDomain AppleInterfaceStyle -string Dark
 
-# ============================================================================
 # Dock / Mission Control
-# ============================================================================
 
 # Dock に提案および最近使用したアプリを表示しない
 defaults write com.apple.dock show-recents -bool false
@@ -162,9 +145,7 @@ defaults write com.apple.dock tilesize -int 72
 # 最新の使用状況に基づいて操作スペースを自動的に並べ替えない
 defaults write com.apple.dock mru-spaces -bool false
 
-# ============================================================================
 # Finder
-# ============================================================================
 
 # 隠しファイルを表示
 defaults write com.apple.finder AppleShowAllFiles -bool true
@@ -181,39 +162,30 @@ defaults write com.apple.finder FXPreferredViewStyle -string Nlsv
 # デスクトップのアイコンをグリッドに沿って並べる
 set_desktop_arrangement grid
 
-# ============================================================================
 # メニューバー / コントロールセンター
-# ============================================================================
 
 # 音量アイコンをメニューバーに常時表示
 defaults write com.apple.controlcenter "NSStatusItem Visible Sound" -bool true
 
-# ============================================================================
 # Rectangle (ウィンドウ管理)
-# ============================================================================
 
-# 稼働中に設定を書き換えると終了時に旧値で上書きされうるため、import 前に終了
+# 終了時の旧設定書き戻しと import の競合を避けるため、停止して終了を待つ
 if pgrep -xq Rectangle; then
   rectangle_restart_pending=1
   trap 'restore_rectangle_on_exit "$?"' EXIT
   killall Rectangle 2>/dev/null || true
-  # 終了時の設定書き戻しと import が競合しないよう終了を待つ
   wait_for_rectangle_exit
 fi
 
 # エクスポート済みの設定 (ショートカット・スナップ挙動) を取り込み
 defaults import com.knollsoft.Rectangle "$script_dir/rectangle.plist"
 
-# ============================================================================
 # 電源管理 (認証済み sudo が必要。未認証時はプロンプトを出さず警告して続行)
-# ============================================================================
 
 # 電源アダプタ接続時は自動スリープさせない
 sudo -n pmset -c sleep 0 2>/dev/null || printf 'warning: skipped pmset sleep setting\n' >&2
 
-# ============================================================================
 # 反映
-# ============================================================================
 
 # 設定を反映するため関連プロセスを再起動
 killall Dock 2>/dev/null || true

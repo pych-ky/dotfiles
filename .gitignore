@@ -6,10 +6,7 @@
 .config/codex/tmp/
 
 ## Claude Code
-# このリポジトリは Claude Code の作業ディレクトリにもなるため、
-# 端末固有の権限 (settings.local.json) やプロンプト履歴 (history.jsonl) などが
-# .claude/ 配下に生成される。公開リポジトリなので、
-# 個別に除外するのではなく「追跡するものだけを許可する」方式にする
+# 作業中に生成される端末固有の権限やプロンプト履歴を公開しないよう、追跡対象だけを許可する
 .claude/*
 !.claude/CLAUDE.md
 !.claude/settings.json

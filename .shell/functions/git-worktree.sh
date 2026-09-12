@@ -1,6 +1,4 @@
-# ============================================================================
 # Bash / Zsh 共通の fzf worktree 作成関数
-# ============================================================================
 
 # HEAD / main / master を除外し、ローカル / origin の全ブランチを重複排除して列挙
 _wto_branches() {
@@ -24,7 +22,7 @@ _wto_hash6() {
   fi | awk '{print substr($1, 1, 6)}'
 }
 
-# 指定 path / branch の worktree が登録済みかを確認し、一致時は終了コード 0 を返却
+# 指定 path / branch の worktree が登録済みかを確認
 _wto_path_has_branch() {
   # zsh では path が PATH と連動する特殊変数のため、local 変数にその名前を使わない
   local repository_root="$1"
@@ -46,7 +44,6 @@ _wto_path_has_branch() {
 
 # fzf で複数ブランチを選択し、まとめて .worktrees/<leaf> に worktree を作成
 wto() {
-  # git リポジトリ内かつ fzf が必須
   local repository_root
   repository_root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
   repository_root="$(cd "$repository_root" && pwd -P)" || return 1
@@ -73,7 +70,6 @@ wto() {
   while IFS= read -r branch; do
     [ -n "$branch" ] || continue
 
-    # ブランチ名の最後のスラッシュ以降をディレクトリ名に使用
     leaf="${branch##*/}"
     dir="$worktrees_root/$leaf"
 
@@ -110,6 +106,5 @@ wto() {
     printf '  %s\n' "${created_paths[@]}"
   fi
 
-  # 一部でも失敗したら非 0 を返す
   ((failed_count == 0))
 }

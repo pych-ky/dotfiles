@@ -9,6 +9,19 @@ setup_run_noninteractive_git() {
     git "$@"
 }
 
+# private repository のアクセス失敗を strict 指定に応じてエラーまたはスキップにする
+setup_handle_access_failure() {
+  local strict="$1"
+  local label="$2"
+
+  if [[ "$strict" == 1 ]]; then
+    printf 'error: private %s repository is not accessible\n' "$label" >&2
+    return 1
+  fi
+
+  printf 'warning: private %s repository is not accessible; skipping\n' "$label" >&2
+}
+
 setup_verify_repository() {
   local repository_dir="$1"
   local expected_url="$2"

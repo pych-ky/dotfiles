@@ -26,16 +26,6 @@ error() {
   return 1
 }
 
-# private repository への認証が未設定の端末では Agent Skills だけをスキップする
-handle_access_failure() {
-  if [[ "$1" == 1 ]]; then
-    error 'private Agent Skills repository is not accessible'
-    return 1
-  fi
-
-  printf 'warning: private Agent Skills repository is not accessible; skipping\n' >&2
-}
-
 # 一時 clone と自プロセスが所有する公開ロックを終了時に清掃
 cleanup() {
   [[ -z "$temporary_clone_dir" ]] || rm -rf "$temporary_clone_dir"
@@ -44,13 +34,10 @@ cleanup() {
 
 # 保存先の repository root と origin、setup.sh の実行権を確認
 verify_repository() {
-  local repository_dir="$1"
-  local expected_url="$2"
   local repository_error
 
   if ! repository_error="$(setup_verify_repository \
-    "$repository_dir" \
-    "$expected_url" \
+    "$1" "$2" \
     'Agent Skills' \
     'AGENT_SKILLS_REPO_DIR' \
     'AGENT_SKILLS_REPO_URL' \
@@ -126,7 +113,7 @@ main() {
   if [[ ! -e "$repository_dir" && ! -L "$repository_dir" ]]; then
     clone_required=1
     if ! setup_run_noninteractive_git ls-remote -- "$repository_url" HEAD >/dev/null 2>&1; then
-      if handle_access_failure "$strict"; then
+      if setup_handle_access_failure "$strict" 'Agent Skills'; then
         return 0
       fi
       return 1

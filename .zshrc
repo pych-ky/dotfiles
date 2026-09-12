@@ -34,7 +34,6 @@ for f in "$HOME"/.zsh/plugins/*/*.plugin.zsh(N); do
 done
 unset f
 
-# Git worktree 共通関数の読み込み
 [[ -r "$HOME/.shell/functions/git-worktree.sh" ]] && . "$HOME/.shell/functions/git-worktree.sh"
 
 # 端末ローカル設定の読み込み (組織固有の設定やツールの自動追記の受け皿、git 管理外)

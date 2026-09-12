@@ -1,24 +1,17 @@
 #!/usr/bin/env bash
-#
-# ============================================================================
-# dotfiles を $HOME 配下にシンボリックリンク展開するスクリプト
-# ============================================================================
+# dotfiles を $HOME 配下へリンク・コピーし、既存の実体は退避する。
 
 set -euo pipefail
 
-# ============================================================================
-# グローバル設定
-# ============================================================================
-
-repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" # このスクリプトを置いているリポジトリのルート
-home_dir="${HOME:-}"                                        # 検証対象の HOME
-backup_root=                                                # HOME 検証後に初期化するバックアップルート
-backup_dir=                                                 # 最初の退避時に一意に確保する今回分のバックアップ先
-dry_run=0                                                   # 1 のとき実コマンドを実行せず内容のみ表示
-backup_created=0                                            # 退避が 1 件以上発生したかを示すフラグ
-backup_keep=5                                               # 保持するバックアップ世代数
-backup_diffs=()                                             # リポジトリ版と内容が異なるまま退避したファイルの一覧
-managed_targets=()                                          # ツールが自動追記した痕跡がある退避先の一覧
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+home_dir="${HOME:-}"
+backup_root= # HOME 検証後に初期化
+backup_dir=  # 最初の退避時に今回分の世代を確保
+dry_run=0
+backup_created=0
+backup_keep=5
+backup_diffs=()    # リポジトリ版と異なる退避元
+managed_targets=() # ツールの自動追記がある退避元
 # Rancher Desktop などが rc ファイルへ自動追記するときの目印
 MANAGED_BLOCK_MARKER='MANAGED BY RANCHER DESKTOP'
 
@@ -34,7 +27,6 @@ source lib/process-lock.sh
 cd "$source_working_dir" || exit 1
 unset source_working_dir
 
-# 使い方を標準出力に表示
 usage() {
   cat <<'EOF'
 Usage: ./scripts/link-dotfiles.sh [--dry-run] [-h | --help]
@@ -71,10 +63,6 @@ validate_environment() {
   fi
 }
 
-# ============================================================================
-# ユーティリティ
-# ============================================================================
-
 # dry-run 時はコマンドの表示のみ行う実行ラッパ
 run() {
   if ((dry_run)); then
@@ -87,11 +75,6 @@ run() {
   fi
 }
 
-# ============================================================================
-# リンク・バックアップ用ユーティリティ
-# ============================================================================
-
-# シンボリックリンク作成結果のサマリを出力 (dry-run 時は "would link" に切り替え)
 report_link() {
   local verb='linked'
   ((dry_run)) && verb='would link'
@@ -261,10 +244,6 @@ remove_obsolete_symlink() {
   run rm "$target"
 }
 
-# ============================================================================
-# リンク作成
-# ============================================================================
-
 # repo_dir の relative を $HOME 配下にシンボリックリンクとして作成し、既存の実体は退避
 link_file() {
   local source_relative="$1"
@@ -272,7 +251,7 @@ link_file() {
   local source="$repo_dir/$source_relative"
   local target="$HOME/$target_relative"
 
-  # -L も見るのは壊れたシンボリックリンクを source として扱うため (-e は壊れたリンクで false)
+  # -e では検出できない壊れたシンボリックリンクも source として扱う
   if [[ ! -e "$source" && ! -L "$source" ]]; then
     printf 'missing source: %s\n' "$source" >&2
     return 1
@@ -288,7 +267,6 @@ link_file() {
   if [[ -L "$target" ]]; then
     run rm "$target" || return
   elif [[ -e "$target" ]]; then
-    # 実体 (ファイルまたはディレクトリ) はバックアップへ退避
     local backup
     ensure_backup_dir || return
     backup="$(backup_path "$target")"
@@ -299,12 +277,8 @@ link_file() {
       return 1
     fi
     backup_created=1
-    # 端末ローカルの変更が黙って消えないよう、内容差分のある退避を記録。
-    # -r でディレクトリ (.config/karabiner など) も再帰的に比較する。
-    #
-    # dry-run では退避を実行していないので、まだ元の場所にある target と比較する。
-    # ここを飛ばすと --dry-run による事前確認で上書き消失が一切見えず、
-    # 事前確認の意味がなくなる
+    # ローカル変更の見落としを防ぐため、ディレクトリも再帰比較して差異を記録する。
+    # dry-run では退避前の target と比較する。
     local compare_target="$backup"
     ((dry_run)) && compare_target="$target"
     if [[ -e "$compare_target" && -e "$source" ]] &&
@@ -312,8 +286,7 @@ link_file() {
       backup_diffs+=("$target (backup: $backup)")
     fi
 
-    # ツールが rc ファイルへ自動追記する設定のままリンクすると、
-    # 追記先がリポジトリの追跡ファイルになり、リポジトリが書き換えられる
+    # ツールの自動追記がリンク後にリポジトリを書き換えないよう警告する
     if [[ -f "$compare_target" ]] &&
       grep -qF "$MANAGED_BLOCK_MARKER" "$compare_target" 2>/dev/null; then
       managed_targets+=("$target")
@@ -324,10 +297,6 @@ link_file() {
   run ln -sh "$source" "$target" || return
   report_link "$target" "$source"
 }
-
-# ============================================================================
-# Codex
-# ============================================================================
 
 # config.toml より優先される /etc/codex/managed_config.toml の残存を警告
 warn_legacy_codex_managed_config() {
@@ -369,13 +338,7 @@ link_codex_system_config() {
   report_link "$target" "$source"
 }
 
-# ============================================================================
-# エントリポイント
-# ============================================================================
-
-# CLI 引数を解釈し、リンク作成・Codex 関連処理・バックアップ整理を実行
 main() {
-  # CLI 引数を解釈
   while (($#)); do
     case "$1" in
     --dry-run)
@@ -405,7 +368,7 @@ main() {
     trap 'process_lock_release' EXIT
   fi
 
-  # 管理対象ファイル一覧、リポジトリ相対パスと $HOME 相対パスは同一 (順序は挙動に影響なし)
+  # リポジトリと $HOME で同じ相対パスに配置する管理対象
   local files=(
     # shell
     ".bash_profile"
@@ -419,7 +382,7 @@ main() {
     ".config/starship.toml"
     ".config/git/ignore"
     ".config/gh/config.yml"
-    # keyboard (karabiner.json 単体の symlink では Karabiner が設定変更を検知できないためディレクトリごとリンク)
+    # Karabiner が変更を検知できるよう、ファイル単体ではなくディレクトリごとリンク
     ".config/karabiner"
     # 開発ツールのバージョン管理
     ".config/mise/config.toml"
@@ -433,27 +396,21 @@ main() {
     ".aws/load-active-profile.sh"
   )
 
-  # 各ファイルを $HOME 配下にリンクし、失敗したものを記録
   local file
   local -a failed_items
   failed_items=()
 
-  # 管理対象外の Zsh 専用リンクを、自リポジトリ由来の場合だけ除去
-  if ! remove_obsolete_symlink ".zsh/functions/git-worktree.zsh"; then
-    failed_items+=(".zsh/functions/git-worktree.zsh (obsolete symlink)")
-  fi
+  # 廃止したリンクは、自リポジトリ由来の場合だけ除去
+  for file in \
+    .zsh/functions/git-worktree.zsh \
+    .claude/hooks/inject-guidelines-context.sh \
+    .claude/keybindings.json; do
+    if ! remove_obsolete_symlink "$file"; then
+      failed_items+=("$file (obsolete symlink)")
+    fi
+  done
 
-  # 廃止した注入フックのリンクを、自リポジトリ由来の場合だけ除去
-  if ! remove_obsolete_symlink ".claude/hooks/inject-guidelines-context.sh"; then
-    failed_items+=(".claude/hooks/inject-guidelines-context.sh (obsolete symlink)")
-  fi
-
-  # 廃止した Claude Code のキー設定リンクを、自リポジトリ由来の場合だけ除去
-  if ! remove_obsolete_symlink ".claude/keybindings.json"; then
-    failed_items+=(".claude/keybindings.json (obsolete symlink)")
-  fi
-
-  # 旧構成で作成した認証 CLI 用 rule のリンクだけを除去する。
+  # 廃止した認証 CLI 用 rule は旧配置先のリンクだけを除去する
   if ! remove_obsolete_symlink ".config/codex/rules/authenticated-cli.rules" ".codex/rules/authenticated-cli.rules"; then
     failed_items+=(".codex/rules/authenticated-cli.rules (obsolete symlink)")
   fi
@@ -475,22 +432,18 @@ main() {
     failed_items+=(".codex/AGENTS.md")
   fi
 
-  # Codex ベース設定 (/etc/codex/config.toml) を sudo でリンク
   warn_legacy_codex_managed_config
   if ! link_codex_system_config; then
     failed_items+=("/etc/codex/config.toml")
   fi
 
-  # バックアップディレクトリの後処理 (dry-run 表示 / 完了報告 / 世代整理)
   if ((dry_run)); then
-    # 実行時に発生する世代整理もそのまま表示
     if ((backup_created)); then
       prune_backups
     fi
     printf 'dry run complete\n'
   elif [[ -n "$backup_dir" && -d "$backup_dir" ]]; then
     printf 'backups: %s\n' "$backup_dir"
-    # 実バックアップが発生した場合のみ世代整理
     if ((backup_created)); then
       prune_backups
       printf 'kept latest %d backup generations\n' "$backup_keep"
@@ -513,7 +466,6 @@ main() {
     printf '         switch the tool to manual PATH management before relinking\n' >&2
   fi
 
-  # 失敗があれば一覧を stderr に出して非ゼロ終了
   if ((${#failed_items[@]} > 0)); then
     printf 'failed items:\n' >&2
     printf '  %s\n' "${failed_items[@]}" >&2

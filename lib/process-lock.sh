@@ -141,9 +141,7 @@ process_lock_acquire_recovery() {
     PROCESS_LOCK_RECOVERY_OWNERLESS_ATTEMPTS=0
   fi
   if [[ ! "$owner_pid" =~ ^[0-9]+$ ]]; then
-    PROCESS_LOCK_RECOVERY_OWNERLESS_ATTEMPTS=$((
-      PROCESS_LOCK_RECOVERY_OWNERLESS_ATTEMPTS + 1
-    ))
+    PROCESS_LOCK_RECOVERY_OWNERLESS_ATTEMPTS=$((PROCESS_LOCK_RECOVERY_OWNERLESS_ATTEMPTS + 1))
     ((PROCESS_LOCK_RECOVERY_OWNERLESS_ATTEMPTS >= 10)) || return 1
   fi
 
@@ -229,11 +227,6 @@ process_lock_wait_for_legacy() {
   local max_attempts=$((timeout_seconds * 10))
   local ownerless_attempts=0
   local describe_status
-  local expected_kind
-  local expected_identity
-  local expected_state_dir
-  local expected_owner_pid
-  local expected_owner_start
 
   while true; do
     describe_status=0
@@ -248,26 +241,17 @@ process_lock_wait_for_legacy() {
       ;;
     esac
 
-    expected_kind="$PROCESS_LOCK_LEGACY_KIND"
-    expected_identity="$PROCESS_LOCK_LEGACY_ENTRY_IDENTITY"
-    expected_state_dir="$PROCESS_LOCK_LEGACY_STATE_DIR"
-    expected_owner_pid="$PROCESS_LOCK_OWNER_PID"
-    expected_owner_start="$PROCESS_LOCK_OWNER_START"
-
-    if process_lock_owner_is_live "$expected_owner_pid" "$expected_owner_start"; then
+    if process_lock_owner_is_live "$PROCESS_LOCK_OWNER_PID" "$PROCESS_LOCK_OWNER_START"; then
       ownerless_attempts=0
-    elif [[ "$expected_owner_pid" =~ ^[0-9]+$ ]]; then
-      process_lock_recover_legacy \
-        "$lock_path" "$generation_pattern" "$expected_kind" \
-        "$expected_identity" "$expected_state_dir" \
-        "$expected_owner_pid" "$expected_owner_start" && continue
     else
-      ownerless_attempts=$((ownerless_attempts + 1))
-      if ((ownerless_attempts >= 10)); then
+      if [[ ! "$PROCESS_LOCK_OWNER_PID" =~ ^[0-9]+$ ]]; then
+        ownerless_attempts=$((ownerless_attempts + 1))
+      fi
+      if [[ "$PROCESS_LOCK_OWNER_PID" =~ ^[0-9]+$ ]] || ((ownerless_attempts >= 10)); then
         process_lock_recover_legacy \
-          "$lock_path" "$generation_pattern" "$expected_kind" \
-          "$expected_identity" "$expected_state_dir" \
-          "$expected_owner_pid" "$expected_owner_start" && continue
+          "$lock_path" "$generation_pattern" "$PROCESS_LOCK_LEGACY_KIND" \
+          "$PROCESS_LOCK_LEGACY_ENTRY_IDENTITY" "$PROCESS_LOCK_LEGACY_STATE_DIR" \
+          "$PROCESS_LOCK_OWNER_PID" "$PROCESS_LOCK_OWNER_START" && continue
       fi
     fi
 

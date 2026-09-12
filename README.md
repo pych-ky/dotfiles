@@ -1,56 +1,91 @@
 # dotfiles
 
 個人用の macOS 環境を構築する dotfiles です。
-`bootstrap.sh` で、OS 設定、シンボリックリンク、Homebrew、CLI、Git、非公開の Codex Custom Pets と Agent Skills をまとめてセットアップします。
+OS 設定、シェル、Homebrew、開発用 CLI、Git、AI エージェントをセットアップします。
+アクセス可能な非公開設定・Agent Skills・Codex Custom Pets も取得して適用します。
 
 ## 一括セットアップ
 
-### 前提条件
-
-- macOS
-- 対話可能なローカル端末
-- `sudo` を実行できるユーザー
-- このリポジトリへのアクセス
-
-`bootstrap.sh` と、そこから呼び出す `macos/defaults.sh`、`scripts/link-dotfiles.sh`、`scripts/setup-git.sh` に `sudo` を付けないでください。
-
-### 実行
+macOS、対話可能なローカル端末、`sudo` を実行できるユーザー、このリポジトリへのアクセスが必要です。
+以下のセットアップスクリプト自体には `sudo` を付けないでください。
 
 ```sh
 git clone <このリポジトリ> && cd dotfiles
 ./bootstrap.sh
 ```
 
-### 処理内容
+Homebrew（未導入時は Xcode Command Line Tools も含む）、不足するアプリと開発ツールを導入し、設定を適用します。
+途中で失敗した場合は、最後に表示される失敗内容を解消して再実行できます。
+`skipped steps` は未実行の処理です。終了状態が 0 でも確認し、必要な認証や前提を揃えて再実行してください。
+終了後は「[手動セットアップ](#手動セットアップ)」を行ってください。
 
-1. `sudo` 認証を行う
-2. `macos/defaults.sh` で macOS 設定を適用する
-3. Homebrew を導入する。
-   未導入時は Xcode Command Line Tools も導入する
-4. 不足する CLI・GUI アプリをインストールする
-5. `scripts/link-dotfiles.sh` で設定ファイルを展開し、Typeless 設定とログイン項目を適用する
-6. `mise install` でグローバル開発ツール（node、go、terraform など）を導入する
-7. `scripts/setup-git.sh` で Git 共通設定を適用する
-8. `zsh-autosuggestions` と `fast-syntax-highlighting` を取得する
-9. 未導入の Claude Code CLI と Codex CLI を導入し、公式 Claude Code プラグインを設定に合わせて整理する
-10. アクセス可能な非公開 Codex Custom Pets を取得し、収録されている全ペットをインストールする
-11. アクセス可能な非公開 Agent Skills を取得し、リポジトリ直下の `setup.sh` で symlink を配置する
-12. アクセス可能な非公開 dotfiles-private（組織固有・個人設定）を取得し、適用する
+設定の多くはこのリポジトリへのシンボリックリンクです。リンク後の編集は実環境にも反映されます。
+認証情報、組織固有の設定、個人情報はここへ置かず、「[非公開設定](#非公開設定dotfiles-private)」に従ってください。
 
-終了後は「手動セットアップ」も行ってください。
+## 手動セットアップ
 
-### 失敗と再実行
+### システムとアプリ
 
-各処理は原則として冪等なため、途中で失敗しても再実行できます。
+- システム設定 > プライバシーとセキュリティで、必要なアプリだけにフルディスクアクセス・アクセシビリティ・入力監視を許可する。
+  ログイン項目の登録には、オートメーションで System Events を許可する。
+- システム設定 > 一般 > ログイン項目と拡張機能で、次を確認する。
+  - 「ログイン時に開く」: Maccy、Rectangle、Typeless があり、Logi Options+ がない。
+  - 「アプリのバックグラウンドでのアクティビティ」: Karabiner、Logi Options+、Logitech Inc をオンにする。
+  - 拡張機能 > Driver Extensions: Karabiner DriverKit VirtualHIDDevice をオンにする。
+- Rancher Desktop: Preferences > Application > Environment > Configure PATH を Manual にする。自動設定のままではリンク先のリポジトリへ追記される。
+- [Maccy](https://github.com/p0deje/Maccy#usage): `Cmd+Shift+C` で履歴を開く。自動貼り付けには「Paste automatically」とアクセシビリティの許可が必要。
+- Typeless: サインインして必要な権限を許可する。
+- VS Code: Settings Sync にサインインし、コマンドパレットの「Shell Command: Install 'code' command in PATH」を実行する。
+- 1Password、Slack、Notion などのアカウントにサインインする。
+- Claude Code の Linear / Microsoft Docs と Codex CLI の Linear は `bootstrap.sh` で導入する。Linear の OAuth 認証は端末ごとに完了する。
+- ChatGPT の Linear プラグインはアカウント単位で Install / Connect し、初回 OAuth 認証を手動で完了する。
 
-- 実行環境の検証または最初の `sudo` 認証に失敗すると、その場で終了する
-- 独立した処理は失敗を記録して続行し、最後に一覧を表示して非ゼロで終了する
-- 前提が揃わず**実行しなかった**処理（mise 未導入、非公開リポジトリへアクセス不可など）は
-  「skipped steps」として一覧に出す。失敗ではないので終了状態は 0 だが、
-  1 件でもあれば「完了」とは表示しない（未実行を見落とさないため）
-- `sudo` のタイムスタンプはバックグラウンドで延長せず、終了時に無効化する
-- 各特権処理は有効なタイムスタンプを再利用し、失効時や Homebrew cask の要求時は再認証する
-- Homebrew、Claude Code、Codex のリモートインストーラは、取得後に実行する
+### GitHub の認証
+
+通常の Git / `gh` は HTTPS と `gh` の保存済み認証を使います。
+AI エージェントからのログインは、利用者の依頼または承認に基づいて行います。
+
+```sh
+gh auth login --hostname github.com --git-protocol https
+```
+
+コードをコピーした後は URL を手動で開かず Enter を押すと、認証画面の重複起動を避けられます。
+組織固有の URL に限って [ghtkn](https://github.com/suzuki-shunsuke/ghtkn) の helper を使う端末は、非公開側の設定に従って追加で認証してください。ghtkn は mise で導入します。
+
+```sh
+ghtkn init   # 対象の GitHub App の Client ID を設定する
+ghtkn auth   # デバイスフローで認証する
+```
+
+`ghtkn auth` も URL の手動クリック・Enter・自動起動を重ねないでください。
+認証は CLI や credential helper に任せ、AI エージェントへトークンを直接取り出させないでください。
+
+## 非公開設定（dotfiles-private）
+
+**このリポジトリは公開です。** 組織固有の設定と公開したくない個人情報は非公開の `dotfiles-private` で管理します。
+`bootstrap.sh` はアクセス可能な場合だけ取得し、その `setup.sh` を実行します。不要なら `DOTFILES_PRIVATE_SKIP=1` を指定してください。
+
+- Git の `user.name` / `user.email`、組織固有の `includeIf`・認証 helper は `~/.gitconfig.local` に置く。
+- シェルの個別設定は `~/.zshrc.local` / `~/.bashrc.local` に置く。
+- 公開リポジトリへの混入を防ぐパターンは `~/.config/dotfiles/denylist.txt`、組織の remote URL の識別条件は `~/.config/dotfiles/work-remotes.txt` に非公開側から配置する。
+- 認証情報そのものは非公開リポジトリにも置かず、1Password などで別途移行する。GitHub 認証は端末ごとに取り直す。
+
+`~/.kube`、`~/.docker` などの機密・端末固有ディレクトリや、AI エージェントのアカウント固有接続はこのリポジトリで管理しません。
+
+## AI エージェントの起動と注意事項
+
+認証情報の平文を環境変数へ設定していない、新しいターミナルセッションから起動してください。
+認証は credential helper・キーチェーン・認証エージェントへ委譲します。
+
+```sh
+claude
+codex
+```
+
+クレデンシャルをモデル・会話・tool output へ直接取り出すことは禁止です。認証済み CLI が内部で認証情報を利用・保管する通常操作は許可します。
+設定とフックは既知の秘密取得・重大な破壊・保護機構の迂回を拒否しますが、任意コードを隔離する境界ではありません。
+ブラウザのサイト操作・履歴取得・ファイル転送は自動承認されます。
+運用上の制約と残存リスクは [SECURITY.md](SECURITY.md) を参照してください。
 
 ## 個別セットアップ
 
@@ -61,22 +96,12 @@ git clone <このリポジトリ> && cd dotfiles
 ./scripts/link-dotfiles.sh             # リンク作成
 ```
 
-- 既存の通常ファイルとディレクトリは `~/.dotfiles-backup/<timestamp>[-<sequence>]/` に退避する
-- 退避したファイルがリポジトリ版と内容が異なる場合は、実行末尾に警告を表示する。
-  端末ローカルの変更はリポジトリか `~/.zshrc.local` などへ統合してから再リンクする
-- 同じ秒の再実行は連番で別世代にし、スクリプトが生成した最新 5 世代だけを保持する
-- 同じ `HOME` への並行実行は排他ロックで直列化する
-- 既存のシンボリックリンクはリンク先が異なる場合のみ張り替える
-- `~/.claude/settings.json` は通常ファイルとして配置し、再適用時は公開設定を優先して更新する。
-  個人の `enabledPlugins` と `extraKnownMarketplaces` は公開側に同じ ID の定義がない限り保持する。
-  既存設定のマージには `jq` が必要
-- `~/.codex/browser/config.toml` は Codex がシンボリックリンクを拒否するため、通常ファイルとしてコピーする
-- Karabiner が変更を検知できるよう、`.config/karabiner` はディレクトリごとリンクする
-- 共通エージェントルールは `.config/agents/AGENTS.md` を正本とし、`~/.config/agents/AGENTS.md` と `~/.codex/AGENTS.md` から参照する
-- Codex の基本設定を `sudo` で `/etc/codex/config.toml` にリンクし、端末固有の `~/.codex/config.toml` で上書き可能にする
-- Codex の hooks / permissions は起動時に読み込まれるため、リンク後は Codex を終了して新しいセッションを開始する
-- 端末固有設定の旧 `sandbox_mode` / `[sandbox_workspace_write]` は削除する。`sandbox_mode` が残ると `default_permissions` が使われない（[公式仕様](https://learn.chatgpt.com/docs/permissions)）
-- 管理対象の正確な一覧は `scripts/link-dotfiles.sh` を参照する
+- 既存の通常ファイルとディレクトリは `~/.dotfiles-backup/<timestamp>[-<sequence>]/` に退避し、このスクリプトが作成した最新 5 世代を保持します。
+  内容の差異を警告された場合は、端末ローカルの変更をリポジトリか `~/.zshrc.local` などへ統合してから再リンクしてください。
+- `~/.claude/settings.json` はコピーし、再適用では公開設定を優先します。公開側に同じ ID がない個人のプラグイン・marketplace 登録は保持します。既存設定のマージには `jq` が必要です。
+- `~/.codex/browser/config.toml` はコピーします。Codex の基本設定は `/etc/codex/config.toml` にリンクし、端末固有の `~/.codex/config.toml` で上書きできます。
+- 端末固有設定の旧 `sandbox_mode` / `[sandbox_workspace_write]` は削除してください。`sandbox_mode` が残ると公開側の `default_permissions` が使われません。
+- リンク後は Codex を終了し、新しいセッションを開始してください。
 
 ### Git 共通設定
 
@@ -86,247 +111,82 @@ Git 2.37 以上が必要です。
 ./scripts/setup-git.sh
 ```
 
-`~/.gitconfig` 全体は置き換えず、共通化する以下の項目だけを設定します。
-`user.name` / `user.email` は公開リポジトリに個人情報を置かないため、ここでは設定せず `~/.gitconfig.local`（非公開側）で設定します。
+`~/.gitconfig` 全体は置き換えず、共通項目とグローバルフックを設定します。
+`user.name` / `user.email` は `~/.gitconfig.local` に設定してください。名前やメールの自動推測は無効です。
+GitHub の通常の HTTPS 認証は `gh` に委譲します（「[GitHub の認証](#github-の認証)」を参照）。
+push URL を含め、URL にトークンやパスワードを埋め込まないでください。
 
-- `user.useConfigOnly`: 名前やメールの自動推測を無効にする（identity は `~/.gitconfig.local` で明示的に設定する）
-- `fetch.prune`: `git fetch` 時に削除済みリモートブランチの追跡参照を削除する
-- `init.defaultBranch`: 新しいリポジトリの最初のブランチ名を `main` にする
-- `branch.autoSetupMerge`: 同名のリモートブランチだけを自動追跡する
-- `push.default`: 同名のブランチだけを push する
-- `push.autoSetupRemote`: 初回 push 時に `upstream` を自動設定する
-- `transfer.credentialsInUrl`: `<protocol>://<user>:<password>@...` 形式の URL を拒否する（`remote.*.pushurl` とユーザー名部分だけに指定したトークンは対象外）
-- `pull.ff`: 履歴の分岐時は自動マージせず停止する
-- `merge.conflictStyle`: 競合時に変更前・自分・相手を表示する
-- `credential.https://github.com.helper`: GitHub の通常の認証を `!gh auth git-credential` に委譲する（下記「GitHub の認証」を参照）
-- `credential.https://github.com.useHttpPath`: 認証時にリポジトリパスを helper へ渡す
-- `include.path`: 組織固有設定の受け皿として `~/.gitconfig.local` を読み込む（存在しない間は無視される）
-- `core.hooksPath`: `~/.local/share/dotfiles/git-hooks` を指定する（下記「グローバルフック」を参照）
-- Git LFS が導入済みの場合は `git lfs install --skip-repo` でグローバルフィルタを有効化する
-
-`transfer.credentialsInUrl` は `remote.*.pushurl` を対象にしないため、push URL を含め、URL にトークンやパスワードを埋め込まないでください（Git credential helper を使います）。
-
-### GitHub の認証
-
-GitHub へは HTTPS で接続し、通常の認証は `gh auth git-credential` に委譲します。SSH へは移行しません。
-
-- 公開側は GitHub ホスト全体の helper を空値でリセットし、`!gh auth git-credential` を設定する
-- 組織固有の URL に限り、非公開側（`~/.gitconfig.local`）で helper を空値でリセットして `!ghtkn git-credential` に切り替える。組織名や対象 URL は公開側に置かない
-- [ghtkn](https://github.com/suzuki-shunsuke/ghtkn) の helper は GitHub App の User Access Token（有効期間 8 時間）を Git へ直接渡す
-- ghtkn 本体は mise が導入する（`.config/mise/config.toml`）。Homebrew では管理しない
-- 認証は利用者の依頼または承認に基づいて開始する。承認済みの操作は確認を繰り返さない
-
-```sh
-gh auth login --hostname github.com --git-protocol https
-```
-
-表示された URL を先に手動で開くと、後から Enter による CLI 自身のブラウザ起動が重なって同じ認証画面が別タブに開く。コードをコピーした後は URL をクリックせず Enter を押す。
-
-URL 限定の ghtkn helper を使う端末では、非公開側の設定に従って追加で認証します。
-
-```sh
-ghtkn init   # ~/.config/ghtkn/ghtkn.yaml を作成し、対象の GitHub App の Client ID を書く
-ghtkn auth   # デバイスフローで認証する
-```
-
-`ghtkn auth` も URL の手動クリック、Enter、10 秒後の自動起動を重ねない。手動で開く運用へ固定する場合だけ、端末固有設定で `open_browser.enable: false` にする。
-
-- `gh auth token` / `gh auth git-credential` / `ghtkn get` / `ghtkn exec` / `ghtkn git-credential` の直接実行はトークンの取り出しになるため、AI エージェントには許可しない
-- `gh` を `ghtkn exec` で包む端末固有 wrapper は `auth` サブコマンドを対象外にする。`GH_TOKEN` が注入された状態では、`gh auth login` が通常の保存済み認証を更新できない
-- Git / `gh` / `aws` は個別の allow rule を使わず、ほかのコマンドと同じ既定 Allow の実行経路で動かす。
-  Codex は「保護付きフルアクセス」、Claude Code は `auto` の classifier を使い、filesystem sandbox を無効化して credential helper、CLI 設定、認証キャッシュを通常どおり利用できるようにする。Claude Code に bare `Bash` allow は設定しない
-  - `gh` は gh 自身が保管先からトークンを読む。
-    トークンはエージェントへ渡らないため、`gh pr list` などは通常どおり使える。
-    ただしこれは `gh auth login` が保管した**別系統のトークン**であり、ghtkn 経由ではない。
-    認証を ghtkn へ一本化するには `gh` 用の broker か wrapper が別途要る（未実装）
-  - AI エージェントから AWS プロファイルを選ぶときは `aws --profile <name> ...` と明示する。`aws-use` は利用者の対話シェルでログインと既定プロファイルの永続化を行うための関数とする
-  - AWS の設定と認証キャッシュは AWS CLI 自身から読み書きできる。ログインは利用者の依頼または承認に基づいて行い、通常の非秘密設定は依頼の範囲内で変更する
-  - Google の認証ファイルは `GOOGLE_APPLICATION_CREDENTIALS` で指定する。`GOOGLE_CREDENTIALS` は JSON も持ちうるため、Codex では継承時に除外する
-- CodeCommit のプロファイル固有設定は公開側に置かない。AWS CLI 同梱の `codecommit credential-helper` は Git の子プロセスとして同じ認証経路を利用できるが、直接実行は認証情報の出力になるため拒否する。`git-remote-codecommit` はこのリポジトリでは導入していない
-- 共通の PreToolUse ガードは、認証ファイルの直接読み取り、秘密値の出力、既知の検査迂回を拒否する。
-  通常のモジュール読み込み、子プロセス起動、非秘密の実行設定、未知のサブコマンドは、それ自体を理由に拒否しない
-
-### グローバルフック
-
-`core.hooksPath` を設定すると、Git は各リポジトリの `.git/hooks` を参照しなくなります。
-個別のフックを直接指定するとリポジトリ固有フックと Git LFS のフックが動かなくなるため、`scripts/setup-git.sh` が振り分け用のディレクトリ `~/.local/share/dotfiles/git-hooks` を作り、そこを参照させます。
-
-| フック | 実行内容 |
-| --- | --- |
-| すべて | `git-hooks/dispatch`（secretlint 検査 → denylist 検査 → リポジトリ固有フック → Git LFS のフック） |
-
-- `pre-commit` は変更されたファイルの index 上の内容全体を secretlint に標準入力で渡す。
-  作業ツリーを読まないため部分ステージにも対応し、改名・型変更後の内容も検査する。
-  削除と submodule のコミット参照は除外し、symlink はリンク先ではなくリンク文字列を検査する
-- 推奨 preset（`@secretlint/secretlint-rule-preset-recommend`）をフック内の `--secretlintrcJSON` で明示する。
-  リポジトリの `.secretlintrc*`・`.secretlintignore`・`.gitignore` はこの共通検査には使わない
-- 秘密情報の検出、未導入、設定・ルール読み込み不備、index の取得・検査失敗はコミットを中断する。
-  空コミットや削除のみでも事前にツールと設定を検査する。
-  `--maskSecrets` を明示し、Git と secretlint の検査出力はエラー・デバッグ出力も含めて抑止する。
-  失敗時は秘密値やパスを含まない固定メッセージだけを表示する
-- リポジトリ固有フックが失敗した場合は、その終了状態を伝播してコミットや push を中断する
-- Git LFS が扱うフック（`pre-push`、`post-checkout`、`post-commit`、`post-merge`）は `git lfs <フック名>` を呼ぶ。
-  そのため各リポジトリでの `git lfs install` は不要
-- `pre-push` と `post-rewrite` は標準入力で情報を受け取るため、内容を保持して各実行先へ渡す
-- 特定のリポジトリでグローバルな検査（secretlint と下記の denylist）を止める場合は、`~/.local/share/dotfiles/IGNORE_GLOBAL_HOOKS` にそのリポジトリのパスを記載する（上流と同じ仕組み）。
-  リポジトリ固有フックと Git LFS のフックは、そのリポジトリの動作そのものに必要なため止めない
-
-secretlint は [公式の単一実行ファイル](https://github.com/secretlint/secretlint#using-single-executable-binary)を
-[mise の aqua backend](https://mise.jdx.dev/dev-tools/backends/aqua.html) で管理する（`.config/mise/config.toml`、13.0.5 固定）。
-推奨ルールを同梱しており、npm のグローバル導入や Homebrew への重複登録は行わない。
-`bootstrap.sh` が設定のリンク後に `mise install` を実行し、secretlint も一括導入する。
-bootstrap 全体を再実行せず、リンク済みの設定から secretlint だけ導入する場合は次を実行する。
+グローバルフックは秘密情報を検査し、リポジトリ固有フックと Git LFS のフックも実行します。
+secretlint が未導入・実行不能の場合もコミットを止めます。単独で導入する場合は、設定のリンク後に実行してください。
 
 ```sh
 mise install aqua:secretlint/secretlint
 ```
 
-版とルールはこの dotfiles の既定であり、チーム標準を定義するものではない。
-チーム指定がある場合は別途確認し、組織固有設定は公開リポジトリに置かない。
-gitleaks の既定ルールと検出範囲は一致せず、汎用 API キーなどが同等に検出されるとは限らない。
-既存端末の gitleaks は自動削除しないため、secretlint の導入・動作確認後に利用者が削除を判断する。
-
-#### 公開リポジトリへの混入防止（denylist）
-
-`git-hooks/deny-private-strings` が、組織固有の識別子や過去の所属先の情報を公開リポジトリへコミット・push させないように止めます。
-**判定パターンはこのリポジトリに置きません。**書いた時点で漏洩になるため、非公開側が以下へ配置します。
-
-| ファイル | 内容 |
-| --- | --- |
-| `~/.config/dotfiles/denylist.txt` | 1 行 1 パターン。固定文字列として扱い、大文字小文字は区別しない。行頭 `#` と空行は無視する |
-| `~/.config/dotfiles/work-remotes.txt` | 1 行 1 部分文字列。remote URL が**すべて**一致するリポジトリは組織のものとみなして検査しない |
-
-- `denylist.txt` が無い端末では何もしません（公開リポジトリ単体でも動きます）
-- `pre-commit` はステージ済みのパス名と、その index 上の**内容全体**を見ます。今回の差分だけでなく既存行の混入も止まります
-- `pre-push` は push 対象コミットを**1 件ずつ**見ます。範囲の net diff ではないため、「あるコミットで追加し、後のコミットで消した」内容も検出します
-- remote が 1 つも無いリポジトリは検査対象です
-- 回避は `git commit --no-verify` / `git push --no-verify` のみです
+組織固有の文字列を検査する denylist は非公開側で設定します。`denylist.txt` がない端末ではこの検査は行われません。
 
 ### Homebrew パッケージ
 
 ```sh
-brew bundle --no-upgrade --file=macos/Brewfile        # 不足パッケージのインストール
-brew bundle upgrade --file=macos/Brewfile             # 管理対象パッケージのアップグレード
-brew bundle check --no-upgrade --file=macos/Brewfile  # 不足パッケージの確認
-brew bundle cleanup --file=macos/Brewfile             # Brewfile にないパッケージの確認 (削除は --force)
+brew bundle --no-upgrade --file=macos/Brewfile       # 不足パッケージのインストール
+brew bundle upgrade --file=macos/Brewfile            # 管理対象パッケージのアップグレード
 ```
 
-- `bootstrap.sh` は `formula` と `cask` を一括アップグレードしない。
-  不足パッケージの依存関係は更新される場合がある
-- Homebrew 本体とパッケージ情報は自動更新される
-- 一部の GUI アプリ（ブラウザ、エディタ、コミュニケーションツールなど）は、別の手段で導入する端末があるため既定ではコメントアウトしてある。
-  個人用端末など brew で導入したい場合はコメントアウトを外して `brew bundle` を再実行してよい
-- `cleanup` は Brewfile の追加・削除を反映した後に、まず `--force` なしで削除候補を確認してから実行する（稼働中のツールを誤って削除しないため）
+`bootstrap.sh` はパッケージを一括アップグレードしませんが、Homebrew 本体・パッケージ情報と、不足パッケージの依存関係は更新される場合があります。
+一部の GUI アプリは [Brewfile](macos/Brewfile) でコメントアウトしています。必要に応じて別途導入するか、コメントアウトを外して `brew bundle` を再実行してください。
 
-### macOS 設定
+### macOS と Typeless
 
 ```sh
 ./macos/defaults.sh
-```
-
-- macOS の既定値から意図的に変える項目だけを `defaults write` で適用する。
-  対象はキーボードのリピート速度、Dock、Finder、日本語入力など
-- Rectangle の設定は、エクスポート済みの `macos/rectangle.plist` を読み込んで適用する
-- `bootstrap.sh` は Maccy、Rectangle、Typeless を「ログイン時に開く」へ登録し、Logi Options+ のメインアプリは同項目から除外する。
-  Logi Options+ の機能は開発元のバックグラウンドサービスを使用する
-- Karabiner のルール、メニューバー表示、Keychron K8 Pro のイベント変更は `.config/karabiner/karabiner.json` で管理する。
-  DriverKit、入力監視、アクセシビリティ、バックグラウンド実行の許可は端末ごとに行う
-- デスクトップのアイコンの並べ方のように入れ子の辞書に含まれる項目は、
-  現在の設定を書き出して該当キーだけ差し替えてから読み込む（同じ辞書にある他の表示設定を失わないため）
-- 電源管理（`pmset`）の変更は、認証済みの `sudo`（`sudo -n`）で実行する
-- 日本語入力、外観（ダークモード）、ファンクションキーの設定は再ログイン後に反映される
-
-### Typeless
-
-```sh
 ./macos/setup-typeless.sh
 ```
 
-- `macos/typeless.json` で音声入力・Ask Anything・翻訳・直前の文字起こし貼付のショートカット、日本語指定、翻訳先の英語、Dock 非表示を管理する
-- `~/Library/Application Support/Typeless/app-settings.json` に管理項目だけを反映し、アカウント別設定や機器情報などは保持する
-- macOS と jq が必要。`bootstrap.sh` は Homebrew パッケージの導入後に実行する
-- 変更が必要な場合は Typeless を終了してから実行する。設定が一致していれば、起動中でも書き換えない
-- 旧ショートカットの移行前は設定を変更せず停止する。Typeless を一度起動・終了して移行を完了し、再実行する
+macOS のキーボード、Dock、Finder、日本語入力、Rectangle などの設定を適用します。
+日本語入力、外観、ファンクションキーの設定は再ログイン後に反映されます。
+電源管理の変更には認証済みの `sudo` が必要です。
+
+Typeless は macOS と `jq` が必要です。[管理する設定](macos/typeless.json)だけを反映し、アカウント別設定や機器情報は保持します。
+設定を変更するときは Typeless を終了してください。旧ショートカットの移行を求められた場合は、一度起動・終了してから再実行してください。
 
 ### キーボード
 
-macOS 共通のキー変換は Karabiner、ターミナルの処理は WezTerm、エディタと統合ターミナルの処理は VS Code で管理する。
-以下の `Cmd` は OS に送るキーを表し、Windows の左 Ctrl の位置から操作できる。
+共通のキー変換は [Karabiner](.config/karabiner/karabiner.json)、ターミナルは [WezTerm](.wezterm.lua) で管理します。
 
-| 対象 | キー・物理位置 | 操作 |
-| --- | --- | --- |
-| Mac 共通 | 左 Control / Option / Command | Command / Control / Option に変更 |
-| Mac 共通 | Caps Lock | Control |
-| Mac 共通 | 右 Command / Option | かな / 英数 |
-| Mac 共通 | Option+Tab / Option+Shift+Tab | アプリ切り替え / 逆順 |
-| Mac 共通 | Cmd+Y | やり直し |
-| Mac 共通 | Print Screen | 範囲指定スクリーンショット |
-| Finder | F2 | 名前変更 |
-| Chrome・Edge・Firefox・Safari | F5 | 再読み込み |
-| Chrome・Edge・Firefox | Shift+F5 | キャッシュを無視して再読み込み |
-| WezTerm・VS Code 統合ターミナル | Cmd+C | 選択中はコピー、未選択時は処理中断 |
-| WezTerm・VS Code 統合ターミナル | Cmd+A / E / R | 行頭 / 行末 / 履歴検索 |
-| WezTerm・VS Code 統合ターミナル | Cmd+Shift+A | スクロールバック全体をコピー |
-| VS Code エディタ | Tab / Shift+Tab | インデントを深く / 浅く（標準操作） |
-| VS Code エディタ | Home / End、Cmd+Home / End | 行頭・行末 / ファイル先頭・末尾（Shift 併用で選択） |
-| VS Code エディタ | Cmd+← / → | 単語移動（Shift 併用で選択） |
-| VS Code エディタ | Cmd+Backspace / Delete | 前 / 後の単語を削除 |
+- 左 Control / Option / Command は Command / Control / Option に、Caps Lock は Control に変わります。
+- 右 Command / Option で、かな / 英数を切り替えます。
+- WezTerm・VS Code 統合ターミナルの `Cmd+C` は、選択中はコピー、未選択時は処理中断です。`Cmd` は OS に送るキーで、Windows の左 Ctrl の位置から操作できます。
 
-- VS Code の `keybindings.json` は Settings Sync で管理し、リポジトリには含めない。
-  Mac 向け追加設定は `isMac` 条件で限定し、Windows の標準キー設定を維持する
-- 左修飾キーの共通変換は Mac 配列を前提とする。外付けキーボードは Mac モードで使用する。
-  Windows 配列だけのキーボードでは、Karabiner の機器別 Simple Modifications で
-  `left_command → left_control`、`left_option → left_option` を指定する
-- Keychron の F13、Windows 側の右上中央の右 Alt、日本語入力切り替え、RGB・Bluetooth 操作は維持する
+外付けキーボードは Mac モードで使用してください。Windows 配列だけの機器は、Karabiner の機器別 Simple Modifications で `left_command → left_control`、`left_option → left_option` を指定します。
+VS Code のキー設定は Settings Sync で管理し、このリポジトリには含めません。
 
 #### Keychron K8 Pro 本体の移行
 
-移行用レイアウトは `macos/keychron_k8_pro_ansi_rgb.layout.json`。
-Mac の修飾キーと右 Command / Option は標準の信号に戻し、位置の変更は Karabiner に任せる。
-Mac の Fn+F10 / F11 / F12 はミュート / 音量を下げる / 上げる、Windows の Caps Lock は Control にする。
-Mac のスクリーンショットキーは Print Screen を送り、Karabiner が元の範囲指定操作に変換する。
+本体を移行する場合は、次の手順で設定します。
 
-1. USB 接続し、本体を Cable・Mac モードにする
-2. [VIA](https://usevia.app/) の Save + Load から移行用レイアウトを読み込む。
-   機種定義が必要な場合は、[Keychron 公式配布](https://www.keychron.com/pages/firmware-and-json-files-of-the-keychron-qmk-k-pro-and-k-max-series-keyboards)の K8 Pro ANSI RGB v1.7 を使う
-3. Karabiner の Keychron 機器設定では、Simple Modifications を空にして共通の変換を使う
-4. 左 Ctrl 位置でのコピー、かな・英数、F13、Fn 音量操作を確認する
+1. USB 接続し、本体を Cable・Mac モードにする。
+2. [VIA](https://usevia.app/) の Save + Load から [移行用レイアウト](macos/keychron_k8_pro_ansi_rgb.layout.json) を読み込む。
+   機種定義が必要な場合は、[Keychron 公式配布](https://www.keychron.com/pages/firmware-and-json-files-of-the-keychron-qmk-k-pro-and-k-max-series-keyboards)の K8 Pro ANSI RGB v1.7 を使う。
+3. Karabiner の Keychron 機器設定では、Simple Modifications を空にする。
+4. 左 Ctrl 位置でのコピー、かな・英数、F13、Fn 音量操作を確認する。
 
-元の Downloads 配下のレイアウトは変更していない。元に戻す場合は旧レイアウトを読み込み、
-Karabiner の Keychron 機器設定で左 Control / Option / Command をそれぞれ同じキーへ変換する 3 件を追加する。
+元に戻す場合は旧レイアウトを読み込み、Karabiner の Keychron 機器設定で左 Control / Option / Command をそれぞれ同じキーへ変換する 3 件を追加します。
 
 ### 非公開 Codex Custom Pets
 
-#### 実行と動作
-
-`bootstrap.sh` から呼び出されますが、単独でも実行できます。
+Git、jq、macOS 標準の `lockf` が必要です。
 
 ```sh
 ./pets/setup.sh
 ```
 
-未取得の場合は、非公開リポジトリを一時ディレクトリにクローンします。
-リポジトリルート、`origin`、インストーラを検証して `$HOME/src/pych/codex-custom-pets` に配置します。
-一括インストール対応版では `bin/install-pet --all` を実行し、未対応の旧版では収録ペットを個別にインストールします。
-
-Git、jq、macOS 標準の `lockf` が必要です。
-`sudo` は使いません。
-
-#### 設定
-
-初回クローン前のアクセス確認に失敗した場合は、既定で警告してスキップします。
-以下の環境変数で動作を変更できます。
-
-- `CODEX_CUSTOM_PETS_STRICT=1`: アクセス失敗時に `bootstrap.sh` も失敗させる
-- `CODEX_CUSTOM_PETS_SKIP=1`: 導入をスキップする
-- `CODEX_CUSTOM_PETS_REPO_URL`: クローン元を上書きする
-- `CODEX_CUSTOM_PETS_REPO_DIR`: 保存先を絶対パスで上書きする
-- `CODEX_HOME`: インストール先を上書きする。
-  未指定時は `$HOME/.codex` になる
+非公開リポジトリを `$HOME/src/pych/codex-custom-pets` に取得し、収録ペットを `${CODEX_HOME:-$HOME/.codex}` にインストールします。
+再実行時は既存ペットを置き換え、同ディレクトリの `pets/.backups` に退避します。
+導入後は Codex の `Settings → Pets` で `Refresh` を実行してください。
 
 #### 更新
 
-既存のチェックアウトは自動更新しません。
+既存のチェックアウトは自動更新しません。更新する場合は以下を実行し、dotfiles に戻って `./pets/setup.sh` を再実行します。
 
 ```sh
 cd "${CODEX_CUSTOM_PETS_REPO_DIR:-$HOME/src/pych/codex-custom-pets}"
@@ -334,33 +194,22 @@ git switch main
 git pull --ff-only
 ```
 
-再実行時は現在のチェックアウトでペットを置き換え、既存ファイルを `${CODEX_HOME:-$HOME/.codex}/pets/.backups` に退避します。
-インストール後は Codex の `Settings → Pets` で `Refresh` を実行してください。
-
 ### 非公開 Agent Skills
-
-`bootstrap.sh` は、未取得の Agent Skills リポジトリを `$HOME/src/pych/agent-skills` にクローンし、リポジトリ直下の `setup.sh` を実行します。
-`setup.sh` は `$HOME/.agents/skills` と `$HOME/.claude/skills` に symlink を配置します。同名の未管理オブジェクトは上書きしません。
-
-Agent Skills のセットアップだけを実行する場合:
 
 ```sh
 ./skills/setup.sh
 ```
 
-#### 設定
+非公開リポジトリを `$HOME/src/pych/agent-skills` に取得し、その `setup.sh` で `~/.agents/skills` と `~/.claude/skills` にリンクします。
+同名の未管理オブジェクトは上書きしません。`setup.sh` は Claude のクラウドルーティン同期も行います。
+導入後は新しい Codex セッションでスキルを確認してください。
 
-初回クローン前のアクセス確認に失敗した場合は、既定で警告してスキップします。
-以下の環境変数で動作を変更できます。
+スキルの選択・単体導入は [Agent Skills の README](https://github.com/pych-ky/agent-skills#readme) を参照してください。
+`delegate-to-chatgpt` は通常 ChatGPT への内蔵送受信ツールがある Codex デスクトップ向けです。自動委譲する資料の許可範囲と配置手順は、同 README の「通常 ChatGPT への自動委譲」に従ってください。
 
-- `AGENT_SKILLS_STRICT=1`: アクセス失敗時に `bootstrap.sh` も失敗させる
-- `AGENT_SKILLS_SKIP=1`: 導入をスキップする
-- `AGENT_SKILLS_REPO_URL`: クローン元を上書きする
-- `AGENT_SKILLS_REPO_DIR`: 保存先を絶対パスで上書きする
+#### 更新
 
-#### 更新と単体導入
-
-既存のチェックアウトは自動更新しません。更新する場合は次を実行します。
+既存のチェックアウトは自動更新しません。更新する場合は次を実行してください。
 
 ```sh
 repository_dir="${AGENT_SKILLS_REPO_DIR:-$HOME/src/pych/agent-skills}"
@@ -368,142 +217,8 @@ git -C "$repository_dir" pull --ff-only
 "$repository_dir/setup.sh"
 ```
 
-dotfiles を使わず単体で導入する場合:
+### Pets・Skills の導入設定
 
-```sh
-git clone https://github.com/pych-ky/agent-skills.git "$HOME/src/pych/agent-skills"
-cd "$HOME/src/pych/agent-skills"
-./setup.sh
-```
-
-#### Codex から通常 ChatGPT への自動委譲
-
-`delegate-to-chatgpt` スキルは、調査・比較・要約・文章作成と、渡した資料だけで成立する設計・コードレビューで、送受信の負担よりまとまった処理を任せられる場合に選択されます。
-毎回スキルを指定する必要はありません。
-小さな処理、ローカル操作、変更の適用、実行検証、最終統合は Codex が担当します。
-
-通常 ChatGPT への内蔵送受信ツールが提供される Codex デスクトップ環境が対象です。
-ツールがない CLI などでは Codex が可能な作業を続け、Work・有料 API・ブラウザ操作へ自動で切り替えません。
-
-Codex の会話 ID ごとに、最初の委譲時に通常 ChatGPT の専用会話を新規作成します。
-新規会話・fork は送信先も分け、同じ会話の再開・アプリ再起動・コンテキスト圧縮では再利用します。
-現在の ID は実行環境の `CODEX_THREAD_ID` で確認します。
-
-`${CODEX_HOME:-$HOME/.codex}/delegate-to-chatgpt.toml` は、この運用で自動送信を許可する資料の範囲だけを保持します。
-会話の対応は `delegate-to-chatgpt/sessions/<Codex会話ID>.toml` に端末ローカルの状態として保存し、Git 管理・同期の対象にしません。
-旧固定 `thread_id` は移行の指示を確認して削除し、新しい対応へ移植しません。
-許可済みの運用と資料範囲は毎回確認せず、会話 ID・個人情報は公開 dotfiles に置きません。
-Codex の `config.toml` に独自キーも追加しません。
-
-通常 ChatGPT の新規作成を扱える内蔵ツールがなければ、以前の固定先を使わず Codex で処理します。
-現行の `create_thread` は通常 ChatGPT の新規作成に対応していません。
-ユーザーが今回用に新しく作成して指定した通常チャットは登録できます。
-単体配置と設定例は Agent Skills の `README.md`「通常 ChatGPT への自動委譲」を参照してください。
-`agent-skills/setup.sh` は Claude のクラウドルーティン同期も行うため、このスキルだけの配置では実行不要です。
-
-スキルの配置後は、新しい Codex セッションで利用可能になっていることを確認してください。
-共通の `.config/agents/AGENTS.md` には Codex 固有の手順を置きません。
-
-自動委譲は指示とスキル選択に基づく動作です。
-毎回の実行保証や利用量削減率は測定していません。
-
-## 手動セットアップ
-
-### システムとアプリ
-
-- システム設定
-  - プライバシーとセキュリティ > フルディスクアクセス / アクセシビリティ / 入力監視（Karabiner、Logi Options+、Claude など必要なものだけ）
-  - プライバシーとセキュリティ > オートメーション（ログイン項目の登録時に System Events を許可）
-  - 一般 > ログイン項目と拡張機能
-    - 「ログイン時に開く」: Maccy、Rectangle、Typeless があり、Logi Options+ がないことを確認
-    - 「アプリのバックグラウンドでのアクティビティ」: Karabiner、Logi Options+、Logitech Inc をオン
-    - 拡張機能 > Driver Extensions: Karabiner DriverKit VirtualHIDDevice をオン
-  - サウンド > 入出力デバイスの指定
-  - キーボード > テキスト入力 > テキスト置換（ユーザー辞書）
-    - `しかく` → `■` / `やじるし` → `→` / `かっこ` → `「」`
-- Finder > 設定 > サイドバー > ホームにチェック
-- Brewfile でコメントアウトしているアプリ（ブラウザ、エディタなど）を、端末に応じた方法で導入
-- Rancher Desktop: Preferences > Application > Environment > Configure PATH を Manual にする
-- [Maccy](https://github.com/p0deje/Maccy#usage): `Cmd+Shift+C` で履歴を開く。自動貼り付けを使う場合は「Paste automatically」をオンにし、システム設定の「アクセシビリティ」で Maccy を許可する
-- Typeless: サインインし、必要な権限を許可する
-- VS Code: Settings Sync にサインイン（設定と拡張はこのリポジトリでは管理しない）。
-  コマンドパレットから「Shell Command: Install 'code' command in PATH」を実行
-- 各種アカウントにサインイン（1Password、Slack、Notion など）
-- GitHub の通常の認証を `gh auth login` で用意する。
-  URL 限定の ghtkn helper を使う端末では、非公開側の設定に従って `ghtkn init` / `ghtkn auth` も実行する。AI エージェントからは利用者の依頼または承認に基づいて実行する
-- 個別インストーラからプリンタドライバを導入
-
-### AI エージェントの外部サービス
-
-- Codex CLI と Claude Code からの GitHub 操作には、`git` とキーチェーン経由で認証済みの `gh` CLI を使う
-- Claude Code の Linear と Microsoft Docs の公式プラグインは `bootstrap.sh` が導入して有効化する。Linear は端末ごとに OAuth 認証する
-- ChatGPT の Linear プラグインはアカウント単位で Install / Connect し、対応するデスクトップ画面で共有する。初回の OAuth 認証は手動で完了する
-- Codex CLI の Linear プラグインは `bootstrap.sh` が導入し、`.config/codex/config.toml` が canonical plugin ID を有効化する。未認証の場合は導入時に OAuth 認証を完了する
-
-## 非公開設定（dotfiles-private）
-
-**このリポジトリは公開リポジトリです。** 所属組織に固有の設定と個人情報は置きません。
-
-組織固有の設定（組織名を含む Git の `includeIf`、認証ヘルパー、組織専用のシェル関数）と、公開したくない個人情報（Git の `user.name` / `user.email`）は、非公開の `dotfiles-private` リポジトリで管理します。
-公開側は「その名前のファイルがあれば読む」という受け皿だけを持ち、非公開側のファイル名や内容を参照しません。
-
-- 受け皿: `.zshrc` / `.bashrc` が末尾で `~/.zshrc.local` / `~/.bashrc.local` を読み込み、`scripts/setup-git.sh` が `include.path` に `~/.gitconfig.local` を設定する
-- 受け皿: `git-hooks/deny-private-strings` が `~/.config/dotfiles/denylist.txt` と `~/.config/dotfiles/work-remotes.txt` を読み、公開リポジトリへの混入を止める（「[公開リポジトリへの混入防止（denylist）](#公開リポジトリへの混入防止denylist)」を参照）
-- `$HOME` へのリンクは `dotfiles-private` 側の `setup.sh` が行う
-- `bootstrap.sh` はアクセス可能な場合のみ `dotfiles-private` を取得し、その `setup.sh` を実行する
-- 認証情報そのもの（トークン・秘密鍵）は `dotfiles-private` にも置かない
-- 以下の環境変数で動作を変更できる
-  - `DOTFILES_PRIVATE_SKIP=1`: 導入をスキップする
-  - `DOTFILES_PRIVATE_REPO_URL`: クローン元を上書きする
-  - `DOTFILES_PRIVATE_DIR`: 保存先を絶対パスで上書きする
-
-## AI エージェントからの機密情報遮断
-
-AI エージェント（Claude Code / Codex）に対する方針は次の一点です。設計と判断の記録は [SECURITY.md](SECURITY.md) を参照してください。
-
-> クレデンシャルをモデル・会話コンテキスト・tool output へ直接取り出さず、ファイル・ログ・環境変数・引数・標準入力への書き出しで迂回しない。
-> credential helper・認証エージェント・署名ブローカー・認証済み CLI が内部で認証情報を利用・保管する通常操作は許可する。
-
-コマンド名や実行機能だけで一律に拒否せず、秘密値の取得と重大な破壊操作を制限します。IP アドレス・ユーザー名・ホスト名・MAC アドレスと、過去の会話・セッション履歴は必要に応じて参照できます。
-
-- `.config/agents/AGENTS.md`: 共通の規約。禁止・許可・確認が必要な操作と、実行ガードの検査範囲を区別する
-- `.claude/settings.json`: `auto` の利用、Bash の個別 allow の不使用、filesystem sandbox の無効化、秘密値を出力する操作の deny、ホーム以下にある既知名の認証情報ファイルに対する組み込み `Read` の禁止
-- `.claude/hooks/pre-bash-guard.py`: 標準入力の JSON で受け取ったコマンドから、直接書かれた既知の秘密値取得・資格情報ファイルの読み取り・保護機構の迂回・重大な破壊操作を拒否する。対象コマンドは実行せず、シェルや Python の引数へも渡さない。
-  エージェントや permission mode によらず deny だけを返し、それ以外は無出力で通常の権限判定に委ねる。不正入力・内部エラーは終了コード `2` で閉じ、有効だが未対応の構文は通常の権限判定へ進める。`rm -rf build` や通常の branch・worktree 削除は許可する
-  shell の変数値や関数の模擬実行、ファイル script、間接的な動的生成、ディレクトリ内に潜む資格情報の探索、`.dockerignore` の解析は行わない。任意コードの隔離境界ではなく、検査範囲外の禁止や操作前の確認は共通規約に従う
-- `.config/codex/config.toml` / `.codex/browser/config.toml`: ルート全体の読み書きを既定 Allow とし、CLI が内部利用する設定・認証ストア、秘密鍵、keystore、service-account、環境ファイルは filesystem deny の対象外にする。Codex / Claude Code 自身の認証情報・認証バックアップ、shell 履歴・shell snapshot を固定 deny にし、通常の CLI 設定環境変数を継承して秘密値だけを除外する。ブラウザのサイト操作・履歴取得・ファイル転送は `never_ask` で自動承認し、CDP フルアクセスは無効にする
-  CLI 設定や認証ストアの直接取得は共通規約で禁止し、既知の取得経路を PreToolUse で拒否する
-  ワークスペース内の任意階層にある認証情報は `.config/agents/AGENTS.md` の禁止規約で扱う
-
-### AI エージェントの起動
-
-新しいターミナルセッションを開き、通常どおり起動します。
-
-```sh
-claude
-codex
-```
-
-- AI エージェントを起動する前に新しいターミナルセッションを開く
-- shell の起動ファイルと端末ローカル設定で、認証情報の平文を環境変数へ設定しない
-- 認証情報を一時的に `export` したターミナルからは起動しない
-- 認証は credential helper・キーチェーン・認証エージェントへ委譲する
-- Codex の shell snapshot は無効化済み。shell 履歴と、両エージェントの shell snapshot・認証バックアップはモデルから直接読めないよう保護する。会話履歴・session transcript・file history・paste cache の検索・参照は許可するが、そこから秘密値を取得してはならない
-- `~/.codex-account-*` の認証情報・shell snapshot にも、通常の Codex と同じ filesystem deny・Claude Code の `Read` deny・共通 Bash ガードを適用する
-- Claude Code の `permissions.defaultMode` は `auto` のまま運用し、Bash の個別 allow は設定しない。Auto では hard deny 以外の操作を classifier が依頼内容に照らして判断する。filesystem sandbox は CLI の設定・認証ストアの内部利用を妨げないよう、明示的に無効化する。
-  `permissions.ask` は空とし、settings は allow / deny に二分する。フックはすべての permission mode で同じ deny を維持する
-  `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` は既定以外の permission mode と競合するため使わない
-
-## このリポジトリで管理しないもの
-
-- Git と GitHub CLI の認証: 端末ごとに設定する
-- 組織固有・個人の設定（`~/.gitconfig.local`、`~/.zshrc.local` など）: 非公開の dotfiles-private で管理する
-- Codex のローカルユーザー設定（`~/.codex/config.toml`）: 端末ごとに個別設定する（旧 `sandbox_mode` は置かず、公開側の `default_permissions` を継承する）
-- Claude Code の生のユーザースコープ MCP 登録（`~/.claude.json`）と claude.ai コネクタ: 端末・アカウントごとに設定する。公式プラグインで安全に代替できる共通 MCP は `.claude/settings.json` の `enabledPlugins` で管理する
-- Brewfile でコメントアウトしているアプリ: 導入手段を端末ごとに選ぶ
-- 非公開 Agent Skills の内容: 非公開リポジトリで管理する
-- 非公開 Codex Custom Pets の内容: 非公開リポジトリで管理する
-- 認証情報（`~/.ssh`、`~/.aws` のクレデンシャル、GitHub のトークン、ROSA/OCM・Helm・uv の認証設定など）: 1Password などで別途移行する。
-  GitHub の通常の認証は端末ごとに `gh auth login`、URL 限定の認証は必要に応じて `ghtkn auth` で取り直す
-- 機密または端末固有のディレクトリ（`~/.kube`、`~/.docker`、`~/.terraform.d`、`~/.rd`）
-- VS Code の設定と拡張: VS Code Settings Sync で同期する
+Pets・Skills は初回アクセスに失敗すると、既定で警告してスキップします。
+導入対象から外す場合は `CODEX_CUSTOM_PETS_SKIP=1` / `AGENT_SKILLS_SKIP=1` を指定します。
+取得先の変更やアクセス失敗をエラーにする設定は [Pets](pets/setup.sh) / [Skills](skills/setup.sh) のセットアップスクリプトを参照してください。
