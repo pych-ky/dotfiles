@@ -3,10 +3,6 @@
 
 set -euo pipefail
 
-# ============================================================================
-# グローバル設定
-# ============================================================================
-
 temporary_clone_dir=
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,23 +18,9 @@ source lib/setup-common.sh
 cd "$source_working_dir" || exit 1
 unset source_working_dir
 
-# ============================================================================
-# ユーティリティ
-# ============================================================================
-
 error() {
   printf 'error: %s\n' "$1" >&2
   return 1
-}
-
-# アクセス失敗を strict 指定に応じてエラーまたはスキップにする
-handle_access_failure() {
-  if [[ "$1" == 1 ]]; then
-    error 'private Codex Custom Pets repository is not accessible'
-    return 1
-  fi
-
-  printf 'warning: private Codex Custom Pets repository is not accessible; skipping\n' >&2
 }
 
 # / および . / .. 成分を含む絶対パスを拒否
@@ -107,10 +89,6 @@ verify_install_paths() {
     return 1
   fi
 }
-
-# ============================================================================
-# 排他制御
-# ============================================================================
 
 # repository の配置を直列化
 acquire_repository_lock() {
@@ -210,19 +188,12 @@ cleanup() {
   exec 9>&- 2>/dev/null || true
 }
 
-# ============================================================================
-# リポジトリ検証
-# ============================================================================
-
 # repository root、origin、install-pet の実行権を検証
 verify_repository() {
-  local repository_dir="$1"
-  local expected_url="$2"
   local repository_error
 
   if ! repository_error="$(setup_verify_repository \
-    "$repository_dir" \
-    "$expected_url" \
+    "$1" "$2" \
     'Codex Custom Pets' \
     'CODEX_CUSTOM_PETS_REPO_DIR' \
     'CODEX_CUSTOM_PETS_REPO_URL' \
@@ -233,7 +204,7 @@ verify_repository() {
   fi
 }
 
-# 新しい一括インストールを優先し、未対応の checkout では個別に導入
+# 一括インストールを優先し、未対応の checkout では個別に導入
 install_repository_pets() {
   local repository_dir="$1"
   local installer="$repository_dir/bin/install-pet"
@@ -255,10 +226,6 @@ install_repository_pets() {
   done
   ((found)) || error 'Codex Custom Pets repository does not contain installable pets'
 }
-
-# ============================================================================
-# エントリポイント
-# ============================================================================
 
 main() {
   local skip="${CODEX_CUSTOM_PETS_SKIP:-0}"
@@ -340,7 +307,7 @@ main() {
   if [[ ! -e "$repository_dir" && ! -L "$repository_dir" ]]; then
     clone_required=1
     if ! setup_run_noninteractive_git ls-remote -- "$repository_url" HEAD >/dev/null 2>&1; then
-      if handle_access_failure "$strict"; then
+      if setup_handle_access_failure "$strict" 'Codex Custom Pets'; then
         return 0
       fi
       return 1

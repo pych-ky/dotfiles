@@ -1,19 +1,7 @@
 #!/usr/bin/env bash
-#
-# ============================================================================
-# core.hooksPath 用のフック振り分けスクリプト
-# ============================================================================
-#
-# core.hooksPath を設定すると、Git は各リポジトリの .git/hooks を参照しなくなる。
-# そのため、このスクリプトがフック名ごとに以下を順に実行し、失敗を伝播する。
-#
-#   1. secretlint による秘密情報の検査 (pre-commit のみ)
-#   2. 非公開 denylist の検査 (pre-commit / pre-push のみ)
-#   3. リポジトリ固有フック (.git/hooks/<フック名>)
-#   4. Git LFS のフック (git-lfs 導入済みかつ LFS が扱うフック名の場合)
-#
-# フック名は $0 のファイル名から決まるため、pre-commit などの名前でこのスクリプトへ
-# シンボリックリンクを張って使う。
+# core.hooksPath から secretlint → denylist → .git/hooks → Git LFS の順に実行し、失敗を伝播する。
+# core.hooksPath で参照されなくなる .git/hooks も、ここで引き継ぐ。
+# pre-commit などのフック名で symlink を張る（$0 のファイル名で判定）。
 
 set -uo pipefail
 
@@ -24,11 +12,9 @@ git_dir="$(git rev-parse --git-common-dir 2>/dev/null || true)"
 [[ -n "$git_dir" ]] || git_dir="$(git rev-parse --git-dir 2>/dev/null || true)"
 local_hook="${git_dir:-.git}/hooks/${hook_name}"
 
-# Git LFS が各リポジトリに設置するフック
 lfs_hooks=' pre-push post-checkout post-commit post-merge '
 
-# 標準入力で情報を受け取るフック (複数の実行先へ渡せるよう内容を保持する)。
-# 内容は ref の一覧など小さな行データなので、一時ファイルを使わず変数に読み込む
+# 小さな ref 一覧を変数で保持し、複数フックへ同じ標準入力を渡す
 stdin_hooks=' pre-push post-rewrite '
 
 stdin_data=
@@ -38,7 +24,6 @@ if [[ "$stdin_hooks" == *" $hook_name "* ]] && [[ ! -t 0 ]]; then
   stdin_captured=1
 fi
 
-# 保持した標準入力があれば、それを与えて実行する
 run_with_stdin() {
   if ((stdin_captured)); then
     if [[ -n "$stdin_data" ]]; then
@@ -51,10 +36,8 @@ run_with_stdin() {
   fi
 }
 
-# 上流互換: IGNORE_GLOBAL_HOOKS に列挙されたリポジトリでは、
-# グローバルに追加した検査 (secretlint / denylist) を行わない。
-# リポジトリ固有フックと Git LFS のフックは、そのリポジトリの動作そのものに
-# 必要なため続行する (止めると LFS のファイルが壊れる)
+# IGNORE_GLOBAL_HOOKS に列挙されたリポジトリでは、secretlint と denylist だけを省略する。
+# リポジトリ固有・LFS フックは、既存動作や LFS ファイルを壊さないよう継続する。
 hooks_dir="$(cd "$(dirname "$0")" && pwd)"
 ignore_file="$(dirname "$hooks_dir")/IGNORE_GLOBAL_HOOKS"
 git_root="$(git rev-parse --show-superproject-working-tree 2>/dev/null || true)"
@@ -66,8 +49,7 @@ if [[ -f "$ignore_file" && -n "$git_root" ]] &&
   skip_global_checks=1
 fi
 
-# 1. index 上の blob を secretlint で検査する。
-# エラーやデバッグ出力にも内容を載せないよう、検査中の出力はすべて抑止する
+# index 上の blob を secretlint で検査し、秘密値がエラーやデバッグ出力に出ないよう全出力を抑止する
 if ((!skip_global_checks)) && [[ "$hook_name" == pre-commit ]]; then
   if ! command -v secretlint >/dev/null 2>&1; then
     printf 'error: secretlint が見つかりません\n' >&2
@@ -89,7 +71,7 @@ if ((!skip_global_checks)) && [[ "$hook_name" == pre-commit ]]; then
       --no-ext-diff --no-textconv --no-color -z |
       while IFS= read -r -d '' entry; do
         IFS= read -r -d '' path || exit 1
-        IFS=' ' read -r old_mode new_mode old_oid new_oid change_type <<<"$entry" || exit 1
+        IFS=' ' read -r _old_mode new_mode _old_oid new_oid _change_type <<<"$entry" || exit 1
         case "$new_mode" in
         160000) continue ;; # submodule のコミット参照は blob ではない
         100644 | 100755 | 120000) ;;
@@ -108,7 +90,6 @@ if ((!skip_global_checks)) && [[ "$hook_name" == pre-commit ]]; then
   fi
 fi
 
-# 2. 非公開 denylist の検査
 deny_private_strings="$(dirname "$0")/deny-private-strings"
 if ((!skip_global_checks)) &&
   [[ "$hook_name" == pre-commit || "$hook_name" == pre-push ]] &&
@@ -116,12 +97,10 @@ if ((!skip_global_checks)) &&
   run_with_stdin "$deny_private_strings" "$hook_name" "$@" || exit $?
 fi
 
-# 3. リポジトリ固有フック (失敗したらその終了状態で中断する)
 if [[ -x "$local_hook" ]]; then
   run_with_stdin "$local_hook" "$@" || exit $?
 fi
 
-# 4. Git LFS のフック
 if [[ "$lfs_hooks" == *" $hook_name "* ]] &&
   command -v git-lfs >/dev/null 2>&1; then
   run_with_stdin git lfs "$hook_name" "$@" || exit $?

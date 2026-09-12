@@ -1,19 +1,9 @@
-# ============================================================================
 # AWS SSO プロファイルを切り替えて永続化するシェル関数
-# ============================================================================
-#
-# 扱うのは AWS_PROFILE (プロファイル名) だけで、一時認証情報そのものは
-# シェルへ持ち込まない。解決は AWS SDK 側に任せる。
-#
-# 以前あった aws-env は aws configure export-credentials の結果を
-# AWS_ACCESS_KEY_ID などへ export していた。値がシェルの環境に載ると、
-# そこから起動する AI エージェントの子プロセスへそのまま渡るため廃止した。
-# AWS_PROFILE 非対応ツールは、最終的には外部の署名ブローカーか認証済みの
-# 隔離 runner 経由で扱う (未実装。SECURITY.md「未完了の対策」を参照)。
+# AWS_PROFILE だけを扱い、一時認証情報をシェルへ持ち込まず AWS SDK に解決を任せる。
+# AWS_PROFILE 非対応ツール向けの署名ブローカー・認証済み隔離 runner は未実装 (SECURITY.md「未完了の対策」)。
 
 # Claude Code のシェルスナップショットで除外されないよう __aws_* 名にする
 
-# 二重読み込みの防止
 [ -n "${__AWS_FUNCTIONS_LOADED:-}" ] && return
 __AWS_FUNCTIONS_LOADED=1
 
@@ -36,12 +26,11 @@ __aws_credential_provider_variables() {
     AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE
 }
 
-# credential provider 環境変数の設定有無を判定
 __aws_has_credential_provider() {
   local variable
 
   while IFS= read -r variable; do
-    # 値そのものは展開せず、空でない変数だけを provider とみなす。
+    # 値を展開せず、空でない変数だけを provider とみなす
     eval "[ \"\${$variable:+x}\" = x ]" && return 0
   done < <(__aws_credential_provider_variables)
 

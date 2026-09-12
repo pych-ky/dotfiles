@@ -21,14 +21,12 @@ if command -v mise >/dev/null 2>&1; then
   eval "$(mise activate bash)"
 fi
 
-# aws-use / aws-clear の読み込み
 [ -r "$HOME/.shell/functions/aws.sh" ] && . "$HOME/.shell/functions/aws.sh"
 
-# Git worktree 関数の読み込み
 [ -r "$HOME/.shell/functions/git-worktree.sh" ] && . "$HOME/.shell/functions/git-worktree.sh"
 
-# 保存済み AWS プロファイルの読み込み
 [ -r "$HOME/.aws/load-active-profile.sh" ] && . "$HOME/.aws/load-active-profile.sh"
 
 # 端末ローカル設定の読み込み (組織固有の設定やツールの自動追記の受け皿、git 管理外)
+# shellcheck source=/dev/null
 [ -r "$HOME/.bashrc.local" ] && . "$HOME/.bashrc.local"

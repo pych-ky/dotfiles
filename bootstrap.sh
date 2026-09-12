@@ -1,24 +1,5 @@
 #!/usr/bin/env bash
-#
-# ============================================================================
-# 新しい Mac を一括セットアップするブートストラップスクリプト
-# ============================================================================
-#
-# 実行内容:
-#   1. sudo 認証
-#   2. macos/defaults.sh による macOS 設定の適用
-#   3. Homebrew の導入 (未導入時、Xcode Command Line Tools も同時に導入される)
-#   4. macos/Brewfile に基づく不足パッケージのインストール
-#   5. scripts/link-dotfiles.sh による dotfiles 展開、Typeless 設定、ログイン項目の追加・削除
-#   6. mise によるグローバル開発ツールの導入
-#   7. scripts/setup-git.sh による Git の共通設定
-#   8. zsh プラグインの取得
-#   9. Claude Code CLI / Codex CLI の導入と公式 Claude Code プラグインの整理
-#  10. private Codex Custom Pets の取得と一括インストール (アクセス可能な場合)
-#  11. private Agent Skills の取得と同期 (アクセス可能な場合)
-#  12. private dotfiles-private (非公開設定) の取得と適用 (アクセス可能な場合)
-#
-# 終了後に手動で行う設定は README.md の「手動セットアップ」を参照。
+# 新しい Mac の設定とツールを一括セットアップする。
 
 set -euo pipefail
 
@@ -27,16 +8,15 @@ failed_steps=()
 skipped_steps=()
 last_run_and_record_status=0
 
-# 非対話 git とリポジトリ検証の共通関数
 setup_common_library="$repo_dir/lib/setup-common.sh"
 if [[ ! -f "$setup_common_library" || -L "$setup_common_library" ]]; then
   printf 'error: setup common library is missing or unsafe: %s\n' \
     "$setup_common_library" >&2
   exit 1
 fi
+# shellcheck source=lib/setup-common.sh
 source "$setup_common_library"
 
-# 進行状況の見出しを出力
 step() {
   printf '\n==> %s\n' "$1"
 }
@@ -60,8 +40,7 @@ record_failure() {
   printf 'warning: %s failed (exit %d), continuing\n' "$label" "$status" >&2
 }
 
-# 実行しなかったステップを記録する。
-# 失敗ではないが「完了した」とも言えないため、サマリで必ず一覧に出す
+# 未実行のステップは失敗と区別し、サマリに必ず表示する
 record_skip() {
   local reason="$1"
 
@@ -71,18 +50,16 @@ record_skip() {
 
 run_and_record() {
   local label="$1"
-  local status
   shift
 
   if "$@"; then
     last_run_and_record_status=0
     return 0
   else
-    status=$?
+    last_run_and_record_status=$?
   fi
 
-  last_run_and_record_status="$status"
-  record_failure "$label" "$status"
+  record_failure "$label" "$last_run_and_record_status"
 }
 
 # sudo timestamp が有効なら再利用し、失効済みなら端末から再認証する
@@ -183,13 +160,21 @@ install_zsh_plugin() {
     return 1
   fi
 
-  # 認証待ちで固まらないよう、他の取得処理と同じ非対話ラッパを使う
+  # 認証待ちを避けて非対話で取得する
   setup_run_noninteractive_git clone --quiet -- "$url" "$target" || return
   if [[ ! -f "$target/$entrypoint" || ! -r "$target/$entrypoint" ]]; then
     printf 'error: zsh plugin entrypoint was not installed: %s\n' \
       "$target/$entrypoint" >&2
     return 1
   fi
+}
+
+list_claude_marketplaces() {
+  "$claude_executable" plugin marketplace list --json |
+    jq -ce '
+      arrays // error("expected an array")
+      | [.[] | objects | .name? | strings]
+    '
 }
 
 if ((EUID == 0)); then
@@ -207,10 +192,6 @@ if [[ -z "${HOME:-}" || "$HOME" != /* ]]; then
   exit 1
 fi
 
-# ============================================================================
-# sudo 認証、macOS 設定
-# ============================================================================
-
 step 'sudo'
 # 認証処理を含むどの経路で終了しても sudo timestamp を無効化する
 trap 'sudo -k 2>/dev/null || true' EXIT
@@ -219,20 +200,8 @@ ensure_sudo
 step 'macos/defaults.sh'
 run_and_record 'macos/defaults.sh' "$repo_dir/macos/defaults.sh"
 
-# ============================================================================
-# Homebrew、dotfiles リンク
-# ============================================================================
-
 step 'Homebrew'
-homebrew_ready=0
 if setup_homebrew; then
-  homebrew_ready=1
-else
-  status=$?
-  record_failure 'Homebrew' "$status"
-fi
-
-if ((homebrew_ready)); then
   step 'brew bundle'
   # MDM 初期構成などで Homebrew ディレクトリの所有者が変わっていると bundle が失敗する
   brew_cellar="$("$brew_executable" --prefix)/Cellar"
@@ -251,6 +220,8 @@ if ((homebrew_ready)); then
     record_failure 'brew bundle sudo authorization' "$status"
   fi
 else
+  status=$?
+  record_failure 'Homebrew' "$status"
   record_skip 'brew bundle (Homebrew が使えないため)'
 fi
 
@@ -271,8 +242,7 @@ run_and_record 'macos/setup-typeless.sh' "$repo_dir/macos/setup-typeless.sh"
 
 step 'login items'
 
-# Logi Options+ の機能はインストーラが登録するバックグラウンドサービスで常駐する。
-# メインアプリのウィンドウはログイン時に不要なため、旧セットアップで追加した項目を除去する。
+# Logi Options+ はバックグラウンドサービスで常駐するため、メインアプリのログイン項目を除去する。
 logi_options_app=/Applications/logioptionsplus.app
 run_and_record \
   "login item removed: $logi_options_app" \
@@ -314,13 +284,10 @@ end run
 APPLESCRIPT
 done
 
-# ============================================================================
 # mise によるグローバル開発ツール (.config/mise/config.toml が管理する)
-# ============================================================================
 
 step 'mise install'
-# mise install は設定が無くても「導入済み」と言って正常終了するため、
-# 設定の有無を先に確かめる (無いのは link ステップの失敗なので skip ではなく失敗)
+# 設定がなくても mise install は成功するため、リンク失敗を先に検出する。
 mise_config="${XDG_CONFIG_HOME:-$HOME/.config}/mise/config.toml"
 if ! command -v mise >/dev/null 2>&1; then
   record_skip 'mise install (mise が使えないため)'
@@ -332,16 +299,10 @@ else
   run_and_record 'mise install' mise install
 fi
 
-# ============================================================================
-# Git の共通設定
-# ============================================================================
-
 step 'scripts/setup-git.sh'
 run_and_record 'scripts/setup-git.sh' "$repo_dir/scripts/setup-git.sh"
 
-# ============================================================================
 # zsh プラグイン (.zshrc が ~/.zsh/plugins/*/*.plugin.zsh を一括ロードする)
-# ============================================================================
 
 step 'zsh plugins'
 plugins_dir="$HOME/.zsh/plugins"
@@ -363,10 +324,6 @@ else
   record_failure 'zsh plugins directory' "$status"
 fi
 
-# ============================================================================
-# Claude Code CLI / 公式プラグイン / Codex CLI
-# ============================================================================
-
 step 'Claude Code'
 if ! command -v claude >/dev/null 2>&1 && [[ ! -x "$HOME/.local/bin/claude" ]]; then
   run_and_record \
@@ -383,16 +340,7 @@ if [[ -z "$claude_executable" ]]; then
   record_skip 'Claude Code plugins (Claude Code が使えないため)'
 elif ! command -v jq >/dev/null 2>&1; then
   record_skip 'Claude Code plugins (jq が使えないため)'
-elif claude_marketplaces="$(
-  "$claude_executable" plugin marketplace list --json |
-    jq -ce '
-      if type == "array" then
-        [.[] | objects | .name? | strings]
-      else
-        error("expected an array")
-      end
-    '
-)"; then
+elif claude_marketplaces="$(list_claude_marketplaces)"; then
   claude_official_marketplace_ready=1
   if ! jq -e \
     'index("claude-plugins-official") != null' \
@@ -401,25 +349,14 @@ elif claude_marketplaces="$(
       'Claude Code marketplace: claude-plugins-official' \
       "$claude_executable" plugin marketplace add \
       anthropics/claude-plugins-official --scope user
-    claude_marketplace_add_status="$last_run_and_record_status"
-
-    if claude_marketplaces="$(
-      "$claude_executable" plugin marketplace list --json |
-        jq -ce '
-          if type == "array" then
-            [.[] | objects | .name? | strings]
-          else
-            error("expected an array")
-          end
-        '
-    )" && jq -e \
+    if claude_marketplaces="$(list_claude_marketplaces)" && jq -e \
       'index("claude-plugins-official") != null' \
       <<<"$claude_marketplaces" >/dev/null; then
       :
     else
       status=$?
       claude_official_marketplace_ready=0
-      if ((claude_marketplace_add_status == 0)); then
+      if ((last_run_and_record_status == 0)); then
         record_failure 'Claude Code marketplace verification' "$status"
       fi
       record_skip 'Claude Code plugins (公式 marketplace を登録できないため)'
@@ -430,21 +367,12 @@ elif claude_marketplaces="$(
     if claude_plugins="$(
       "$claude_executable" plugin list --json |
         jq -ce '
-          if type == "array" then
-            [
-              .[]
-              | objects
-              | select(.scope == "user")
-              | select(.id? | type == "string")
-              | {id, enabled: (.enabled == true)}
-            ]
-          else
-            error("expected an array")
-          end
+          arrays // error("expected an array")
+          | [.[] | objects | select(.scope == "user") | .id? | strings]
         '
     )"; then
       if jq -e \
-        'any(.[]; .id == "context7@claude-plugins-official")' \
+        'index("context7@claude-plugins-official") != null' \
         <<<"$claude_plugins" >/dev/null; then
         run_and_record \
           'Claude Code plugin removed: context7@claude-plugins-official' \
@@ -455,7 +383,7 @@ elif claude_marketplaces="$(
         linear@claude-plugins-official \
         microsoft-docs@claude-plugins-official; do
         if jq -e --arg plugin "$claude_plugin" \
-          'any(.[]; .id == $plugin)' \
+          'index($plugin) != null' \
           <<<"$claude_plugins" >/dev/null; then
           continue
         fi
@@ -504,39 +432,25 @@ elif codex_plugins="$(
       end
     '
 )"; then
-  for codex_plugin in linear@openai-curated; do
-    if jq -e --arg plugin "$codex_plugin" \
-      'index($plugin) != null' \
-      <<<"$codex_plugins" >/dev/null; then
-      continue
-    fi
-
+  if ! jq -e \
+    'index("linear@openai-curated") != null' \
+    <<<"$codex_plugins" >/dev/null; then
     run_and_record \
-      "Codex plugin: $codex_plugin" \
-      "$codex_executable" plugin add "$codex_plugin"
-  done
+      'Codex plugin: linear@openai-curated' \
+      "$codex_executable" plugin add linear@openai-curated
+  fi
 else
   codex_plugin_list_status=$?
   record_failure 'Codex plugin list' "$codex_plugin_list_status"
 fi
 
-# ============================================================================
-# Codex Custom Pets
-# ============================================================================
-
 step 'Codex Custom Pets'
 run_and_record 'Codex Custom Pets' "$repo_dir/pets/setup.sh"
-
-# ============================================================================
-# Agent Skills
-# ============================================================================
 
 step 'Agent Skills'
 run_and_record 'Agent Skills' "$repo_dir/skills/setup.sh"
 
-# ============================================================================
 # 非公開設定のオーバーレイ (private リポジトリ、アクセス可能な場合のみ)
-# ============================================================================
 
 step 'dotfiles-private overlay'
 if [[ "${DOTFILES_PRIVATE_SKIP:-0}" == 1 ]]; then
@@ -545,7 +459,7 @@ else
   overlay_dir="${DOTFILES_PRIVATE_DIR:-$HOME/src/pych/dotfiles-private}"
   overlay_url="${DOTFILES_PRIVATE_REPO_URL:-https://github.com/pych-ky/dotfiles-private.git}"
   overlay_ready=1
-  # 未取得なら、まずアクセス可否を非対話で確認してから clone する (認証待ちで固まらない)
+  # 認証待ちを避け、非対話でアクセス確認してから clone する
   if [[ ! -d "$overlay_dir" ]]; then
     if setup_run_noninteractive_git ls-remote -- "$overlay_url" HEAD >/dev/null 2>&1; then
       mkdir -p "$(dirname "$overlay_dir")" || true
@@ -559,7 +473,7 @@ else
       overlay_ready=0
     fi
   fi
-  # 取得済みディレクトリが正しいリポジトリ (origin 一致・ルート・実行可能な setup.sh) か検証
+  # 取得済みの origin・ルート・setup.sh の実行権を検証する
   if ((overlay_ready)); then
     if overlay_error="$(
       setup_verify_repository \
@@ -588,7 +502,7 @@ if ((${#failed_steps[@]} > 0)); then
   exit 1
 fi
 
-# 未実行があるまま「完了」と言わない (受け入れ条件を満たしたかを誤認させないため)
+# 未実行がある場合は完了と表示しない
 if ((${#skipped_steps[@]} > 0)); then
   printf 'bootstrap finished without failures, but some steps were skipped\n'
   printf 'satisfy their requirements and rerun ./bootstrap.sh to complete setup\n'

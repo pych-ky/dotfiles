@@ -26,7 +26,6 @@ def deny(reason):
     raise Denied(reason)
 
 
-# CLI の既知の秘密出力と、保護機構の迂回を拒否する。
 SECRET_OUTPUT_REASON = "資格情報や秘密値を直接出力・取得する操作は許可していません。"
 EXEC_OVERRIDE_REASON = "保護機構や認証処理を迂回する実行設定は許可していません。"
 DESTRUCTIVE_REASON = "強制的な変更破棄、検証の迂回、ディスクの破壊は許可していません。"
@@ -64,7 +63,6 @@ COMPOSE_VALUE_OPTIONS = {
     "--progress", "--project-directory", "-p", "--project-name",
 }
 
-# サービス名と操作名を分け、秘密を返す操作を短い表で維持する。
 SECRET_SUBCOMMANDS = {
     "ghtkn": {"get", "exec", "git-credential"},
     "op": {"read", "inject", "run", "plugin run", "item get", "document get", "signin", "connect token create", "service-account create"},
@@ -329,9 +327,7 @@ def inspect_git(args, words, cwd):
             return
     if command == "reflog" and has_option(args, {"--dry-run"}, "n", CLI_VALUE_OPTIONS["git"], negated={"--no-dry-run"}):
         return
-    if command == "push" and has_option(args, {"--force", "--mirror", "--prune"}, "f"):
-        deny(DESTRUCTIVE_REASON)
-    if command == "push" and any(word.startswith("+") for word in words[1:]):
+    if command == "push" and (has_option(args, {"--force", "--mirror", "--prune"}, "f") or any(word.startswith("+") for word in words[1:])):
         deny(DESTRUCTIVE_REASON)
     if command == "reset" and has_option(args, {"--hard"}):
         deny(DESTRUCTIVE_REASON)
@@ -355,9 +351,8 @@ def inspect_security(args, words):
     command = words[0]
     if command in {"dump-keychain", "export-smartcard"}:
         deny(SECRET_OUTPUT_REASON)
-    if command in {"find-generic-password", "find-internet-password"}:
-        if has_option(args, set(), "wg"):
-            deny(SECRET_OUTPUT_REASON)
+    if command in {"find-generic-password", "find-internet-password"} and has_option(args, set(), "wg"):
+        deny(SECRET_OUTPUT_REASON)
     if command == "export":
         types = option_values(args, {"-t"})
         if not types or any(value not in {"certs", "pubKeys"} for value in types):
@@ -427,7 +422,7 @@ def inspect_gh(args, words, cwd):
                 deny(SECRET_OUTPUT_REASON)
 
 
-def inspect_terraform(command, args, words, cwd):
+def inspect_terraform(args, words, cwd):
     for value in option_values(args, {"--tf-path", "--terragrunt-tfpath", "--shell", "--terragrunt-iam-assume-role-command"}):
         scan(value, cwd)
     if has_option(args, {"--help", "-help", "-h"}):
@@ -476,7 +471,7 @@ def safe_container_format(value):
     return True
 
 
-def inspect_container(command, args, words):
+def inspect_container(args, words):
     if has_option(args, {"--help"}):
         return
     formats = option_values(args, {"--format", "-f"})
@@ -501,8 +496,7 @@ def inspect_container(command, args, words):
         deny(EXEC_OVERRIDE_REASON)
 
 
-def inspect_environment(command, args):
-    words = cli_words(command, args)
+def inspect_environment(command, args, words):
     if command == "printenv":
         if has_option(args, {"--help", "--version"}):
             return
@@ -575,13 +569,13 @@ def inspect_cli(command, args, cwd):
     elif command == "gh":
         inspect_gh(args, words, cwd)
     elif command in {"terraform", "terragrunt"}:
-        inspect_terraform(command, args, words, cwd)
+        inspect_terraform(args, words, cwd)
     elif command in {"kubectl", "oc"}:
         inspect_kubernetes(command, args, words)
     elif command in {"docker", "podman", "nerdctl"}:
-        inspect_container(command, args, words)
+        inspect_container(args, words)
     elif command in {"printenv", "set", "export", "declare", "typeset"}:
-        inspect_environment(command, args)
+        inspect_environment(command, args, words)
     elif command in {"ps", "pgrep", "launchctl", "sysctl"}:
         inspect_process(command, args)
     elif command in {"ssh", "scp", "sftp"}:
@@ -1132,7 +1126,6 @@ class Word:
     value: str
     parameters: set = field(default_factory=set)
     quoted: bool = False
-    heredoc: bool = False
 
 
 def ansi_c_quote(text, index):
@@ -1347,7 +1340,7 @@ def shell_tokens(text, literal=False):
                             nested.extend(inner)
                             for word in expanded:
                                 names.update(word.parameters)
-                        tokens[token_index] = Word(body, names, is_quoted, True)
+                        tokens[token_index] = Word(body, names, is_quoted)
                     pending.clear()
                 continue
         value.append(char)
@@ -1732,7 +1725,7 @@ def interpreter_input(command, args):
         "awk": {"-F", "-v", "-f"}, "gawk": {"-F", "-v", "-f"},
         "ruby": {"-I", "-r"}, "perl": {"-I", "-M"}, "php": {"-d", "-c"},
     }
-    chunks, module, script, index = [], None, None, 0
+    chunks, script, index = [], None, 0
     while index < len(args):
         arg = args[index]
         if arg == "--":
@@ -1758,21 +1751,16 @@ def interpreter_input(command, args):
                     if not arg[position + 1:]:
                         index += 1
                     break
-                if command in {"python", "python3"} and flag == "m":
-                    module = arg[position + 1:]
-                    if not module:
-                        index += 1
-                        if index >= len(args):
-                            raise ParseError("Python module is missing")
-                        module = args[index]
-                    return None, [module] + args[index + 1:], None
-                if flag in CODE_OPTIONS[command]:
+                is_module = command in {"python", "python3"} and flag == "m"
+                if is_module or flag in CODE_OPTIONS[command]:
                     value = arg[position + 1:]
                     if not value:
                         index += 1
                         if index >= len(args):
-                            raise ParseError("inline code is missing")
+                            raise ParseError("Python module is missing" if is_module else "inline code is missing")
                         value = args[index]
+                    if is_module:
+                        return None, [value] + args[index + 1:], None
                     chunks.append(value)
                     break
         else:
@@ -1784,7 +1772,7 @@ def interpreter_input(command, args):
         if chunks and command in {"python", "python3"}:
             break
         index += 1
-    return "\n".join(chunks) if chunks else None, module, script
+    return "\n".join(chunks) if chunks else None, None, script
 
 
 def script_uses_stdin(path):
@@ -1813,8 +1801,8 @@ def inspect_argv(argv, cwd, depth, stdin=None, external=False):
     args = argv[1:]
     if "$" in command or "`" in command or UNKNOWN_ARGUMENT in command:
         raise UnsupportedSyntax("dynamic command name")
-    for arg in args:
-        if command in {"export", "readonly", "declare", "typeset", "local", "env", "sudo"}:
+    if command in {"export", "readonly", "declare", "typeset", "local", "env", "sudo"}:
+        for arg in args:
             inspect_assignment(arg, cwd)
     if (
         command in {"read", "mapfile", "readarray"}
@@ -1902,12 +1890,9 @@ def inspect_argv(argv, cwd, depth, stdin=None, external=False):
             if not arg.startswith("-"):
                 if credential_path(arg, cwd):
                     deny("認証情報ファイルをスクリプトとして読み込むことは許可していません。")
-                if script_uses_stdin(arg):
-                    if external:
-                        raise UnsupportedSyntax("uninspected shell input")
-                    if stdin is not None:
-                        scan(stdin, cwd, depth + 1)
-                return
+                if not script_uses_stdin(arg):
+                    return
+                break
             index += 1
         if external:
             raise UnsupportedSyntax("uninspected shell input")

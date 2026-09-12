@@ -1,17 +1,10 @@
-## ============================================================================
 ## Codex ベース設定 (/etc/codex/config.toml として配置)
-## ============================================================================
 
-# Codex 起動時の設定マージ対象 (同じキーは ~/.codex 側を優先)
-# - /etc/codex/config.toml : この dotfiles が提供するベース設定
-# - ~/.codex/config.toml   : Codex のローカル設定 (git 管理外)
+# 起動時に ~/.codex/config.toml (git 管理外) とマージし、同じキーはローカル設定を優先する
 
 
-## ============================================================================
 ## コア設定
-## ============================================================================
 
-# メインモデル
 model        = "gpt-6-astra"  # 通常タスク用モデル
 review_model = "gpt-6-astra"  # コードレビュー用モデル
 
@@ -21,36 +14,25 @@ model_reasoning_summary  = "auto"    # 推論要約の形式 (auto / concise / d
 hide_agent_reasoning     = true      # エージェント推論過程を非表示
 show_raw_agent_reasoning = false     # 生の推論データを非表示
 
-# 応答スタイル
 personality = "pragmatic"  # 性格プリセット (none / friendly / pragmatic)
 
-# Web 検索
 web_search = "live"  # Web 検索モード (disabled / cached / live)
 
-# 認証情報の保管場所
-# Codex 自身の認証情報は file 保管とし、外部 CLI の credential store と分ける。
+# Codex の認証情報を外部 CLI の credential store と分け、~/.codex/auth.json を Claude の Read deny で保護する。
 # Git などが credential helper 経由で Keychain を内部利用することは制限しない。
-# ~/.codex/auth.json は Claude 側の組み込み Read deny に登録済み
 cli_auth_credentials_store = "file"  # CLI 認証情報の保存先 (auto / keyring / file)
 
 
-## ============================================================================
 ## 承認ポリシー & パーミッション
-## ============================================================================
 
 approval_policy     = "on-request"          # 操作の承認要否 (untrusted / on-request / never)
 approvals_reviewer  = "user"                # 追加承認はユーザーに確認する
 default_permissions = "保護付きフルアクセス"
 
 
-## ============================================================================
 ## 既定許可と認証情報・shell 履歴の保護
-## ============================================================================
-#
-# ルート全体を読み書き可能にし、外部 CLI が内部利用する認証材は deny しない。
 # Codex / Claude Code 自身の認証情報と shell 履歴・snapshot を固定 deny にする。
 # 会話履歴・session transcript・file history・paste cache の調査は許可する。
-# その他の認証情報の直接取得は AGENTS.md で禁止し、既知の取得経路を PreToolUse で拒否する。
 # permission profile は旧 sandbox_mode / [sandbox_workspace_write] と併用しない。
 [permissions."保護付きフルアクセス"]
 description = "AI エージェントの認証情報と shell 履歴・snapshot を除くフルアクセス"
@@ -59,10 +41,8 @@ description = "AI エージェントの認証情報と shell 履歴・snapshot �
 ":root" = "write"
 "~/.codex/plugins/cache/openai-bundled/browser" = "read"  # 信頼済み Browser RPC のコードを変更不可にする
 
-# Git、クラウド、コンテナ、パッケージ管理 CLI の設定・認証ストア、
-# 秘密鍵、keystore、service-account、環境ファイルは
-# filesystem deny に入れない。CLI 自身による通常利用を既定で許可し、
-# 内容の直接取得と秘密値を返す既知の操作を PreToolUse で拒否する。
+# 外部 CLI の設定・認証ストア、秘密鍵、keystore、service-account、環境ファイルは、CLI の通常利用のため filesystem deny に含めない。
+# 認証情報の直接取得は AGENTS.md で禁止し、内容の直接取得と秘密値を返す既知の操作を PreToolUse で拒否する。
 
 # AI エージェントの認証情報・shell snapshot
 "~/.codex/auth.json"                          = "deny"
@@ -88,21 +68,16 @@ description = "AI エージェントの認証情報と shell 履歴・snapshot �
 enabled = true  # コマンドのネットワークアクセスを制限しない
 
 
-## ============================================================================
 ## シェル環境
-## ============================================================================
 
 [shell_environment_policy]
 inherit                 = "all"   # CLI の通常設定を継承し、秘密値だけを下で除外する
 ignore_default_excludes = true    # TOKEN_FILE などの非秘密パスまで落とす既定除外は使わない
 set                     = { GIT_TERMINAL_PROMPT = "0", AWS_PAGER = "" }  # Git の認証待ちと AWS の外部 pager 起動を防ぐ
 
-# 除外パターンは正式なテーブル表記で書く。
-# 旧来の exclude / include_only 配列とは併用できない (Codex が読み込み時に弾く)。
-# filter 名は大文字小文字を区別しないため、同名の大小文字違いは重ねない。
-# エージェントは秘密を環境変数へ設定しない新しいターミナルから起動する前提とし、
-# 秘密値だけを除外する。起動元の非秘密な認証・実行設定は継承する。
-# コマンドに直接書かれた秘密取得を PreToolUse で検査する。
+# filters はテーブルで指定する。exclude / include_only 配列との併用は読み込み時に拒否される。
+# filter 名は大文字小文字を区別しないため、大小文字違いを重ねない。
+# 秘密を環境変数に設定していない新しいターミナルから起動し、非秘密の認証・実行設定を継承する。
 [shell_environment_policy.filters]
 "*PASSWORD"                       = "exclude"
 "*PASSPHRASE"                     = "exclude"
@@ -132,9 +107,7 @@ set                     = { GIT_TERMINAL_PROMPT = "0", AWS_PAGER = "" }  # Git �
 "TF_TOKEN_*"                      = "exclude"
 
 
-## ============================================================================
 ## ターミナル表示
-## ============================================================================
 
 [tui]
 notifications          = true  # デスクトップ通知を有効化
@@ -151,17 +124,13 @@ status_line = [
   "fast-mode",             # Fast モードの有効/無効
 ]
 
-## ============================================================================
 ## 履歴
-## ============================================================================
 
 [history]
 persistence = "save-all"  # 履歴の永続化 (none / save-all)
 
 
-## ============================================================================
 ## 機能フラグ
-## ============================================================================
 
 [features]
 hooks              = true   # 共通 PreToolUse ガードを有効にする
@@ -169,9 +138,7 @@ shell_snapshot     = false  # shell 状態や環境変数を平文ファイル�
 prevent_idle_sleep = true  # アイドル時のスリープを防止
 
 
-## ============================================================================
 ## 実行前ガード
-## ============================================================================
 
 [[hooks.PreToolUse]]
 matcher = "^Bash$"
@@ -183,88 +150,64 @@ timeout       = 30
 statusMessage = "Bash コマンドを検査中"
 
 
-## ============================================================================
 ## Plugins
-## ============================================================================
 
-# Browser
 [plugins."browser@openai-bundled"]
 enabled = true
 
-# Chrome
 [plugins."chrome@openai-bundled"]
 enabled = true
 
-# Computer Use
 [plugins."computer-use@openai-bundled"]
 enabled = true
 
-# GitHub
 [plugins."github@openai-curated-remote"]
 enabled = true
 
-# Linear
 [plugins."linear@openai-curated"]
 enabled = true
 
-# Slack
 [plugins."slack@openai-curated"]
 enabled = true
 
-# Notion
 [plugins."notion@openai-curated"]
 enabled = true
 
-# Documents
 [plugins."documents@openai-primary-runtime"]
 enabled = true
 
-# PDF
 [plugins."pdf@openai-primary-runtime"]
 enabled = true
 
-# Spreadsheets
 [plugins."spreadsheets@openai-primary-runtime"]
 enabled = true
 
-# Presentations
 [plugins."presentations@openai-primary-runtime"]
 enabled = true
 
-# Template Creator
 [plugins."template-creator@openai-primary-runtime"]
 enabled = true
 
-# Sites
 [plugins."sites@openai-bundled"]
 enabled = true
 
-# Visualize
 [plugins."visualize@openai-bundled"]
 enabled = true
 
 
-## ============================================================================
 ## Codex App
-## ============================================================================
 
 [desktop]
-# モデル選択
 enabled-reasoning-efforts = ["low", "medium", "high", "xhigh", "persistent", "max", "ultra"]  # 選択肢に表示する推論強度
 
-# 提案表示
 ambient-suggestions-enabled = false  # 提案表示を無効化
 
-# ブラウザ
 "browser-family-enabled:chrome" = true  # Composer で Chrome のブラウザ参照を有効にする
 
-# Appshot
 appshotSoundEnabled = false  # 撮影時の効果音を無効化
 
-# 入力操作
 hotkey-window-projectless-default-enabled = true  # グローバルホットキーでプロジェクトなしウィンドウを開く
 
-# 実行中の follow-up
 followUpQueueMode = "steer"  # 実行中の follow-up で現在の turn を steer
 
 # Git 操作
@@ -278,13 +221,11 @@ git-show-sidebar-pr-icons = true              # Git サイドバーに PR アイ
 mac-menu-bar-enabled      = false             # メニューバー項目を表示しない
 show-context-window-usage = true              # コンテキスト使用量を表示
 
-# レビュー
 reviewDelivery = "inline"  # レビュー結果をインラインで表示
 
 # 電源管理
 preventSleepWhileRunning             = true  # チャット実行中のスリープを防止
 keepRemoteControlAwakeWhilePluggedIn = true  # 電源接続中の Remote Control で app suspension を防止
 
-# ファイルを開く
 [desktop.open-in-target-preferences]
 global = "vscode"  # ファイルを開く既定ターゲット

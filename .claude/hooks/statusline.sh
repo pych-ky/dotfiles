@@ -1,22 +1,11 @@
 #!/usr/bin/env bash
-#
-# ============================================================================
 # Claude Code ステータスラインを Codex TUI の表示構成に合わせる
-# ============================================================================
 
 set -euo pipefail
-
-# ============================================================================
-# グローバル設定
-# ============================================================================
 
 status_separator=' · '
 codex_context_baseline_tokens=12000
 default_claude_context_window=200000
-
-# ============================================================================
-# パス解決
-# ============================================================================
 
 # このスクリプトの実体があるディレクトリを返す
 script_dir() {
@@ -48,16 +37,11 @@ if [[ -z "$codex_config" || ! -r "$codex_config" ]]; then
 fi
 claude_settings="${CODEX_STATUSLINE_CLAUDE_SETTINGS:-$repo_dir/.claude/settings.json}"
 
-# ============================================================================
-# 入力・設定の読み取り
-# ============================================================================
-
-# command が実行可能なら 0 を返す
 has_command() {
   command -v "$1" >/dev/null 2>&1
 }
 
-# Claude から渡された JSON を 1 回で読み取り、表示用の値へ展開する
+# Claude の入力 JSON を 1 回で読み、表示値を設定する
 read_input_json() {
   local payload="$1"
   local key
@@ -68,25 +52,12 @@ read_input_json() {
 
   while IFS= read -r -d '' key && IFS= read -r -d '' value; do
     case "$key" in
-    cwd) input_cwd="$value" ;;
-    model_name) input_model_name="$value" ;;
-    effort) input_effort="$value" ;;
-    transcript_path) input_transcript_path="$value" ;;
-    context_used) input_context_used="$value" ;;
-    context_input_tokens) input_context_input_tokens="$value" ;;
-    context_window_size) input_context_window_size="$value" ;;
-    context_window) input_context_window="$value" ;;
-    used_tokens) input_used_tokens="$value" ;;
-    five_hour_limit) input_five_hour_limit="$value" ;;
-    weekly_limit) input_weekly_limit="$value" ;;
+    cwd | model_name | effort | transcript_path | context_used | context_input_tokens | context_window_size | context_window | used_tokens | five_hour_limit | weekly_limit)
+      printf -v "input_$key" '%s' "$value"
+      ;;
     esac
   done < <(
     jq -j '
-      def scalar:
-        if . == null or . == false then ""
-        elif type == "string" then .
-        else tostring
-        end;
       . as $root
       | (try $root.model catch null) as $model
       |
@@ -130,12 +101,12 @@ read_input_json() {
         )]
       ]
       | .[]
-      | .[0] + "\u0000" + (.[1] | scalar) + "\u0000"
+      | .[0] + "\u0000" + (.[1] // "" | tostring) + "\u0000"
     ' 2>/dev/null <<<"$payload" || true
   )
 }
 
-# Claude 設定を 1 回で読み取り、入力 JSON のフォールバック値へ展開する
+# Claude 設定を 1 回で読み、入力 JSON のフォールバック値を設定する
 read_claude_settings() {
   local file="$1"
   local key
@@ -146,22 +117,16 @@ read_claude_settings() {
 
   while IFS= read -r -d '' key && IFS= read -r -d '' value; do
     case "$key" in
-    model) settings_model="$value" ;;
-    effort) settings_effort="$value" ;;
+    model | effort) printf -v "settings_$key" '%s' "$value" ;;
     esac
   done < <(
     jq -j '
-      def scalar:
-        if . == null or . == false then ""
-        elif type == "string" then .
-        else tostring
-        end;
       [
         ["model", (try .model catch null)],
         ["effort", (try .effortLevel catch null)]
       ]
       | .[]
-      | .[0] + "\u0000" + (.[1] | scalar) + "\u0000"
+      | .[0] + "\u0000" + (.[1] // "" | tostring) + "\u0000"
     ' "$file" 2>/dev/null || true
   )
 }
@@ -199,10 +164,6 @@ read_status_items() {
     tr -d '"' || true
 }
 
-# ============================================================================
-# Codex 互換の値整形
-# ============================================================================
-
 # ホームディレクトリ配下のパスを ~ 表記に変換する
 format_directory_display() {
   local dir="${1:-$PWD}"
@@ -217,7 +178,6 @@ format_directory_display() {
   fi
 }
 
-# 指定ディレクトリの現在の Git ブランチ名を返す
 current_git_branch() {
   local dir="$1"
 
@@ -279,59 +239,37 @@ context_used_percent() {
   [[ "$used_tokens" =~ ^[0-9]+$ ]] || used_tokens=0
   [[ "$context_window" =~ ^[0-9]+$ ]] || context_window="$default_claude_context_window"
 
-  awk \
-    -v used_tokens="$used_tokens" \
-    -v context_window="$context_window" \
-    -v baseline="$codex_context_baseline_tokens" '
-      BEGIN {
-        if (context_window <= baseline) {
-          print 100
-          exit
-        }
-
-        effective_window = context_window - baseline
-        used = used_tokens - baseline
-        if (used < 0) {
-          used = 0
-        }
-
-        percent = (used / effective_window) * 100
-        if (percent < 0) {
-          percent = 0
-        } else if (percent > 100) {
-          percent = 100
-        }
-
-        rounded = int(percent)
-        if (percent > rounded) {
-          rounded += 1
-        }
-
-        printf "%d", rounded
-      }
-    '
+  token_usage_percent "$used_tokens" "$context_window" "$codex_context_baseline_tokens"
 }
 
-# context window に対する単純な使用率を返す
+# baseline がある場合は差し引き、context window に対する使用率を返す
 token_usage_percent() {
   local used_tokens="$1"
   local context_window="$2"
+  local baseline="${3:-0}"
 
   [[ "$used_tokens" =~ ^[0-9]+$ ]] || return 0
   [[ "$context_window" =~ ^[0-9]+$ ]] || return 0
 
   awk \
     -v used_tokens="$used_tokens" \
-    -v context_window="$context_window" '
+    -v context_window="$context_window" \
+    -v baseline="$baseline" '
       BEGIN {
-        if (context_window <= 0) {
+        if (context_window <= baseline) {
+          if (baseline > 0) {
+            print 100
+          }
           exit
         }
 
-        percent = (used_tokens / context_window) * 100
-        if (percent < 0) {
-          percent = 0
-        } else if (percent > 100) {
+        used = used_tokens - baseline
+        if (used < 0) {
+          used = 0
+        }
+
+        percent = (used / (context_window - baseline)) * 100
+        if (percent > 100) {
           percent = 100
         }
 
@@ -345,7 +283,7 @@ token_usage_percent() {
     '
 }
 
-# reasoning が未指定のときは Codex 表示に合わせて default と表示する
+# reasoning 未指定時は Codex と同じ default 表示にする
 reasoning_label() {
   local value="$1"
 
@@ -354,20 +292,6 @@ reasoning_label() {
   else
     printf '%s' "$value"
   fi
-}
-
-# Codex の service_tier から Fast 表示を返す
-fast_mode_label() {
-  local service_tier="$1"
-
-  case "$service_tier" in
-  fast | priority)
-    printf 'Fast on'
-    ;;
-  *)
-    printf 'Fast off'
-    ;;
-  esac
 }
 
 # rate limit の使用率が取れたときだけ表示用ラベルを返す
@@ -384,34 +308,10 @@ rate_limit_label() {
   printf '%s %s%% used' "$label" "$used_percent"
 }
 
-# ============================================================================
-# 色付け
-# ============================================================================
-
 status_line_use_colors="$(toml_scalar "$codex_config" status_line_use_colors)"
 [[ -n "$status_line_use_colors" ]] || status_line_use_colors=true
 
-# Codex の status_line 項目に対応する ANSI color code を返す
-style_code_for_item() {
-  local item="$1"
-
-  case "$item" in
-  model | model-name | model-with-reasoning | reasoning | run-state | status | fast-mode | raw-output | permissions | approval-mode | approval | codex-version | thread-id | session-id)
-    printf '36'
-    ;;
-  current-dir | project-name | project | project-root | context-remaining | context-used | context-usage | context-window-size | used-tokens | total-input-tokens | total-output-tokens | task-progress)
-    printf '32'
-    ;;
-  git-branch | pull-request-number | branch-changes | five-hour-limit | weekly-limit | thread-title)
-    printf '35'
-    ;;
-  *)
-    printf '2'
-    ;;
-  esac
-}
-
-# 色設定が有効なときだけテキストに ANSI color を付ける
+# 色設定が有効なときだけ項目の ANSI color を付ける
 styled() {
   local item="$1"
   local text="$2"
@@ -422,7 +322,20 @@ styled() {
     return 0
   fi
 
-  code="$(style_code_for_item "$item")"
+  case "$item" in
+  model | model-name | model-with-reasoning | reasoning | run-state | status | fast-mode | raw-output | permissions | approval-mode | approval | codex-version | thread-id | session-id)
+    code=36
+    ;;
+  current-dir | project-name | project | project-root | context-remaining | context-used | context-usage | context-window-size | used-tokens | total-input-tokens | total-output-tokens | task-progress)
+    code=32
+    ;;
+  git-branch | pull-request-number | branch-changes | five-hour-limit | weekly-limit | thread-title)
+    code=35
+    ;;
+  *)
+    code=2
+    ;;
+  esac
   printf '\033[%sm%s\033[0m' "$code" "$text"
 }
 
@@ -442,10 +355,6 @@ append_segment() {
   fi
   status_line+="$(styled "$item" "$text")"
 }
-
-# ============================================================================
-# エントリポイント
-# ============================================================================
 
 main() {
   local input
@@ -481,28 +390,24 @@ main() {
   local reasoning
   reasoning="$(reasoning_label "$claude_effort")"
 
-  local transcript_path="$input_transcript_path"
   local context_used="$input_context_used"
   if [[ -z "$context_used" ]]; then
-    local context_window_tokens context_window_size
-    context_window_tokens="$input_context_input_tokens"
-    context_window_size="$input_context_window_size"
-    context_used="$(token_usage_percent "$context_window_tokens" "$context_window_size")"
+    context_used="$(token_usage_percent "$input_context_input_tokens" "$input_context_window_size")"
   fi
   if [[ -z "$context_used" ]]; then
-    local context_window used_tokens
-    context_window="$input_context_window"
-    [[ -n "$context_window" ]] || context_window="$default_claude_context_window"
+    local used_tokens
     used_tokens="$input_used_tokens"
-    [[ -n "$used_tokens" ]] || used_tokens="$(last_transcript_usage_total "$transcript_path")"
-    context_used="$(context_used_percent "$used_tokens" "$context_window")"
+    [[ -n "$used_tokens" ]] || used_tokens="$(last_transcript_usage_total "$input_transcript_path")"
+    context_used="$(context_used_percent "$used_tokens" "$input_context_window")"
   fi
   context_used="$(ceil_percent "$context_used")"
 
-  local service_tier five_hour_limit weekly_limit
+  local service_tier
   service_tier="$(toml_scalar "$codex_config" service_tier)"
-  five_hour_limit="$input_five_hour_limit"
-  weekly_limit="$input_weekly_limit"
+  local fast_mode='Fast off'
+  case "$service_tier" in
+  fast | priority) fast_mode='Fast on' ;;
+  esac
 
   local status_line=''
   local -a status_items=()
@@ -536,13 +441,13 @@ main() {
       append_segment "$item" "Context ${context_used}% used"
       ;;
     fast-mode)
-      append_segment "$item" "$(fast_mode_label "$service_tier")"
+      append_segment "$item" "$fast_mode"
       ;;
     five-hour-limit)
-      append_segment "$item" "$(rate_limit_label "5h limit" "$five_hour_limit")"
+      append_segment "$item" "$(rate_limit_label "5h limit" "$input_five_hour_limit")"
       ;;
     weekly-limit)
-      append_segment "$item" "$(rate_limit_label "Weekly limit" "$weekly_limit")"
+      append_segment "$item" "$(rate_limit_label "Weekly limit" "$input_weekly_limit")"
       ;;
     *) ;;
     esac
