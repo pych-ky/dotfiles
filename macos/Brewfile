@@ -2,9 +2,6 @@
 # 任意の GUI アプリを Homebrew で導入する場合は、コメントアウトを外して brew bundle を再実行する。
 # OS 全体で使う CLI と GUI アプリをここで管理し、バージョン切り替えが必要なランタイムは mise (.config/mise/config.toml) で管理する。
 
-# サードパーティ tap
-tap "terraform-linters/tap"
-
 # CLI (formula)
 
 # シェル / ターミナル UX
@@ -25,6 +22,7 @@ brew "git"
 brew "git-lfs"
 brew "gibo"
 brew "gh"
+brew "ghq"
 # secretlint は公式バイナリを mise 側で管理する
 
 # ランタイム / パッケージツール
@@ -33,7 +31,7 @@ brew "mise"
 brew "uv"
 
 # クラウド / IaC / ポリシー / Kubernetes
-# aws / terraform / terragrunt は mise 側で管理し、ここには重複して置かない
+# aws / terraform / terragrunt / tflint は mise 側で管理し、ここには重複して置かない
 # kubectl / helm は Rancher Desktop 同梱 (~/.rd/bin) を使う
 brew "azure-cli"
 brew "opa"
@@ -51,6 +49,7 @@ brew "libpq"
 # cask "google-chrome"
 
 # ターミナル
+cask "ghostty"
 cask "wezterm"
 
 # 開発エディタ / AI ツール
@@ -73,6 +72,7 @@ cask "licecap"
 cask "logi-options+"
 cask "maccy"
 cask "notunes"
+cask "raycast"
 
 # セキュリティ / パスワード管理
 # cask "1password"
@@ -85,6 +85,3 @@ cask "rancher"
 # クラウド CLI (cask 配布)
 cask "gcloud-cli"
 cask "session-manager-plugin"
-
-# IaC linter (cask 配布)
-cask "terraform-linters/tap/tflint", trusted: true

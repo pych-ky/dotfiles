@@ -3,21 +3,23 @@
 
 set -euo pipefail
 
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+setup_common_library="$repo_dir/lib/setup-common.sh"
+if [[ ! -f "$setup_common_library" || -L "$setup_common_library" ]]; then
+  printf 'error: setup common library is missing or unsafe: %s\n' \
+    "$setup_common_library" >&2
+  exit 1
+fi
+# shellcheck source=lib/setup-common.sh
+source "$setup_common_library"
+
 if ((EUID == 0)); then
   printf 'error: do not run scripts/setup-git.sh with sudo or as root\n' >&2
   exit 1
 fi
 
-if [[ -z "${HOME:-}" || "$HOME" != /* || ! -d "$HOME" ]]; then
-  printf 'error: HOME must be an existing absolute directory\n' >&2
-  exit 1
-fi
-
-home_dir="$(cd "$HOME" && pwd -P)"
-if [[ "$home_dir" == / ]]; then
-  printf 'error: HOME must not resolve to /\n' >&2
-  exit 1
-fi
+setup_validate_home || exit 1
 
 if ! command -v git >/dev/null 2>&1; then
   printf 'error: git is required\n' >&2
@@ -102,7 +104,6 @@ fi
 # secretlint/denylist 検査 → リポジトリ固有フック → Git LFS の順に呼ぶ。
 # dispatch は dirname $0 を基準に参照するため、deny-private-strings を同じディレクトリへ配置する。
 
-repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 hooks_dir="$HOME/.local/share/dotfiles/git-hooks"
 
 # フックをリンクし、異なる既存リンクや実体は置き換える。

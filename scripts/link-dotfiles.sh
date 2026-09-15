@@ -4,9 +4,10 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-home_dir="${HOME:-}"
-backup_root= # HOME 検証後に初期化
-backup_dir=  # 最初の退避時に今回分の世代を確保
+backup_root=           # HOME 検証後に初期化
+backup_dir=            # 最初の退避時に今回分の世代を確保
+backup_target=         # 直近の退避先
+backup_compare_target= # 直近の退避元と比較すべきパス
 dry_run=0
 backup_created=0
 backup_keep=5
@@ -15,17 +16,14 @@ managed_targets=() # ツールの自動追記がある退避元
 # Rancher Desktop などが rc ファイルへ自動追記するときの目印
 MANAGED_BLOCK_MARKER='MANAGED BY RANCHER DESKTOP'
 
-process_lock_library="$repo_dir/lib/process-lock.sh"
-if [[ ! -f "$process_lock_library" || -L "$process_lock_library" ]]; then
-  printf 'error: process lock library is missing or unsafe: %s\n' \
-    "$process_lock_library" >&2
+setup_common_library="$repo_dir/lib/setup-common.sh"
+if [[ ! -f "$setup_common_library" || -L "$setup_common_library" ]]; then
+  printf 'error: setup common library is missing or unsafe: %s\n' \
+    "$setup_common_library" >&2
   exit 1
 fi
-source_working_dir="$PWD"
-cd "$repo_dir" || exit 1
-source lib/process-lock.sh
-cd "$source_working_dir" || exit 1
-unset source_working_dir
+# shellcheck source=lib/setup-common.sh
+source "$setup_common_library"
 
 usage() {
   cat <<'EOF'
@@ -42,25 +40,14 @@ Options:
 EOF
 }
 
-# HOME がルート以外の既存絶対パスか検証
+# root 実行を拒否し、HOME を検証
 validate_environment() {
-  local physical_home
-
   if ((EUID == 0)); then
     printf 'error: do not run scripts/link-dotfiles.sh with sudo or as root\n' >&2
     return 1
   fi
 
-  if [[ -z "$home_dir" || "$home_dir" != /* || "$home_dir" == / || ! -d "$home_dir" ]]; then
-    printf 'error: HOME must be an existing absolute path other than /\n' >&2
-    return 1
-  fi
-
-  physical_home="$(cd "$home_dir" && pwd -P)" || return 1
-  if [[ "$physical_home" == / ]]; then
-    printf 'error: HOME must not resolve to /\n' >&2
-    return 1
-  fi
+  setup_validate_home
 }
 
 # dry-run 時はコマンドの表示のみ行う実行ラッパ
@@ -87,7 +74,6 @@ copy_regular_file() {
   local target_relative="${2:-$1}"
   local source="$repo_dir/$source_relative"
   local target="$HOME/$target_relative"
-  local merged_settings=
 
   if [[ ! -f "$source" || -L "$source" ]]; then
     printf 'missing regular source: %s\n' "$source" >&2
@@ -99,67 +85,66 @@ copy_regular_file() {
     return 0
   fi
 
-  # Claude の公開設定を優先し、個人のプラグイン登録だけ保持
-  if [[ "$source_relative" == .claude/settings.json && -f "$target" ]] &&
-    ! cmp -s "$source" "$target"; then
-    if ! command -v jq >/dev/null 2>&1; then
-      printf 'error: jq is required to preserve Claude plugin settings; install jq and rerun\n' >&2
-      return 1
-    fi
-    merged_settings="$(
-      jq -s '
-        .[0] as $base | .[1] as $current |
-        reduce ["enabledPlugins", "extraKnownMarketplaces"][] as $key ($base;
-          if $current | has($key) then
-            .[$key] = (($current[$key] // {}) + ($base[$key] // {}))
-          else
-            .
-          end
-        )
-      ' "$source" "$target"
-    )" || return
-    if [[ ! -L "$target" ]] &&
-      cmp -s "$target" <(printf '%s\n' "$merged_settings"); then
-      printf 'ok: %s (user plugin settings preserved)\n' "$target"
-      return 0
-    fi
-  fi
-
   run mkdir -p "$(dirname "$target")" || return
-
-  if [[ -L "$target" ]]; then
-    run rm "$target" || return
-  elif [[ -e "$target" ]]; then
-    local backup
-    ensure_backup_dir || return
-    backup="$(backup_path "$target")"
-    run mkdir -p "$(dirname "$backup")" || return
-    run mv -n "$target" "$backup" || return
-    if ((!dry_run)) && [[ -e "$target" || -L "$target" ]]; then
-      printf 'error: backup destination already exists: %s\n' "$backup" >&2
-      return 1
-    fi
-    backup_created=1
-
-    local compare_target="$backup"
-    ((dry_run)) && compare_target="$target"
-    if [[ -z "$merged_settings" && -e "$compare_target" ]] &&
-      ! cmp -s "$compare_target" "$source"; then
-      backup_diffs+=("$target (backup: $backup)")
-    fi
+  backup_existing_target "$target" || return
+  if [[ -e "$backup_compare_target" ]] &&
+    ! cmp -s "$backup_compare_target" "$source"; then
+    backup_diffs+=("$target (backup: $backup_target)")
   fi
 
-  if [[ -n "$merged_settings" ]]; then
-    if ((!dry_run)); then
-      printf '%s\n' "$merged_settings" >"$target" || return
-      chmod 600 "$target" || return
-    fi
-  else
-    run cp -p "$source" "$target" || return
-  fi
+  run cp -p "$source" "$target" || return
   if ((dry_run)); then
     printf 'would copy: %s <- %s\n' "$target" "$source"
   else
+    printf 'copied: %s <- %s\n' "$target" "$source"
+  fi
+}
+
+# Claude の公開設定を優先し、個人のプラグイン登録だけ保持して配置
+install_claude_settings() {
+  local source_relative='.claude/settings.json'
+  local source="$repo_dir/$source_relative"
+  local target="$HOME/$source_relative"
+  local merged_settings
+
+  # 不正な source とマージ不要な既存設定は通常のコピーに任せる
+  if [[ ! -f "$source" || -L "$source" || ! -f "$target" ]] ||
+    cmp -s "$source" "$target"; then
+    copy_regular_file "$source_relative"
+    return
+  fi
+
+  if ! command -v jq >/dev/null 2>&1; then
+    printf 'error: jq is required to preserve Claude plugin settings; install jq and rerun\n' >&2
+    return 1
+  fi
+  merged_settings="$(
+    jq -s '
+      .[0] as $base | .[1] as $current |
+      reduce ["enabledPlugins", "extraKnownMarketplaces"][] as $key ($base;
+        if $current | has($key) then
+          .[$key] = (($current[$key] // {}) + ($base[$key] // {}))
+        else
+          .
+        end
+      )
+    ' "$source" "$target"
+  )" || return
+  if [[ ! -L "$target" ]] &&
+    cmp -s "$target" <(printf '%s\n' "$merged_settings"); then
+    printf 'ok: %s (user plugin settings preserved)\n' "$target"
+    return 0
+  fi
+
+  run mkdir -p "$(dirname "$target")" || return
+  # マージ済みの内容を書くため、退避元とリポジトリ版の差異は記録しない
+  backup_existing_target "$target" || return
+
+  if ((dry_run)); then
+    printf 'would copy: %s <- %s\n' "$target" "$source"
+  else
+    printf '%s\n' "$merged_settings" >"$target" || return
+    chmod 600 "$target" || return
     printf 'copied: %s <- %s\n' "$target" "$source"
   fi
 }
@@ -195,6 +180,37 @@ ensure_backup_dir() {
     return 1
   fi
   printf '%s\n' 'link-dotfiles-v1' >"$backup_dir/.dotfiles-backup-generation"
+}
+
+# 実体を退避し、退避先と比較対象を渡す。シンボリックリンクは退避せず削除する
+backup_existing_target() {
+  local target="$1"
+
+  backup_target=
+  backup_compare_target=
+
+  if [[ -L "$target" ]]; then
+    run rm "$target"
+    return
+  fi
+  [[ -e "$target" ]] || return 0
+
+  ensure_backup_dir || return
+  backup_target="$(backup_path "$target")"
+  run mkdir -p "$(dirname "$backup_target")" || return
+  run mv -n "$target" "$backup_target" || return
+  if ((!dry_run)) && [[ -e "$target" || -L "$target" ]]; then
+    printf 'error: backup destination already exists: %s\n' "$backup_target" >&2
+    return 1
+  fi
+  backup_created=1
+
+  # dry-run では退避前の target と比較する
+  if ((dry_run)); then
+    backup_compare_target="$target"
+  else
+    backup_compare_target="$backup_target"
+  fi
 }
 
 # 古いバックアップを backup_keep 世代だけ残して削除
@@ -264,33 +280,17 @@ link_file() {
 
   run mkdir -p "$(dirname "$target")" || return
 
-  if [[ -L "$target" ]]; then
-    run rm "$target" || return
-  elif [[ -e "$target" ]]; then
-    local backup
-    ensure_backup_dir || return
-    backup="$(backup_path "$target")"
-    run mkdir -p "$(dirname "$backup")" || return
-    run mv -n "$target" "$backup" || return
-    if ((!dry_run)) && [[ -e "$target" || -L "$target" ]]; then
-      printf 'error: backup destination already exists: %s\n' "$backup" >&2
-      return 1
-    fi
-    backup_created=1
-    # ローカル変更の見落としを防ぐため、ディレクトリも再帰比較して差異を記録する。
-    # dry-run では退避前の target と比較する。
-    local compare_target="$backup"
-    ((dry_run)) && compare_target="$target"
-    if [[ -e "$compare_target" && -e "$source" ]] &&
-      ! diff -rq "$compare_target" "$source" >/dev/null 2>&1; then
-      backup_diffs+=("$target (backup: $backup)")
-    fi
+  backup_existing_target "$target" || return
+  # ローカル変更の見落としを防ぐため、ディレクトリも再帰比較して差異を記録する
+  if [[ -e "$backup_compare_target" && -e "$source" ]] &&
+    ! diff -rq "$backup_compare_target" "$source" >/dev/null 2>&1; then
+    backup_diffs+=("$target (backup: $backup_target)")
+  fi
 
-    # ツールの自動追記がリンク後にリポジトリを書き換えないよう警告する
-    if [[ -f "$compare_target" ]] &&
-      grep -qF "$MANAGED_BLOCK_MARKER" "$compare_target" 2>/dev/null; then
-      managed_targets+=("$target")
-    fi
+  # ツールの自動追記がリンク後にリポジトリを書き換えないよう警告する
+  if [[ -f "$backup_compare_target" ]] &&
+    grep -qF "$MANAGED_BLOCK_MARKER" "$backup_compare_target" 2>/dev/null; then
+    managed_targets+=("$target")
   fi
 
   # -h で競合するディレクトリリンクを辿らず、配下への誤作成を防ぐ
@@ -357,12 +357,11 @@ main() {
   done
 
   validate_environment || return
-  backup_root="$home_dir/.dotfiles-backup"
+  backup_root="$HOME/.dotfiles-backup"
   if ((!dry_run)); then
     mkdir -p "$backup_root" || return
     process_lock_acquire \
       "$backup_root/.link-dotfiles.lock" \
-      '.link-dotfiles.lock.generation.??????' \
       'dotfiles link' \
       30 || return
     trap 'process_lock_release' EXIT
@@ -377,6 +376,7 @@ main() {
     ".zshrc"
     ".shell/functions/aws.sh"
     ".shell/functions/git-worktree.sh"
+    ".shell/functions/ghq.sh"
     # terminal
     ".wezterm.lua"
     ".config/starship.toml"
@@ -421,11 +421,13 @@ main() {
     fi
   done
 
-  for file in .claude/settings.json .codex/browser/config.toml; do
-    if ! copy_regular_file "$file"; then
-      failed_items+=("$file")
-    fi
-  done
+  if ! install_claude_settings; then
+    failed_items+=(".claude/settings.json")
+  fi
+
+  if ! copy_regular_file ".codex/browser/config.toml"; then
+    failed_items+=(".codex/browser/config.toml")
+  fi
 
   # 共通ルールの正本を Codex の参照先にもリンク
   if ! link_file ".config/agents/AGENTS.md" ".codex/AGENTS.md"; then
@@ -474,6 +476,8 @@ main() {
 
   if ((!dry_run)); then
     printf 'restart Codex to load updated hooks and permissions\n'
+    printf 'in Codex App, select "保護付きフルアクセス" and start a new task to apply the configured approval policy\n'
+    printf 'the built-in "Full access" mode overrides config.toml with approval_policy=never\n'
   fi
 }
 

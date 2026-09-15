@@ -3,6 +3,18 @@
 
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_dir="$(cd "$script_dir/.." && pwd)"
+
+setup_common_library="$repo_dir/lib/setup-common.sh"
+if [[ ! -f "$setup_common_library" || -L "$setup_common_library" ]]; then
+  printf 'error: setup common library is missing or unsafe: %s\n' \
+    "$setup_common_library" >&2
+  exit 1
+fi
+# shellcheck source=lib/setup-common.sh
+source "$setup_common_library"
+
 if ((EUID == 0)); then
   printf 'error: do not run macos/setup-typeless.sh with sudo or as root\n' >&2
   exit 1
@@ -13,17 +25,13 @@ if [[ "$(uname -s)" != Darwin ]]; then
   exit 1
 fi
 
-if [[ "${HOME:-}" != /* || "$HOME" == / || ! -d "$HOME" ]]; then
-  printf 'error: HOME must be an existing absolute directory other than /\n' >&2
-  exit 1
-fi
+setup_validate_home || exit 1
 
 if ! command -v jq >/dev/null 2>&1; then
   printf 'error: jq is required\n' >&2
   exit 1
 fi
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 managed_settings="$script_dir/typeless.json"
 settings_file="$HOME/Library/Application Support/Typeless/app-settings.json"
 

@@ -79,6 +79,30 @@
             ]
           },
           {
+            "description": "Cmd+Space -> Raycast",
+            "manipulators": [
+              {
+                "type": "basic",
+                "from": {
+                  "key_code": "spacebar",
+                  "modifiers": {
+                    "mandatory": ["command"],
+                    "optional": ["caps_lock"]
+                  }
+                },
+                "to": [
+                  {
+                    "software_function": {
+                      "open_application": {
+                        "bundle_identifier": "com.raycast.macos"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
             "description": "Cmd+Y -> Redo",
             "manipulators": [
               {
