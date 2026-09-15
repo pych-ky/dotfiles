@@ -33,7 +33,6 @@ default_permissions = "保護付きフルアクセス"
 
 
 ## 既定許可と認証情報・shell 履歴の保護
-# Codex / Claude Code 自身の認証情報と shell 履歴・snapshot を固定 deny にする。
 # 会話履歴・session transcript・file history・paste cache の調査は許可する。
 # permission profile は旧 sandbox_mode / [sandbox_workspace_write] と併用しない。
 [permissions."保護付きフルアクセス"]
@@ -118,12 +117,12 @@ status_line_use_colors = true  # ステータスラインの項目別色分け�
 status_line = [
   "model-with-reasoning",  # 使用モデルと推論レベル
   "permissions",           # 現在有効な permission profile または sandbox mode
-  "current-dir",           # カレントディレクトリ
-  "git-branch",            # Git ブランチ名
+  "current-dir",
+  "git-branch",
   "context-used",          # 使用中のコンテキスト量
   "five-hour-limit",       # 5 時間単位の利用上限
   "weekly-limit",          # 週次の利用上限
-  "fast-mode",             # Fast モードの有効/無効
+  "fast-mode",
 ]
 
 ## 履歴

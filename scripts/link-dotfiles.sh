@@ -13,7 +13,6 @@ backup_created=0
 backup_keep=5
 backup_diffs=()    # リポジトリ版と異なる退避元
 managed_targets=() # ツールの自動追記がある退避元
-# Rancher Desktop などが rc ファイルへ自動追記するときの目印
 MANAGED_BLOCK_MARKER='MANAGED BY RANCHER DESKTOP'
 
 setup_common_library="$repo_dir/lib/setup-common.sh"
@@ -40,7 +39,6 @@ Options:
 EOF
 }
 
-# root 実行を拒否し、HOME を検証
 validate_environment() {
   if ((EUID == 0)); then
     printf 'error: do not run scripts/link-dotfiles.sh with sudo or as root\n' >&2
@@ -50,10 +48,8 @@ validate_environment() {
   setup_validate_home
 }
 
-# dry-run 時はコマンドの表示のみ行う実行ラッパ
 run() {
   if ((dry_run)); then
-    # %q で各引数を再実行可能な形にクオートして表示
     printf 'DRY-RUN:'
     printf ' %q' "$@"
     printf '\n'
@@ -205,7 +201,6 @@ backup_existing_target() {
   fi
   backup_created=1
 
-  # dry-run では退避前の target と比較する
   if ((dry_run)); then
     backup_compare_target="$target"
   else
@@ -215,10 +210,9 @@ backup_existing_target() {
 
 # 古いバックアップを backup_keep 世代だけ残して削除
 prune_backups() {
-  local root="$backup_root"
   local candidate
   local name
-  [[ -d "$root" ]] || return 0
+  [[ -d "$backup_root" ]] || return 0
 
   # 14 桁名とマーカー付き連番名だけを削除候補にする
   {
@@ -229,10 +223,10 @@ prune_backups() {
           [[ -f "$candidate/.dotfiles-backup-generation" ]]; }; then
         printf '%s\n' "$candidate"
       fi
-    done < <(find "$root" -mindepth 1 -maxdepth 1 -type d -print)
+    done < <(find "$backup_root" -mindepth 1 -maxdepth 1 -type d -print)
     # dry-run では未作成の今回分 backup_dir も削除候補の算出に含める
     if ((dry_run && backup_created)) &&
-      [[ "${backup_dir%/*}" == "$root" ]] &&
+      [[ "${backup_dir%/*}" == "$backup_root" ]] &&
       [[ "${backup_dir##*/}" =~ ^[0-9]{14}(-[0-9]{6})?$ ]]; then
       printf '%s\n' "$backup_dir"
     fi
@@ -244,7 +238,6 @@ prune_backups() {
     done
 }
 
-# 既存リンクが指定 source を指しているかを判定
 is_correct_symlink() {
   [[ -L "$1" && "$(readlink "$1")" == "$2" ]]
 }
@@ -287,7 +280,6 @@ link_file() {
     backup_diffs+=("$target (backup: $backup_target)")
   fi
 
-  # ツールの自動追記がリンク後にリポジトリを書き換えないよう警告する
   if [[ -f "$backup_compare_target" ]] &&
     grep -qF "$MANAGED_BLOCK_MARKER" "$backup_compare_target" 2>/dev/null; then
     managed_targets+=("$target")
@@ -397,8 +389,7 @@ main() {
   )
 
   local file
-  local -a failed_items
-  failed_items=()
+  local failed_items=()
 
   # 廃止したリンクは、自リポジトリ由来の場合だけ除去
   for file in \
@@ -429,7 +420,6 @@ main() {
     failed_items+=(".codex/browser/config.toml")
   fi
 
-  # 共通ルールの正本を Codex の参照先にもリンク
   if ! link_file ".config/agents/AGENTS.md" ".codex/AGENTS.md"; then
     failed_items+=(".codex/AGENTS.md")
   fi
@@ -452,14 +442,12 @@ main() {
     fi
   fi
 
-  # リポジトリ版と異なる内容を退避した場合は、統合漏れの可能性を警告
   if ((${#backup_diffs[@]} > 0)); then
     printf 'warning: replaced files differed from the repository version:\n' >&2
     printf '  %s\n' "${backup_diffs[@]}" >&2
     printf '         merge local changes into the repository or ~/.zshrc.local, then relink\n' >&2
   fi
 
-  # 自動追記の設定が残っていると、リンク後は追記先がリポジトリの追跡ファイルになる
   if ((${#managed_targets[@]} > 0)); then
     printf 'warning: these files contain a tool-managed block (%s):\n' \
       "$MANAGED_BLOCK_MARKER" >&2

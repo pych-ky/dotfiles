@@ -7,7 +7,6 @@ status_separator=' · '
 codex_context_baseline_tokens=12000
 default_claude_context_window=200000
 
-# このスクリプトの実体があるディレクトリを返す
 script_dir() {
   local source="${BASH_SOURCE[0]}"
   local dir
@@ -54,7 +53,7 @@ input_used_tokens=''
 input_five_hour_limit=''
 input_weekly_limit=''
 
-# 入力 JSON を 1 回読み、jq の出力順に表示値を設定する
+# jq の出力順に表示値を設定する
 read_input_json() {
   local payload="$1"
 
@@ -79,9 +78,7 @@ read_input_json() {
       | (try $root.model catch null) as $model
       |
       [
-        # input_cwd
         (try ($root.workspace.current_dir // $root.cwd) catch null),
-        # input_model_name
         (
           if ($model | type) == "object" then
             $model.display_name // $model.name // $model.id
@@ -91,31 +88,22 @@ read_input_json() {
             null
           end
         ),
-        # input_effort
         (try $root.effort.level catch null),
-        # input_transcript_path
         (try $root.transcript_path catch null),
-        # input_context_used
         (try $root.context_window.used_percentage catch null),
-        # input_context_input_tokens
         (try $root.context_window.total_input_tokens catch null),
-        # input_context_window_size
         (try $root.context_window.context_window_size catch null),
-        # input_context_window
         (try (
           $root.model_context_window //
           $root.context.window //
           $root.usage.context_window
         ) catch null),
-        # input_used_tokens
         (try (
           $root.usage.total_tokens //
           $root.context.total_tokens //
           $root.context.used_tokens
         ) catch null),
-        # input_five_hour_limit
         (try $root.rate_limits.five_hour.used_percentage catch null),
-        # input_weekly_limit
         (try $root.rate_limits.seven_day.used_percentage catch null)
       ]
       | .[]
@@ -128,7 +116,6 @@ read_input_json() {
 settings_model=''
 settings_effort=''
 
-# Claude 設定を 1 回読み、jq の出力順にフォールバック値を設定する
 read_claude_settings() {
   local file="$1"
 
@@ -141,9 +128,7 @@ read_claude_settings() {
   } < <(
     jq -j '
       [
-        # settings_model
         (try .model catch null),
-        # settings_effort
         (try .effortLevel catch null)
       ]
       | .[]
@@ -192,8 +177,7 @@ format_directory_display() {
   if [[ "$dir" == "$HOME" ]]; then
     printf '~'
   elif [[ "$dir" == "$HOME"/* ]]; then
-    printf '~'
-    printf '/%s' "${dir#"$HOME"/}"
+    printf '%s/%s' '~' "${dir#"$HOME"/}"
   else
     printf '%s' "$dir"
   fi
@@ -313,7 +297,6 @@ rate_limit_label() {
 status_line_use_colors="$(toml_scalar "$codex_config" status_line_use_colors)"
 [[ -n "$status_line_use_colors" ]] || status_line_use_colors=true
 
-# 色設定が有効なときだけ項目の ANSI color を付ける
 styled() {
   local item="$1"
   local text="$2"
@@ -341,7 +324,6 @@ styled() {
   printf '\033[%sm%s\033[0m' "$code" "$text"
 }
 
-# 表示値が空でなければステータスライン末尾に追加する
 append_segment() {
   local item="$1"
   local text="$2"
@@ -365,15 +347,12 @@ main() {
   read_input_json "$input"
   read_claude_settings "$claude_settings"
 
-  local cwd="$input_cwd"
-  [[ -n "$cwd" ]] || cwd="$PWD"
+  local cwd="${input_cwd:-$PWD}"
 
-  local model_name="$input_model_name"
-  [[ -n "$model_name" ]] || model_name="$settings_model"
+  local model_name="${input_model_name:-$settings_model}"
   [[ -n "$model_name" ]] || model_name="$(toml_scalar "$codex_config" model)"
 
-  local claude_effort="$input_effort"
-  [[ -n "$claude_effort" ]] || claude_effort="$settings_effort"
+  local claude_effort="${input_effort:-$settings_effort}"
   [[ -n "$claude_effort" ]] || claude_effort="$(toml_scalar "$codex_config" model_reasoning_effort)"
 
   local reasoning

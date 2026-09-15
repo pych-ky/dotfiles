@@ -45,15 +45,12 @@ record_skip() {
 run_and_record() {
   local label="$1"
   shift
-  local status
 
   if "$@"; then
     return 0
   else
-    status=$?
+    record_failure "$label" "$?"
   fi
-
-  record_failure "$label" "$status"
 }
 
 # sudo timestamp が有効なら再利用し、失効済みなら端末から再認証する
@@ -278,7 +275,6 @@ install_zsh_plugin() {
     return 1
   fi
 
-  # 認証待ちを避けて非対話で取得する
   setup_run_noninteractive_git clone --quiet -- "$url" "$target" || return
   if [[ ! -f "$target/$entrypoint" || ! -r "$target/$entrypoint" ]]; then
     setup_error "zsh plugin entrypoint was not installed: $target/$entrypoint"
@@ -345,13 +341,8 @@ ensure_claude_marketplace() {
     return 0
   fi
 
-  if "$executable" plugin marketplace add \
-    anthropics/claude-plugins-official --scope user; then
-    :
-  else
-    add_status=$?
-  fi
-  # record_failure が返す中断の終了状態を伝播
+  "$executable" plugin marketplace add \
+    anthropics/claude-plugins-official --scope user || add_status=$?
   if ((add_status != 0)); then
     record_failure 'Claude Code marketplace: claude-plugins-official' "$add_status" || return
   fi
@@ -491,14 +482,10 @@ setup_private_overlay() {
   }
   overlay_url="${DOTFILES_PRIVATE_REPO_URL:-https://github.com/pych-ky/dotfiles-private.git}"
 
-  if setup_ensure_private_checkout \
+  setup_ensure_private_checkout \
     "$overlay_dir" "$overlay_url" 'dotfiles-private' \
     DOTFILES_PRIVATE_DIR DOTFILES_PRIVATE_REPO_URL \
-    setup.sh 'dotfiles-private setup.sh is missing or not executable' 0; then
-    :
-  else
-    status=$?
-  fi
+    setup.sh 'dotfiles-private setup.sh is missing or not executable' 0 || status=$?
 
   case "$status" in
   0) run_and_record 'dotfiles-private setup' "$overlay_dir/setup.sh" ;;
@@ -543,15 +530,11 @@ run_and_record 'macos/setup-typeless.sh' "$repo_dir/macos/setup-typeless.sh"
 step 'login items'
 setup_login_items
 
-# mise によるグローバル開発ツール (.config/mise/config.toml が管理する)
-
 step 'mise install'
 setup_mise_tools
 
 step 'scripts/setup-git.sh'
 run_and_record 'scripts/setup-git.sh' "$repo_dir/scripts/setup-git.sh"
-
-# zsh プラグイン (.zshrc が ~/.zsh/plugins/*/*.plugin.zsh を一括ロードする)
 
 step 'zsh plugins'
 setup_zsh_plugins
@@ -571,8 +554,6 @@ run_and_record 'Codex Custom Pets' "$repo_dir/pets/setup.sh"
 step 'Agent Skills'
 run_and_record 'Agent Skills' "$repo_dir/skills/setup.sh"
 
-# 非公開設定のオーバーレイ (private リポジトリ、アクセス可能な場合のみ)
-
 step 'dotfiles-private overlay'
 trap 'setup_cleanup_private_checkout' EXIT
 setup_private_overlay
@@ -590,7 +571,6 @@ if ((${#failed_steps[@]} > 0)); then
   exit 1
 fi
 
-# 未実行がある場合は完了と表示しない
 if ((${#skipped_steps[@]} > 0)); then
   printf 'bootstrap finished without failures, but some steps were skipped\n'
   printf 'satisfy their requirements and rerun ./bootstrap.sh to complete setup\n'

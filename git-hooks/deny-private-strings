@@ -1,16 +1,5 @@
 #!/usr/bin/env bash
 # 非公開 denylist に一致する文字列のコミット・push を止めるフック
-# 公開リポジトリへの非公開識別子の混入を防ぐ。パターンは非公開側が配置し、未配置なら何もしない。
-# ${XDG_CONFIG_HOME:-~/.config}/dotfiles/ 以下に配置するファイル:
-#   denylist.txt: 1 行 1 固定文字列。大文字小文字を区別せず、行頭 # と空行は無視する。
-#   work-remotes.txt: 1 行 1 部分文字列。全 remote URL が一致する組織リポジトリは検査しない。
-#     組織内での識別子の使用は許可する。remote が無いリポジトリは検査する。
-#
-# deny-private-strings pre-commit: ステージ済みのパス名と index の内容全体を検査する。
-# deny-private-strings pre-push: 標準入力の送信対象 ref ごとに、コミットメッセージと差分を検査する。
-# 内容全体・各コミットを見るため、既存行や追加後に削除された識別子も検出する。
-#
-# 混入を見つけたら終了状態 1 で中断する。回避は git の --no-verify のみ。
 
 set -uo pipefail
 
@@ -22,12 +11,14 @@ if [[ "$mode" != pre-commit && "$mode" != pre-push ]]; then
 fi
 
 config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/dotfiles"
+# 非公開側で配置する、1 行 1 固定文字列のパターン（大文字小文字を区別しない）
 denylist_file="$config_dir/denylist.txt"
+# 全 remote URL がパターンのいずれかを含む場合だけ検査を省略する
 work_remotes_file="$config_dir/work-remotes.txt"
 
 [[ -r "$denylist_file" ]] || exit 0
 
-# 前後の空白を落とし、行頭 # のコメント行と空行を除く。空行は grep -F が全行に一致するため残さない。
+# 空パターンは全行に一致するため、前後の空白・コメント行・空行を除く
 strip_pattern_file() {
   sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -- "$1" |
     grep -v -e '^#' -e '^$' || true
@@ -59,8 +50,7 @@ resolve_path() {
   printf '%s/%s\n' "$dir" "$(basename "$path")"
 }
 
-# パターン自身が必ず一致するため、symlink を解決した配置元リポジトリは denylist 検査を除外する。
-# secretlint など他のグローバルフックは継続する。
+# パターン自身が一致する配置元リポジトリは、denylist 検査だけを省略する
 denylist_source="$(resolve_path "$denylist_file" 2>/dev/null || true)"
 current_repo="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 denylist_repo=
@@ -76,7 +66,6 @@ if [[ -n "$current_repo" && -n "$denylist_repo" ]]; then
   [[ "$current_repo" == "$denylist_repo" ]] && exit 0
 fi
 
-# remote URL がすべて work-remotes.txt に一致するなら、組織のリポジトリとみなす
 is_work_repository() {
   local url total=0 matched=0
 
@@ -126,13 +115,12 @@ scan_pre_commit() {
 
   ((${#paths[@]} > 0)) || return 0
 
-  # パス名に含まれる識別子も検査する
   hit="$(
     printf '%s\n' "${paths[@]}" | grep -iF -f <(patterns) || true
   )"
   [[ -n "$hit" ]] && report 'ステージ済みのパス名が一致しました' <<<"$hit"
 
-  # index 上の内容の検査 (-I でバイナリを除外)
+  # index の対象ファイル全体を検査する（-I でバイナリを除外）
   hit="$(
     git grep --cached --no-color -I -n -i -F -f <(patterns) -- "${paths[@]}" ||
       true

@@ -1,13 +1,11 @@
 # AWS SSO プロファイルを切り替えて永続化するシェル関数
-# AWS_PROFILE だけを扱い、一時認証情報をシェルへ持ち込まず AWS SDK に解決を任せる。
-# AWS_PROFILE 非対応ツール向けの署名ブローカー・認証済み隔離 runner は未実装 (SECURITY.md「未完了の対策」)。
+# AWS_PROFILE だけを扱い、一時認証情報は AWS SDK に解決を任せる
 
 # Claude Code のシェルスナップショットで除外されないよう __aws_* 名にする
 
 [ -n "${__AWS_FUNCTIONS_LOADED:-}" ] && return
 __AWS_FUNCTIONS_LOADED=1
 
-# credential provider として扱う AWS 環境変数を列挙
 __aws_credential_provider_variables() {
   printf '%s\n' \
     AWS_PROFILE \
@@ -37,7 +35,6 @@ __aws_has_credential_provider() {
   return 1
 }
 
-# credential provider 環境変数を全消去
 __aws_clear_credentials() {
   local clear_status=0
   local variable
@@ -49,7 +46,6 @@ __aws_clear_credentials() {
   return "$clear_status"
 }
 
-# credential provider を除外したサブシェルでコマンドを実行
 __aws_run_without_credentials() (
   __aws_clear_credentials || exit
   "$@"
@@ -63,7 +59,6 @@ __aws_verify_profile_credentials() (
   AWS_PROFILE="$profile" AWS_PAGER='' aws sts get-caller-identity
 )
 
-# 指定プロファイルが AWS SSO 用に設定済みかを検証
 __aws_require_sso_profile() {
   local profile="${1:?usage: __aws_require_sso_profile <profile>}"
   local sso_session
@@ -80,14 +75,13 @@ __aws_require_sso_profile() {
   fi
 }
 
-# 次回シェル起動時に復元できるよう、アクティブなプロファイル名をファイルへ保存
+# 次回のシェル起動時に復元するプロファイル名を保存する
 __aws_persist_active_profile() {
   local profile="${1:?usage: __aws_persist_active_profile <profile>}"
   local file="$HOME/.aws/active-profile"
-  local directory
+  local directory="${file%/*}"
   local temporary
 
-  directory="$(dirname "$file")"
   mkdir -p "$directory" || return
   temporary="$(mktemp "$directory/.active-profile.XXXXXX")" || return
 
@@ -99,7 +93,6 @@ __aws_persist_active_profile() {
   fi
 }
 
-# 認証情報の解決を SDK 側に任せ、AWS_PROFILE 方式で SSO ログイン
 aws-use() {
   local profile="${1:?usage: aws-use <profile>}"
 

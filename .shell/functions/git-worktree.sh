@@ -1,6 +1,6 @@
 # Bash / Zsh 共通の fzf worktree 作成関数
 
-# HEAD / main / master を除外し、ローカル / origin の全ブランチを重複排除して列挙
+# ローカル / origin のブランチを重複排除して列挙する
 _wto_branches() {
   local repository_root="$1"
 
@@ -13,7 +13,7 @@ _wto_branches() {
     awk '!seen[$0]++'
 }
 
-# パス衝突回避用の安定サフィックスとして文字列の SHA-1 先頭 6 文字を返却
+# パス衝突回避用の安定したサフィックスを返す
 _wto_hash6() {
   if command -v shasum >/dev/null 2>&1; then
     printf '%s' "$1" | shasum -a 1
@@ -22,20 +22,18 @@ _wto_hash6() {
   fi | awk '{print substr($1, 1, 6)}'
 }
 
-# 指定 path / branch の worktree が登録済みかを確認
 _wto_path_has_branch() {
-  # zsh では path が PATH と連動する特殊変数のため、local 変数にその名前を使わない
   local repository_root="$1"
   local worktree_path="$2"
   local branch="$3"
   local worktree_path_physical
 
-  # /tmp と /private/tmp の比較用に物理 path へ統一
+  # /tmp と /private/tmp を同じパスとして比較する
   worktree_path_physical="$(cd "$worktree_path" 2>/dev/null && pwd -P)" || return 1
 
   git -C "$repository_root" worktree list --porcelain |
     awk -v path="$worktree_path_physical" -v branch="refs/heads/$branch" '
-    # パスは空白を含みうるため "worktree " プレフィックス以降を丸ごと取得
+    # 空白を含むパスも取得する
     $1 == "worktree" { worktree = substr($0, 10) }
     $1 == "branch" && worktree == path && $2 == branch { found = 1 }
     END { exit found ? 0 : 1 }
@@ -55,7 +53,6 @@ wto() {
 
   local worktrees_root="$repository_root/.worktrees"
   mkdir -p "$worktrees_root" || return 1
-  # リモートの最新状態を取り込んでから候補列挙、失敗しても継続
   git -C "$repository_root" fetch --all --prune >/dev/null 2>&1 || true
 
   local branches
@@ -64,8 +61,7 @@ wto() {
 
   local branch dir leaf
   local failed_count=0
-  local -a created_paths
-  created_paths=()
+  local -a created_paths=()
 
   while IFS= read -r branch; do
     [ -n "$branch" ] || continue
@@ -73,24 +69,21 @@ wto() {
     leaf="${branch##*/}"
     dir="$worktrees_root/$leaf"
 
-    # leaf 名が別ブランチに使われているだけのときはハッシュサフィックスを付けて回避
+    # 同名の末尾要素を持つ別ブランチとのパス衝突を避ける
     if [ -e "$dir" ] && ! _wto_path_has_branch "$repository_root" "$dir" "$branch"; then
       dir="$worktrees_root/${leaf}__$(_wto_hash6 "$branch")"
     fi
 
-    # 確定したパスに既に同じ branch が割り当て済みなら冪等にスキップ
     if [ -e "$dir" ] && _wto_path_has_branch "$repository_root" "$dir" "$branch"; then
       echo "exists: $dir (branch=$branch)"
       created_paths+=("$dir")
       continue
     fi
 
-    # ローカルにブランチが無ければ origin から追跡ブランチを作成
     if ! git -C "$repository_root" show-ref --verify --quiet "refs/heads/$branch"; then
       git -C "$repository_root" branch --track "$branch" "origin/$branch" >/dev/null 2>&1 || true
     fi
 
-    # stdout は抑制しつつ、失敗原因が分かるよう stderr は通す
     if git -C "$repository_root" worktree add "$dir" "$branch" >/dev/null; then
       echo "created: $dir (branch=$branch)"
       created_paths+=("$dir")
@@ -100,7 +93,6 @@ wto() {
     fi
   done <<<"$branches"
 
-  # 作成 / 既存 worktree のパス一覧をエディタで開きやすい形式で表示
   if ((${#created_paths[@]})); then
     echo "Open these folders in your editor:"
     printf '  %s\n' "${created_paths[@]}"

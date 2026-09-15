@@ -6,7 +6,7 @@
 .config/codex/tmp/
 
 ## Claude Code
-# 作業中に生成される端末固有の権限やプロンプト履歴を公開しないよう、追跡対象だけを許可する
+# 端末固有の権限・プロンプト履歴を除き、追跡対象だけを許可する
 .claude/*
 !.claude/CLAUDE.md
 !.claude/settings.json

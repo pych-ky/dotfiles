@@ -1,6 +1,5 @@
-# Homebrew パッケージマニフェスト (brew bundle --file=macos/Brewfile で一括導入)
-# 任意の GUI アプリを Homebrew で導入する場合は、コメントアウトを外して brew bundle を再実行する。
-# OS 全体で使う CLI と GUI アプリをここで管理し、バージョン切り替えが必要なランタイムは mise (.config/mise/config.toml) で管理する。
+# OS 全体の CLI・GUI アプリを管理し、ランタイムは .config/mise/config.toml で管理する
+# 任意の GUI アプリはコメントアウトを外して brew bundle --file=macos/Brewfile で導入する
 
 # CLI (formula)
 
@@ -26,7 +25,6 @@ brew "ghq"
 # secretlint は公式バイナリを mise 側で管理する
 
 # ランタイム / パッケージツール
-# node などのバージョン切り替えが必要なランタイムは mise 側で管理する
 brew "mise"
 brew "uv"
 

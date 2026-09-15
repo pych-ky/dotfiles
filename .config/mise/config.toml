@@ -1,6 +1,5 @@
-# mise が管理するグローバル開発ツール (~/.config/mise/config.toml として配置)
-# バージョン切り替えが必要なツールはここだけで管理し、macos/Brewfile と重複させない。
-# リポジトリごとのバージョンは、そのリポジトリの mise 設定で上書きする。
+# バージョンを切り替えるグローバル開発ツールを管理し、macos/Brewfile と重複させない
+# ~/.config/mise/config.toml に配置し、リポジトリごとの mise 設定で上書きする
 
 [tools]
 "aqua:secretlint/secretlint" = "13.0.5"

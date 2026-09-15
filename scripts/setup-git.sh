@@ -51,8 +51,7 @@ if ((10#$git_major < 2 || (10#$git_major == 2 && 10#$git_minor < 37))); then
   exit 1
 fi
 
-# 端末やツール固有の設定を残し、共通化する項目だけを更新する。
-# 個人情報の user.name / user.email は非公開側 (~/.gitconfig.local) で設定する。
+# 個人情報や端末固有の設定を残し、共通項目だけを更新
 git config --global --replace-all user.useConfigOnly true
 git config --global --replace-all fetch.prune true
 git config --global --replace-all init.defaultBranch 'main'
@@ -63,8 +62,7 @@ git config --global --replace-all transfer.credentialsInUrl 'die'
 git config --global --replace-all pull.ff 'only'
 git config --global --replace-all merge.conflictStyle 'zdiff3'
 
-# identity は ~/.gitconfig.local を正本とし、末尾の include で優先する。
-# 正本がある場合だけ global の重複を削除し、非公開側を取得できない端末で古い identity が使われるのを防ぐ。
+# ~/.gitconfig.local に identity がある場合だけ global の重複を削除
 gitconfig_local="$HOME/.gitconfig.local"
 if [[ -f "$gitconfig_local" ]] &&
   git config --file "$gitconfig_local" --get user.email >/dev/null 2>&1; then
@@ -81,8 +79,7 @@ else
     "$gitconfig_local" >&2
 fi
 
-# GitHub は gh helper に委譲し、継承した helper を空設定でリセットして二重登録を防ぐ。
-# 組織固有 URL の ghtkn helper は ~/.gitconfig.local に置き、gh auth login は利用者の依頼または承認に基づいて実行する。
+# 継承した helper を空設定でリセットし、gh の二重登録を防ぐ
 git config --global --replace-all 'credential.https://github.com.helper' ''
 git config --global --add \
   'credential.https://github.com.helper' '!gh auth git-credential'
@@ -93,21 +90,16 @@ if ! command -v gh >/dev/null 2>&1; then
   printf "         install it, then run \`gh auth login\` (agents need a user request or approval)\n" >&2
 fi
 
-# 組織固有の includeIf や helper 上書き用。ほかの include を残して未登録時だけ追加する。
-# ファイルが存在しない間は Git が無視する。
+# 組織固有の includeIf や helper 上書き用。未作成のファイルは Git が無視する
 if ! git config --global --get-all include.path 2>/dev/null |
   grep -qxF \~/.gitconfig.local; then
   git config --global --add include.path \~/.gitconfig.local
 fi
 
-# core.hooksPath で隠れるリポジトリ固有フックと Git LFS は dispatch が実行する。
-# secretlint/denylist 検査 → リポジトリ固有フック → Git LFS の順に呼ぶ。
-# dispatch は dirname $0 を基準に参照するため、deny-private-strings を同じディレクトリへ配置する。
-
+# dispatch は dirname $0 から deny-private-strings を参照するため、同じ場所に配置
 hooks_dir="$HOME/.local/share/dotfiles/git-hooks"
 
-# フックをリンクし、異なる既存リンクや実体は置き換える。
-# Git は壊れたリンクを無警告で無視するため、参照先の実行権を検証して core.hooksPath 変更前に失敗させる。
+# Git が壊れたリンクを無視するため、core.hooksPath の変更前に実行権を検証
 link_hook() {
   local source="$1"
   local target="$hooks_dir/$2"
@@ -133,7 +125,6 @@ if mkdir -p "$hooks_dir"; then
     link_hook "$repo_dir/git-hooks/dispatch" "$hook"
   done
 
-  # 不要になった中継フックのリンクを除去する
   obsolete_hook="$hooks_dir/_local-hook-exec"
   if [[ -L "$obsolete_hook" ]]; then
     rm -- "$obsolete_hook"
@@ -146,8 +137,7 @@ else
   exit 1
 fi
 
-# Git LFS のグローバルフィルタ (clean/smudge) を有効化する。
-# フックは上記 dispatch が呼び出すため、ここでは設置しない
+# Git LFS のフックは dispatch が呼ぶため、フィルタだけを導入
 if command -v git-lfs >/dev/null 2>&1; then
   git lfs install --skip-repo
 fi
