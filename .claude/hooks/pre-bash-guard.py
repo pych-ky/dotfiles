@@ -672,9 +672,9 @@ CREDENTIAL_PATH_VARIABLES = {
 
 
 def path_spellings(value, cwd):
+    """既知のホーム表記と symlink を、ファイル本文を読まずに解決する。"""
     if UNKNOWN_ARGUMENT in value:
         return set()
-    """既知のホーム表記と symlink を、ファイル本文を読まずに解決する。"""
     if value.startswith(("file://", "fileb://")):
         value = unquote(urlsplit(value).path)
     home = os.path.expanduser("~")
@@ -815,286 +815,339 @@ def git_metadata_only(operation, args):
     return names_only or (metadata and not patch)
 
 
+def check_path(value, cwd, recursive=False):
+    """recursive では既知の保管先を含む親ディレクトリも拒否する。"""
+    predicate = path_exposes_credentials if recursive else credential_path
+    if predicate(value, cwd):
+        deny("認証情報ファイルの直接読み取り・持ち出しは許可していません。")
+
+
+def check_path_values(values, options, cwd):
+    for option in options:
+        for value in values.get(option, []):
+            check_path(value, cwd)
+
+
+def inspect_grep_paths(args, cwd):
+    operands, values = path_arguments(args, {
+        "-e", "--regexp", "-f", "--file", "-g", "--glob", "--iglob", "-t", "--type",
+        "-T", "--type-not", "-A", "-B", "-C", "-m", "--max-count", "--context",
+        "--color", "--colors", "--encoding", "--exclude", "--exclude-dir", "--include",
+        "--ignore-file", "--exclude-from", "--replace", "--type-add", "--type-clear", "--max-depth",
+    })
+    check_path_values(values, {"-f", "--file", "--ignore-file", "--exclude-from"}, cwd)
+    if not any(option in values for option in {"-e", "--regexp", "-f", "--file"}):
+        operands = operands[1:]
+    return operands, cwd
+
+
+def inspect_filter_paths(command, args, cwd):
+    program_options = {"-e", "--expression", "-f", "--file"}
+    if command in {"awk", "gawk", "mawk", "nawk"}:
+        program_options |= {"-F", "-v"}
+    if command in {"sed", "gsed"}:
+        args = [argument for index, argument in enumerate(args) if not (index and args[index - 1] == "-i" and argument == "")]
+    if command in {"jq", "yq"}:
+        program_options = {"-f", "--from-file", "--indent"}
+        remaining = []
+        index = 0
+        while index < len(args):
+            argument = args[index]
+            if argument in {"--arg", "--argjson", "--slurpfile", "--rawfile"}:
+                if index + 2 >= len(args):
+                    deny("ファイル入力オプションの値がありません。")
+                if argument in {"--slurpfile", "--rawfile"}:
+                    check_path(args[index + 2], cwd)
+                index += 3
+            else:
+                remaining.append(argument)
+                index += 1
+        args = remaining
+    operands, values = path_arguments(args, program_options)
+    check_path_values(values, {"-f", "--file", "--from-file"}, cwd)
+    if not any(option in values for option in {"-e", "--expression", "-f", "--file", "--from-file"}):
+        operands = operands[1:]
+    if command in {"awk", "gawk", "mawk", "nawk"}:
+        operands = [operand for operand in operands if not re.match(r"[A-Za-z_][A-Za-z_0-9]*=", operand)]
+    return operands, cwd
+
+
+def inspect_reader_paths(command, args, cwd):
+    reader_options = {
+        "head": {"-n", "--lines", "-c", "--bytes"},
+        "tail": {"-n", "--lines", "-c", "--bytes", "-s", "--sleep-interval"},
+        "less": {"-p", "-P", "-x", "-z", "-j", "-t", "-T"},
+        "more": {"-n"}, "nl": {"-b", "-d", "-f", "-h", "-i", "-l", "-n", "-s", "-v", "-w"},
+        "wc": {"--files0-from"},
+        "sort": {"-k", "--key", "-t", "--field-separator", "-T", "--temporary-directory", "-S", "--buffer-size", "-o", "--output", "--files0-from", "--random-source"},
+        "uniq": {"-f", "-s", "-w"}, "cut": {"-b", "-c", "-d", "-f", "--bytes", "--characters", "--delimiter", "--fields"},
+        "paste": {"-d", "--delimiters"}, "od": {"-A", "-j", "-N", "-t", "-w"},
+        "xxd": {"-c", "-g", "-l", "-o", "-s"}, "hexdump": {"-e", "-f", "-n", "-s"},
+        "strings": {"-n", "-t", "-e"}, "md5": {"-s"}, "shasum": {"-a", "--algorithm"},
+        "file": {"-m", "--magic-file", "-f", "--files-from", "-e", "--exclude"},
+        "diff": {"-I", "-L", "--label", "-x", "--exclude", "-X", "--exclude-from", "-F"},
+        "cmp": {"-i", "--ignore-initial", "-n", "--bytes"},
+    }
+    operands, values = path_arguments(args, reader_options.get(command, set()))
+    if command in {"base64", "base32"}:
+        operands, values = path_arguments(args, {"-i", "--input", "-o", "--output", "-w", "--wrap"})
+        check_path_values(values, {"-i", "--input"}, cwd)
+    check_path_values(values, {"--files0-from", "--random-source"}, cwd)
+    if command in {"hexdump", "file"}:
+        check_path_values(values, {"-f", "--files-from", "-m", "--magic-file"}, cwd)
+    if command == "diff":
+        check_path_values(values, {"-X", "--exclude-from"}, cwd)
+    if command in {"uniq", "xxd"}:
+        operands = operands[:1]
+    return operands, cwd
+
+
+def inspect_copy_paths(command, args, cwd):
+    copy_options = {
+        "cp": {"-t", "--target-directory", "-S", "--suffix"},
+        "scp": {"-i", "-F", "-o", "-P", "-S", "-J", "-l", "-c", "-D"},
+        "rsync": {"-e", "--rsh", "--exclude", "--include", "--exclude-from", "--include-from", "--files-from", "--password-file"},
+    }
+    operands, values = path_arguments(args, copy_options[command])
+    check_path_values(values, {"--exclude-from", "--include-from", "--files-from", "--password-file"}, cwd)
+    sources = operands if "-t" in values or "--target-directory" in values else operands[:-1]
+    for source in sources:
+        if command in {"scp", "rsync"} and ":" in source:
+            source = source.split(":", 1)[1]
+        check_path(source, cwd, recursive=True)
+
+
+def inspect_dd_paths(args, cwd):
+    for argument in args:
+        if argument.startswith("if="):
+            check_path(argument[3:], cwd)
+
+
+def inspect_git_paths(args, cwd):
+    """-C で変わる相対パスの基準も、共通検査へ返す。"""
+    global_options = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"}
+    index = 0
+    while index < len(args) and args[index].startswith("-"):
+        argument = args[index]
+        index += 2 if argument in global_options else 1
+    _operands, globals_ = path_arguments(args[:index], global_options)
+    for directory in globals_.get("-C", []):
+        cwd = os.path.normpath(os.path.join(cwd, directory))
+    if index >= len(args):
+        return
+    operation, args = args[index], args[index + 1:]
+    file_options = {"--pathspec-from-file"}
+    if operation in {"commit", "tag", "merge", "notes", "fmt-merge-msg"}:
+        file_options |= {"-F", "--file"}
+    if operation == "commit":
+        file_options |= {"-t", "--template"}
+    value_options = set(file_options)
+    if operation in {"show", "diff", "diff-files", "diff-index", "diff-tree", "difftool", "log", "reflog", "format-patch", "whatchanged"}:
+        value_options |= GIT_CONTENT_OPTIONS
+    elif operation in {"blame", "annotate"}:
+        file_options |= {"--contents", "-S", "--ignore-revs-file"}
+        value_options |= file_options | {"-L", "--ignore-rev", "--date"}
+    elif operation in {"commit", "tag", "merge", "notes", "fmt-merge-msg"}:
+        value_options |= {"-m", "--message", "-u", "--ref"}
+    if operation == "archive":
+        value_options |= {"--format", "--prefix", "--remote", "--exec", "--add-file", "--add-virtual-file"}
+        file_options.add("--add-file")
+    operands, values = path_arguments(args, value_options)
+    check_path_values(values, file_options | {"--contents", "-O"}, cwd)
+    if operation == "log":
+        for selection in values.get("-L", []):
+            if ":" in selection:
+                check_path(selection.rsplit(":", 1)[1], cwd)
+    if operation in {"show", "cat-file"}:
+        for operand in operands:
+            if ":" in operand:
+                path = re.sub(r"^:[0-3]:", ":", operand).split(":", 1)[1]
+                check_path(path, cwd)
+    if operation in {"show", "diff", "diff-files", "diff-index", "diff-tree", "log", "reflog"} and git_metadata_only(operation, args):
+        return
+    if operation not in {"show", "diff", "diff-files", "diff-index", "diff-tree", "difftool", "log", "reflog", "grep", "archive", "cat-file", "blame", "annotate", "format-patch", "fast-export", "checkout-index", "whatchanged"}:
+        return
+    if operation == "grep":
+        inspect_paths("grep", args, cwd)
+        return
+    return operands, cwd
+
+
+def inspect_openssl_paths(args, cwd):
+    input_options = {"-in", "-inkey", "-key", "-cert", "-CAfile", "-CApath", "-config", "-extfile", "-signkey", "-untrusted", "-chain", "-certfile"}
+    if args[:1] in (["s_client"], ["s_server"]):
+        input_options -= {"-key", "-cert", "-CAfile", "-CApath"}
+    _operands, values = path_arguments(args, input_options | {"-out", "-keyout", "-writerand"})
+    check_path_values(values, input_options, cwd)
+
+
+def inspect_tar_paths(args, cwd):
+    normalized = list(args)
+    if normalized and not normalized[0].startswith("-"):
+        normalized[0] = "-" + normalized[0]
+    operands, values = path_arguments(normalized, {"-f", "--file", "-C", "--directory", "-T", "--files-from", "-X", "--exclude-from", "--exclude", "--transform"})
+    creating = any(argument == "--create" or (argument.startswith("-") and not argument.startswith("--") and any(flag in argument[1:] for flag in "cru")) for argument in normalized)
+    check_path_values(values, {"-T", "--files-from", "-X", "--exclude-from"}, cwd)
+    if not creating:
+        check_path_values(values, {"-f", "--file"}, cwd)
+        return
+    for directory in values.get("-C", []) + values.get("--directory", []):
+        cwd = os.path.normpath(os.path.join(cwd, directory))
+    for operand in operands:
+        check_path(operand, cwd, recursive=True)
+
+
+def gh_file_options(args, direct_options, indirect_options, ignored_options):
+    """gh はサブコマンドでファイル指定の短縮形が変わるため、補正した集合とサブコマンドを返す。"""
+    direct_options, indirect_options = set(direct_options), set(indirect_options)
+    ignored_options = ignored_options | {
+        "-a", "--add", "-b", "--body", "-d", "--desc", "-f", "--filename",
+        "-t", "--title", "-n", "--notes", "--notes-start-tag", "--target",
+        "--discussion-category", "--type", "-s", "--source", "-T",
+    }
+    words, _values = path_arguments(args, direct_options | indirect_options | ignored_options)
+    pair = tuple(words[:2])
+    if pair in {
+        ("issue", "comment"), ("issue", "create"), ("issue", "edit"),
+        ("pr", "comment"), ("pr", "create"), ("pr", "edit"), ("pr", "merge"),
+        ("pr", "review"), ("pr", "revert"), ("release", "create"), ("release", "edit"),
+    }:
+        direct_options.add("-F")
+        indirect_options.discard("-F")
+    if pair == ("pr", "create"):
+        direct_options |= {"-T", "--template"}
+    elif pair in {("repo", "create"), ("repo", "new")}:
+        direct_options |= {"-s", "--source"}
+    elif pair == ("gist", "edit"):
+        direct_options |= {"-a", "--add"}
+    elif pair in {("secret", "set"), ("variable", "set")}:
+        direct_options.add("-f")
+    elif pair == ("attestation", "verify"):
+        direct_options.add("-b")
+    return direct_options, indirect_options, ignored_options, pair
+
+
+def inspect_transfer_paths(command, args, cwd):
+    direct_options = {
+        "curl": {"-T", "--upload-file", "-K", "--config"},
+        "wget": {"-i", "--input-file", "--config", "--body-file", "--post-file"},
+        "gh": {"--body-file", "--bundle", "--env-file", "--input", "--notes-file"},
+    }[command]
+    indirect_options = {
+        "curl": {"-d", "--data", "--data-binary", "--data-urlencode", "--json", "-F", "--form", "-H", "--header", "--proxy-header"},
+        "wget": set(), "gh": {"-F", "--field"},
+    }[command]
+    ignored_options = {
+        "curl": {"-o", "--output", "-E", "--cert", "--key", "--netrc-file", "--cacert", "--capath", "--proxy-cert", "--proxy-key", "--data-raw", "--form-string", "-u", "--user", "-x", "--proxy", "-X", "--request"},
+        "wget": {"-O", "--output-document", "-o", "--output-file", "--load-cookies", "--certificate", "--private-key", "--ca-certificate"},
+        "gh": {"-R", "--repo", "-H", "--header", "-f", "--raw-field", "--jq", "--template", "--hostname", "--method", "-X"},
+    }[command]
+    pair = ()
+    if command == "gh":
+        direct_options, indirect_options, ignored_options, pair = gh_file_options(args, direct_options, indirect_options, ignored_options)
+    operands, values = path_arguments(args, direct_options | indirect_options | ignored_options | {"--url"})
+    check_path_values(values, direct_options, cwd)
+    for option in indirect_options:
+        for value in values.get(option, []):
+            source = None
+            if option in {"-F", "--form", "--field"}:
+                for marker in ("=@", "=<"):
+                    if marker in value:
+                        source = value.split(marker, 1)[1].split(";", 1)[0]
+            elif value.startswith("@"):
+                source = value[1:]
+            elif option == "--data-urlencode" and "@" in value and "=" not in value.split("@", 1)[0]:
+                source = value.split("@", 1)[1]
+            if source is not None:
+                for path in source.split(","):
+                    check_path(path.removeprefix("@"), cwd)
+    for value in operands + values.get("--url", []):
+        if value.startswith(("file://", "fileb://")):
+            check_path(value, cwd)
+    if command == "gh":
+        start = None
+        if pair in {("gist", "create"), ("gist", "new"), ("ssh-key", "add"), ("gpg-key", "add"), ("attestation", "verify"), ("attestation", "download")}:
+            start = 2
+        elif pair in {("release", "create"), ("release", "new"), ("release", "upload"), ("gist", "edit")} or operands[:3] == ["repo", "deploy-key", "add"]:
+            start = 3
+        if start is not None:
+            for value in operands[start:]:
+                check_path(value.split("#", 1)[0] if pair[0] == "release" else value, cwd)
+
+
+def inspect_container_paths(args, cwd):
+    operands, values = path_arguments(args, {"-v", "--volume", "--mount", "--secret", "--env-file", "-f", "--file", "--build-context", "--config", "-H", "--host", "--name", "-e", "--env", "--build-arg", "-t", "--tag"})
+    if not any(operation in operands for operation in {"build", "run", "create", "cp", "compose"}):
+        return
+    if "--use-api-socket" in args:
+        deny("ホストの socket をコンテナへ渡す操作は許可していません。")
+    if "--secret" in values:
+        deny("secret をコンテナへ渡す操作は許可していません。")
+    check_path_values(values, {"--env-file"}, cwd)
+    if "build" in operands:
+        check_path_values(values, {"-f", "--file"}, cwd)
+    elif "compose" in operands:
+        operations = operands[operands.index("compose") + 1:]
+        boundary = args.index(operations[0]) if operations else len(args)
+        _operands, compose_values = path_arguments(args[:boundary], {"-f", "--file"})
+        check_path_values(compose_values, {"-f", "--file"}, cwd)
+    for value in values.get("-v", []) + values.get("--volume", []):
+        source = value.split(":", 1)[0]
+        if source.endswith(".sock"):
+            deny("ホストの socket をコンテナへ渡す操作は許可していません。")
+        if source.startswith(("/", ".", "~", "$")):
+            check_path(source, cwd, recursive=True)
+    for value in values.get("--mount", []):
+        fields = dict(part.split("=", 1) for part in value.split(",") if "=" in part)
+        source = fields.get("source", fields.get("src", ""))
+        if source.endswith(".sock"):
+            deny("ホストの socket をコンテナへ渡す操作は許可していません。")
+        if source and fields.get("type", "bind") == "bind":
+            check_path(source, cwd, recursive=True)
+    if "cp" in operands and len(operands) >= 3:
+        source = operands[operands.index("cp") + 1]
+        check_path(source.split(":", 1)[-1], cwd, recursive=True)
+    if "build" in operands and operands[-1] != "build":
+        check_path(operands[-1], cwd, recursive=True)
+    for value in values.get("--build-context", []):
+        check_path(value.partition("=")[2], cwd, recursive=True)
+
+
 def inspect_paths(command, args, cwd):
-    def check(value, recursive=False):
-        predicate = path_exposes_credentials if recursive else credential_path
-        if predicate(value, cwd):
-            deny("認証情報ファイルの直接読み取り・持ち出しは許可していません。")
-
-    def check_values(values, options):
-        for option in options:
-            for value in values.get(option, []):
-                check(value)
-
+    """コマンドごとの検査へ振り分け、返された位置引数と基準ディレクトリでパスを検査する。"""
     if command in {"echo", "printf", "test", "[", "[[", "ls", "stat", "touch", "mkdir", "chmod", "chown", "chgrp", "rm", "rmdir", "mv", "ln"}:
         return
-
     if command in {"grep", "egrep", "fgrep", "rg"}:
-        operands, values = path_arguments(args, {
-            "-e", "--regexp", "-f", "--file", "-g", "--glob", "--iglob", "-t", "--type",
-            "-T", "--type-not", "-A", "-B", "-C", "-m", "--max-count", "--context",
-            "--color", "--colors", "--encoding", "--exclude", "--exclude-dir", "--include",
-            "--ignore-file", "--exclude-from", "--replace", "--type-add", "--type-clear", "--max-depth",
-        })
-        check_values(values, {"-f", "--file", "--ignore-file", "--exclude-from"})
-        if not any(option in values for option in {"-e", "--regexp", "-f", "--file"}):
-            operands = operands[1:]
+        result = inspect_grep_paths(args, cwd)
     elif command in {"sed", "gsed", "awk", "gawk", "mawk", "nawk", "jq", "yq"}:
-        program_options = {"-e", "--expression", "-f", "--file"}
-        if command in {"awk", "gawk", "mawk", "nawk"}:
-            program_options |= {"-F", "-v"}
-        if command in {"sed", "gsed"}:
-            args = [argument for index, argument in enumerate(args) if not (index and args[index - 1] == "-i" and argument == "")]
-        if command in {"jq", "yq"}:
-            program_options = {"-f", "--from-file", "--indent"}
-            remaining = []
-            index = 0
-            while index < len(args):
-                argument = args[index]
-                if argument in {"--arg", "--argjson", "--slurpfile", "--rawfile"}:
-                    if index + 2 >= len(args):
-                        deny("ファイル入力オプションの値がありません。")
-                    if argument in {"--slurpfile", "--rawfile"}:
-                        check(args[index + 2])
-                    index += 3
-                else:
-                    remaining.append(argument)
-                    index += 1
-            args = remaining
-        operands, values = path_arguments(args, program_options)
-        check_values(values, {"-f", "--file", "--from-file"})
-        if not any(option in values for option in {"-e", "--expression", "-f", "--file", "--from-file"}):
-            operands = operands[1:]
-        if command in {"awk", "gawk", "mawk", "nawk"}:
-            operands = [operand for operand in operands if not re.match(r"[A-Za-z_][A-Za-z_0-9]*=", operand)]
+        result = inspect_filter_paths(command, args, cwd)
     elif command in {"cat", "head", "tail", "less", "more", "nl", "wc", "sort", "uniq", "cut", "paste", "od", "xxd", "hexdump", "strings", "base64", "base32", "md5", "md5sum", "sha1sum", "sha256sum", "shasum", "cksum", "file", "diff", "cmp", "comm"}:
-        reader_options = {
-            "head": {"-n", "--lines", "-c", "--bytes"},
-            "tail": {"-n", "--lines", "-c", "--bytes", "-s", "--sleep-interval"},
-            "less": {"-p", "-P", "-x", "-z", "-j", "-t", "-T"},
-            "more": {"-n"}, "nl": {"-b", "-d", "-f", "-h", "-i", "-l", "-n", "-s", "-v", "-w"},
-            "wc": {"--files0-from"},
-            "sort": {"-k", "--key", "-t", "--field-separator", "-T", "--temporary-directory", "-S", "--buffer-size", "-o", "--output", "--files0-from", "--random-source"},
-            "uniq": {"-f", "-s", "-w"}, "cut": {"-b", "-c", "-d", "-f", "--bytes", "--characters", "--delimiter", "--fields"},
-            "paste": {"-d", "--delimiters"}, "od": {"-A", "-j", "-N", "-t", "-w"},
-            "xxd": {"-c", "-g", "-l", "-o", "-s"}, "hexdump": {"-e", "-f", "-n", "-s"},
-            "strings": {"-n", "-t", "-e"}, "md5": {"-s"}, "shasum": {"-a", "--algorithm"},
-            "file": {"-m", "--magic-file", "-f", "--files-from", "-e", "--exclude"},
-            "diff": {"-I", "-L", "--label", "-x", "--exclude", "-X", "--exclude-from", "-F"},
-            "cmp": {"-i", "--ignore-initial", "-n", "--bytes"},
-        }
-        operands, values = path_arguments(args, reader_options.get(command, set()))
-        if command in {"base64", "base32"}:
-            operands, values = path_arguments(args, {"-i", "--input", "-o", "--output", "-w", "--wrap"})
-            check_values(values, {"-i", "--input"})
-        check_values(values, {"--files0-from", "--random-source"})
-        if command in {"hexdump", "file"}:
-            check_values(values, {"-f", "--files-from", "-m", "--magic-file"})
-        if command == "diff":
-            check_values(values, {"-X", "--exclude-from"})
-        if command in {"uniq", "xxd"}:
-            operands = operands[:1]
+        result = inspect_reader_paths(command, args, cwd)
     elif command in {"cp", "scp", "rsync"}:
-        copy_options = {
-            "cp": {"-t", "--target-directory", "-S", "--suffix"},
-            "scp": {"-i", "-F", "-o", "-P", "-S", "-J", "-l", "-c", "-D"},
-            "rsync": {"-e", "--rsh", "--exclude", "--include", "--exclude-from", "--include-from", "--files-from", "--password-file"},
-        }
-        operands, values = path_arguments(args, copy_options[command])
-        check_values(values, {"--exclude-from", "--include-from", "--files-from", "--password-file"})
-        sources = operands if "-t" in values or "--target-directory" in values else operands[:-1]
-        for source in sources:
-            if command in {"scp", "rsync"} and ":" in source:
-                source = source.split(":", 1)[1]
-            check(source, recursive=True)
-        return
+        result = inspect_copy_paths(command, args, cwd)
     elif command == "dd":
-        for argument in args:
-            if argument.startswith("if="):
-                check(argument[3:])
-        return
+        result = inspect_dd_paths(args, cwd)
     elif command == "git":
-        global_options = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"}
-        index = 0
-        while index < len(args) and args[index].startswith("-"):
-            argument = args[index]
-            index += 2 if argument in global_options else 1
-        _operands, globals_ = path_arguments(args[:index], global_options)
-        for directory in globals_.get("-C", []):
-            cwd = os.path.normpath(os.path.join(cwd, directory))
-        if index >= len(args):
-            return
-        operation, args = args[index], args[index + 1:]
-        file_options = {"--pathspec-from-file"}
-        if operation in {"commit", "tag", "merge", "notes", "fmt-merge-msg"}:
-            file_options |= {"-F", "--file"}
-        if operation == "commit":
-            file_options |= {"-t", "--template"}
-        value_options = set(file_options)
-        if operation in {"show", "diff", "diff-files", "diff-index", "diff-tree", "difftool", "log", "reflog", "format-patch", "whatchanged"}:
-            value_options |= GIT_CONTENT_OPTIONS
-        elif operation in {"blame", "annotate"}:
-            file_options |= {"--contents", "-S", "--ignore-revs-file"}
-            value_options |= file_options | {"-L", "--ignore-rev", "--date"}
-        elif operation in {"commit", "tag", "merge", "notes", "fmt-merge-msg"}:
-            value_options |= {"-m", "--message", "-u", "--ref"}
-        if operation == "archive":
-            value_options |= {"--format", "--prefix", "--remote", "--exec", "--add-file", "--add-virtual-file"}
-            file_options.add("--add-file")
-        operands, values = path_arguments(args, value_options)
-        check_values(values, file_options | {"--contents", "-O"})
-        if operation == "log":
-            for selection in values.get("-L", []):
-                if ":" in selection:
-                    check(selection.rsplit(":", 1)[1])
-        if operation in {"show", "cat-file"}:
-            for operand in operands:
-                if ":" in operand:
-                    path = re.sub(r"^:[0-3]:", ":", operand).split(":", 1)[1]
-                    check(path)
-        if operation in {"show", "diff", "diff-files", "diff-index", "diff-tree", "log", "reflog"} and git_metadata_only(operation, args):
-            return
-        if operation not in {"show", "diff", "diff-files", "diff-index", "diff-tree", "difftool", "log", "reflog", "grep", "archive", "cat-file", "blame", "annotate", "format-patch", "fast-export", "checkout-index", "whatchanged"}:
-            return
-        if operation == "grep":
-            inspect_paths("grep", args, cwd)
-            return
+        result = inspect_git_paths(args, cwd)
     elif command == "openssl":
-        input_options = {"-in", "-inkey", "-key", "-cert", "-CAfile", "-CApath", "-config", "-extfile", "-signkey", "-untrusted", "-chain", "-certfile"}
-        if args[:1] in (["s_client"], ["s_server"]):
-            input_options -= {"-key", "-cert", "-CAfile", "-CApath"}
-        _operands, values = path_arguments(args, input_options | {"-out", "-keyout", "-writerand"})
-        check_values(values, input_options)
-        return
+        result = inspect_openssl_paths(args, cwd)
     elif command == "tar":
-        normalized = list(args)
-        if normalized and not normalized[0].startswith("-"):
-            normalized[0] = "-" + normalized[0]
-        operands, values = path_arguments(normalized, {"-f", "--file", "-C", "--directory", "-T", "--files-from", "-X", "--exclude-from", "--exclude", "--transform"})
-        creating = any(argument == "--create" or (argument.startswith("-") and not argument.startswith("--") and any(flag in argument[1:] for flag in "cru")) for argument in normalized)
-        check_values(values, {"-T", "--files-from", "-X", "--exclude-from"})
-        if not creating:
-            check_values(values, {"-f", "--file"})
-            return
-        for directory in values.get("-C", []) + values.get("--directory", []):
-            cwd = os.path.normpath(os.path.join(cwd, directory))
-        for operand in operands:
-            check(operand, recursive=True)
-        return
+        result = inspect_tar_paths(args, cwd)
     elif command in {"curl", "wget", "gh"}:
-        direct_options = {
-            "curl": {"-T", "--upload-file", "-K", "--config"},
-            "wget": {"-i", "--input-file", "--config", "--body-file", "--post-file"},
-            "gh": {"--body-file", "--bundle", "--env-file", "--input", "--notes-file"},
-        }[command]
-        indirect_options = {
-            "curl": {"-d", "--data", "--data-binary", "--data-urlencode", "--json", "-F", "--form", "-H", "--header", "--proxy-header"},
-            "wget": set(), "gh": {"-F", "--field"},
-        }[command]
-        ignored_options = {
-            "curl": {"-o", "--output", "-E", "--cert", "--key", "--netrc-file", "--cacert", "--capath", "--proxy-cert", "--proxy-key", "--data-raw", "--form-string", "-u", "--user", "-x", "--proxy", "-X", "--request"},
-            "wget": {"-O", "--output-document", "-o", "--output-file", "--load-cookies", "--certificate", "--private-key", "--ca-certificate"},
-            "gh": {"-R", "--repo", "-H", "--header", "-f", "--raw-field", "--jq", "--template", "--hostname", "--method", "-X"},
-        }[command]
-        if command == "gh":
-            ignored_options |= {
-                "-a", "--add", "-b", "--body", "-d", "--desc", "-f", "--filename",
-                "-t", "--title", "-n", "--notes", "--notes-start-tag", "--target",
-                "--discussion-category", "--type", "-s", "--source", "-T",
-            }
-            words, _values = path_arguments(args, direct_options | indirect_options | ignored_options)
-            pair = tuple(words[:2])
-            if pair in {
-                ("issue", "comment"), ("issue", "create"), ("issue", "edit"),
-                ("pr", "comment"), ("pr", "create"), ("pr", "edit"), ("pr", "merge"),
-                ("pr", "review"), ("pr", "revert"), ("release", "create"), ("release", "edit"),
-            }:
-                direct_options.add("-F")
-                indirect_options.discard("-F")
-            if pair == ("pr", "create"):
-                direct_options |= {"-T", "--template"}
-            elif pair in {("repo", "create"), ("repo", "new")}:
-                direct_options |= {"-s", "--source"}
-            elif pair == ("gist", "edit"):
-                direct_options |= {"-a", "--add"}
-            elif pair in {("secret", "set"), ("variable", "set")}:
-                direct_options.add("-f")
-            elif pair == ("attestation", "verify"):
-                direct_options.add("-b")
-        operands, values = path_arguments(args, direct_options | indirect_options | ignored_options | {"--url"})
-        check_values(values, direct_options)
-        for option in indirect_options:
-            for value in values.get(option, []):
-                source = None
-                if option in {"-F", "--form", "--field"}:
-                    for marker in ("=@", "=<"):
-                        if marker in value:
-                            source = value.split(marker, 1)[1].split(";", 1)[0]
-                elif value.startswith("@"):
-                    source = value[1:]
-                elif option == "--data-urlencode" and "@" in value and "=" not in value.split("@", 1)[0]:
-                    source = value.split("@", 1)[1]
-                if source is not None:
-                    for path in source.split(","):
-                        check(path.removeprefix("@"))
-        for value in operands + values.get("--url", []):
-            if value.startswith(("file://", "fileb://")):
-                check(value)
-        if command == "gh":
-            start = None
-            if pair in {("gist", "create"), ("gist", "new"), ("ssh-key", "add"), ("gpg-key", "add"), ("attestation", "verify"), ("attestation", "download")}:
-                start = 2
-            elif pair in {("release", "create"), ("release", "new"), ("release", "upload"), ("gist", "edit")} or operands[:3] == ["repo", "deploy-key", "add"]:
-                start = 3
-            if start is not None:
-                for value in operands[start:]:
-                    check(value.split("#", 1)[0] if pair[0] == "release" else value)
-        return
+        result = inspect_transfer_paths(command, args, cwd)
     elif command in {"docker", "podman", "nerdctl"}:
-        operands, values = path_arguments(args, {"-v", "--volume", "--mount", "--secret", "--env-file", "-f", "--file", "--build-context", "--config", "-H", "--host", "--name", "-e", "--env", "--build-arg", "-t", "--tag"})
-        if not any(operation in operands for operation in {"build", "run", "create", "cp", "compose"}):
-            return
-        if "--use-api-socket" in args:
-            deny("ホストの socket をコンテナへ渡す操作は許可していません。")
-        if "--secret" in values:
-            deny("secret をコンテナへ渡す操作は許可していません。")
-        check_values(values, {"--env-file"})
-        if "build" in operands:
-            check_values(values, {"-f", "--file"})
-        elif "compose" in operands:
-            operations = operands[operands.index("compose") + 1:]
-            boundary = args.index(operations[0]) if operations else len(args)
-            _operands, compose_values = path_arguments(args[:boundary], {"-f", "--file"})
-            check_values(compose_values, {"-f", "--file"})
-        for value in values.get("-v", []) + values.get("--volume", []):
-            source = value.split(":", 1)[0]
-            if source.endswith(".sock"):
-                deny("ホストの socket をコンテナへ渡す操作は許可していません。")
-            if source.startswith(("/", ".", "~", "$")):
-                check(source, recursive=True)
-        for value in values.get("--mount", []):
-            fields = dict(part.split("=", 1) for part in value.split(",") if "=" in part)
-            source = fields.get("source", fields.get("src", ""))
-            if source.endswith(".sock"):
-                deny("ホストの socket をコンテナへ渡す操作は許可していません。")
-            if source and fields.get("type", "bind") == "bind":
-                check(source, recursive=True)
-        if "cp" in operands and len(operands) >= 3:
-            source = operands[operands.index("cp") + 1]
-            check(source.split(":", 1)[-1], recursive=True)
-        if "build" in operands and operands[-1] != "build":
-            check(operands[-1], recursive=True)
-        for value in values.get("--build-context", []):
-            check(value.partition("=")[2], recursive=True)
-        return
+        result = inspect_container_paths(args, cwd)
     else:
         for argument in args:
             value = argument.partition("=")[2] if "=" in argument else argument
             if value.startswith(("file://", "fileb://")):
-                check(value)
+                check_path(value, cwd)
         return
+    if result is None:
+        return
+    operands, cwd = result
     for operand in operands:
-        check(operand)
+        check_path(operand, cwd)
 
 
 SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
@@ -1177,9 +1230,107 @@ def ansi_c_quote(text, index):
     raise ParseError("unterminated ANSI-C quote")
 
 
-def group_end(text, start, opening, closing):
+def heredoc_delimiter(text, index):
+    """引用を外した区切り語と次の位置を返す。コマンド置換を含む区切り語は None にする。"""
+    delimiter, quote, substituted, started = [], None, False, False
+    while index < len(text):
+        char = text[index]
+        if quote == "'":
+            if char == "'":
+                quote = None
+            else:
+                delimiter.append(char)
+            index += 1
+            continue
+        if char == "\\":
+            if index + 1 >= len(text):
+                raise ParseError("unfinished shell escape")
+            following = text[index + 1]
+            # shell_tokens と同じく行継続は捨て、二重引用内は $ ` " \ だけを外す。
+            if following != "\n":
+                if quote == '"' and following not in '$`"\\':
+                    delimiter.append("\\")
+                delimiter.append(following)
+                started = True
+            index += 2
+            continue
+        if char in "'\"":
+            if quote == char:
+                quote = None
+            elif quote is None:
+                quote = char
+            else:
+                delimiter.append(char)
+            started = True
+            index += 1
+            continue
+        if quote is None:
+            if char in " \t":
+                if started:
+                    break
+                # 区切り語が始まる前の空白は読み飛ばす。
+                index += 1
+                continue
+            if char in "\r\n|&;()<>":
+                break
+            if text.startswith("$'", index):
+                decoded, index = ansi_c_quote(text, index + 2)
+                delimiter.append(decoded)
+                started = True
+                continue
+        # 区切り語は展開せず、範囲を確定できないコマンド置換だけ heredoc として扱わない。
+        if char == "`" or text.startswith("$(", index):
+            substituted = started = True
+            index += 1
+            continue
+        if text.startswith("${", index):
+            end = group_end(text, index + 2, "{", "}")
+            body = text[index + 2:end]
+            if body.startswith("!") or re.search(r"@P$", body):
+                deny("間接参照・再評価によるパラメータ展開は許可していません。")
+            delimiter.append(text[index:end + 1])
+            started = True
+            index = end + 1
+            continue
+        if char == "$":
+            match = PARAMETER.match(text, index + 1)
+            if match:
+                name = match.group()
+                delimiter.append("$" + name)
+                started = True
+                index = match.end()
+                continue
+        delimiter.append(char)
+        started = True
+        index += 1
+    if quote:
+        raise ParseError("unterminated shell quote")
+    if not started:
+        raise ParseError("heredoc delimiter is missing")
+    return None if substituted else "".join(delimiter), index
+
+
+def heredoc_body(text, index, delimiter, strip_tabs):
+    """heredoc 本文と、区切り語の直後の位置を返す。"""
+    body = []
+    while index < len(text):
+        end = text.find("\n", index)
+        end = len(text) if end < 0 else end
+        line = text[index:end]
+        if strip_tabs:
+            index += len(line) - len(line.lstrip("\t"))
+            line = line.lstrip("\t")
+        if line.rstrip("\r") == delimiter:
+            return "".join(body), index + len(delimiter)
+        body.append(line + "\n")
+        index = end + 1
+    raise ParseError("unterminated heredoc")
+
+
+def group_end(text, start, opening, closing, heredocs=False):
     """引用を飛ばし、明示された展開の終端だけを探す。"""
     depth, quote, index = 1, None, start
+    pending, arithmetic, comment, backtick = [], [], False, False
     while index < len(text):
         char = text[index]
         if quote is None and text.startswith("$'", index):
@@ -1188,17 +1339,62 @@ def group_end(text, start, opening, closing):
         if char == "\\" and quote != "'":
             index += 2
             continue
+        if heredocs and not comment and quote != "'" and text.startswith("$(", index) and not text.startswith("$((", index):
+            # 入れ子のコマンド置換は引用が独立するため、内側をまとめて読み飛ばす。
+            index = group_end(text, index + 2, "(", ")", heredocs=True) + 1
+            continue
         if quote:
             if char == quote:
                 quote = None
         elif char in "'\"":
             quote = char
+        elif heredocs and char == "`":
+            # バッククォート置換の内側は shell_tokens が別途走査するため、heredoc を読まない。
+            backtick = not backtick
+        elif heredocs and text.startswith("((", index):
+            # 二重括弧内の << は算術の左シフトなので、heredoc として読まない。
+            arithmetic.append(depth)
+            depth += 2
+            index += 2
+            continue
         elif char == opening:
             depth += 1
         elif char == closing:
             depth -= 1
             if not depth:
                 return index
+            while arithmetic and depth <= arithmetic[-1]:
+                arithmetic.pop()
+            # 内側の括弧で登録した heredoc は本文を読めないため、閉じたところで捨てる。
+            pending = [item for item in pending if item[0] <= depth]
+        elif heredocs and char == "#" and text[index - 1] in " \t\n;&|(":
+            # 引用外の # 以降は行末まで heredoc 演算子を読まない（引用と括弧の追跡は続ける）。
+            comment = True
+        elif heredocs and not comment and not backtick and not arithmetic and text.startswith("<<", index):
+            if text.startswith("<<<", index):
+                # here-string は heredoc ではないため、演算子ごと読み飛ばす。
+                index += 3
+                continue
+            strip_tabs = text.startswith("<<-", index)
+            delimiter, index = heredoc_delimiter(text, index + (3 if strip_tabs else 2))
+            if delimiter is not None:
+                pending.append((depth, delimiter, strip_tabs))
+            continue
+        elif heredocs and char == "\n":
+            comment = False
+            if pending and not backtick:
+                _, delimiter, strip_tabs = pending.pop(0)
+                body, index = heredoc_body(text, index + 1, delimiter, strip_tabs)
+                # 対応の取れない閉じ括弧を含む本文は、そこで展開を終端する shell があり解釈を確定できない。
+                level = 0
+                for item in body:
+                    level += (item == opening) - (item == closing)
+                    if level < 0:
+                        raise ParseError("unbalanced heredoc body")
+                # 区切り語で始まり閉じ括弧が続く行は、そこを終端とみなす shell があり解釈を確定できない。
+                if any(line.startswith(delimiter) and closing in line for line in body.split("\n")):
+                    raise ParseError("ambiguous heredoc terminator")
+                continue
         index += 1
     raise ParseError("unterminated shell expansion")
 
@@ -1268,9 +1464,10 @@ def shell_tokens(text, literal=False):
             index = end + 1
             continue
         if text.startswith("$(", index) or (quote is None and text[index:index + 2] in {"<(", ">("}):
-            end = group_end(text, index + 2, "(", ")")
+            arithmetic = text.startswith("$((", index)
+            end = group_end(text, index + 2, "(", ")", heredocs=not arithmetic)
             body = text[index + 2:end]
-            if text.startswith("$((", index):
+            if arithmetic:
                 _, inner = shell_tokens(body[1:-1], literal=True)
                 nested.extend(inner)
                 parameters.update(PARAMETER.findall(body))
@@ -1290,7 +1487,9 @@ def shell_tokens(text, literal=False):
                 parameters.add(match.group())
             _, inner = shell_tokens(body, literal=True)
             nested.extend(inner)
-            value.append(os.path.expanduser("~") if body == "HOME" else text[index:end + 1])
+            # heredoc の区切り語は展開されないため、HOME も文字どおりに残す。
+            heredoc_word = tokens and tokens[-1] in ("<<", "<<-")
+            value.append(os.path.expanduser("~") if body == "HOME" and not heredoc_word else text[index:end + 1])
             started = True
             index = end + 1
             continue
@@ -1299,7 +1498,8 @@ def shell_tokens(text, literal=False):
             if match:
                 name = match.group()
                 parameters.add(name)
-                value.append(os.path.expanduser("~") if name == "HOME" else "$" + name)
+                heredoc_word = tokens and tokens[-1] in ("<<", "<<-")
+                value.append(os.path.expanduser("~") if name == "HOME" and not heredoc_word else "$" + name)
                 started = True
                 index = match.end()
                 continue
@@ -1319,21 +1519,10 @@ def shell_tokens(text, literal=False):
                 index += len(operator)
                 if operator == "\n":
                     for token_index, delimiter, strip_tabs, is_quoted in pending:
-                        body = []
-                        while True:
-                            if index >= len(text):
-                                raise ParseError("unterminated heredoc")
-                            end = text.find("\n", index)
-                            end = len(text) if end < 0 else end + 1
-                            line = text[index:end]
-                            index = end
-                            compared = line.rstrip("\r\n")
-                            if strip_tabs:
-                                compared = compared.lstrip("\t")
-                            if compared == delimiter:
-                                break
-                            body.append(line.lstrip("\t") if strip_tabs else line)
-                        body = "".join(body)
+                        body, index = heredoc_body(text, index, delimiter, strip_tabs)
+                        # 次の heredoc 本文は区切り語の行の後から始まる。
+                        end = text.find("\n", index)
+                        index = len(text) if end < 0 else end + 1
                         names = set()
                         if not is_quoted:
                             expanded, inner = shell_tokens(body, literal=True)
@@ -1555,97 +1744,117 @@ def mask_code(language, code, cwd, depth):
     return "".join(executable), strings
 
 
-def inspect_code(language, code, cwd, depth=0):
-    """直接記述されたファイル操作・秘密値取得・プロセス起動だけを検査する。"""
-    if depth > 32:
-        raise ParseError("nested code limit exceeded")
-    if UNKNOWN_ARGUMENT in code:
-        raise UnsupportedSyntax("dynamic inline code")
-    if language in {"python", "python3"}:
+def qualified_name(node, aliases):
+    """import の別名を解いて、呼び出し先の完全修飾名を組み立てる。"""
+    if isinstance(node, ast.Name):
+        return aliases.get(node.id, node.id)
+    if isinstance(node, ast.Attribute):
+        return qualified_name(node.value, aliases) + "." + node.attr
+    if isinstance(node, ast.Call) and qualified_name(node.func, aliases) in {"getattr", "builtins.getattr"}:
+        if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant) and isinstance(node.args[1].value, str):
+            return qualified_name(node.args[0], aliases) + "." + node.args[1].value
+    if isinstance(node, ast.Call) and qualified_name(node.func, aliases) in {"__import__", "builtins.__import__"}:
+        if node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
+            return node.args[0].value
+    return ""
+
+
+def inspect_python_process(language, name, node, cwd, depth):
+    """Python コードからの再評価と子プロセス起動を、子コマンドとして検査する。"""
+    process_args = node.args[1:] if name.startswith("os.spawn") else node.args
+    argument = process_args[0] if process_args else next((item.value for item in node.keywords if item.arg == "args"), None)
+    if name in {"eval", "exec", "builtins.eval", "builtins.exec"}:
+        if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
+            inspect_code(language, argument.value, cwd, depth + 1)
+    elif name in {"subprocess.Popen", "subprocess.run", "subprocess.call", "subprocess.check_call", "subprocess.check_output", "subprocess.getoutput", "subprocess.getstatusoutput"}:
+        options = {item.arg: item.value.value for item in node.keywords if isinstance(item.value, ast.Constant)}
+        child_cwd = os.path.normpath(os.path.join(cwd, options["cwd"])) if isinstance(options.get("cwd"), str) else cwd
+        child = argument.elts if isinstance(argument, (ast.List, ast.Tuple)) else [argument]
+        if child and all(isinstance(item, ast.Constant) and isinstance(item.value, str) for item in child):
+            child = [item.value for item in child]
+            if options.get("shell") or name in {"subprocess.getoutput", "subprocess.getstatusoutput"}:
+                child = [options.get("executable") or "/bin/sh", "-c"] + child
+            elif isinstance(options.get("executable"), str):
+                child[0] = options["executable"]
+            inspect_argv(child, child_cwd, depth + 1)
+    elif re.match(r"os\.(?:system|popen|exec\w*|spawn\w*|posix_spawnp?)$", name):
+        if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
+            if name in {"os.system", "os.popen"}:
+                scan(argument.value, cwd, depth + 1)
+            elif len(process_args) > 1:
+                child = process_args[1].elts if isinstance(process_args[1], (ast.List, ast.Tuple)) else process_args[1:]
+                if all(isinstance(item, ast.Constant) and isinstance(item.value, str) for item in child):
+                    inspect_argv([argument.value] + [item.value for item in child[1:]], cwd, depth + 1)
+
+
+def inspect_python_code(language, code, cwd, depth):
+    """Python の構文木から、秘密値の取得・認証情報ファイルの読み取り・プロセス起動だけを検査する。"""
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError) as error:
+        raise UnsupportedSyntax("unsupported inline Python") from error
+    aliases = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            aliases.update((item.asname or item.name, item.name) for item in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            aliases.update((item.asname or item.name, (node.module or "") + "." + item.name) for item in node.names)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Subscript) and qualified_name(node.value, aliases) == "os.environ":
+            if isinstance(node.slice, ast.Constant) and secret_name(str(node.slice.value)):
+                deny("コードからの秘密環境変数の取得は許可していません。")
+        if not isinstance(node, ast.Call):
+            continue
+        name = qualified_name(node.func, aliases)
+        if name in {"getattr", "builtins.getattr"}:
+            name = qualified_name(node, aliases)
         try:
-            tree = ast.parse(code)
-        except (SyntaxError, ValueError) as error:
-            raise UnsupportedSyntax("unsupported inline Python") from error
-        aliases = {}
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                aliases.update((item.asname or item.name, item.name) for item in node.names)
-            elif isinstance(node, ast.ImportFrom):
-                aliases.update((item.asname or item.name, (node.module or "") + "." + item.name) for item in node.names)
+            inspect_python_process(language, name, node, cwd, depth)
+        except UnsupportedSyntax:
+            pass
+        if name in {"os.getenv", "os.environ.get"}:
+            key = node.args[0] if node.args else next((item.value for item in node.keywords if item.arg == "key"), None)
+            if isinstance(key, ast.Constant) and isinstance(key.value, str) and secret_name(key.value):
+                deny("コードからの秘密環境変数の取得は許可していません。")
+        if (
+            name in {"dict", "list", "print"}
+            and any(qualified_name(item, aliases) == "os.environ" for item in node.args)
+            or name in {"os.environ.items", "os.environ.values"}
+        ):
+            deny("環境変数の一括取得は許可していません。")
+        if name.rsplit(".", 1)[-1] in CODE_READERS:
+            receiver = node.func.value if isinstance(node.func, ast.Attribute) else None
+            sources = node.args[:1] + ([receiver] if receiver is not None else [])
+            sources.extend(item.value for item in node.keywords if item.arg in {"file", "filename", "path"})
+            literals = [
+                item.value
+                for source in sources
+                for item in ast.walk(source)
+                if isinstance(item, ast.Constant) and isinstance(item.value, str)
+            ]
+            if any(credential_path(value, cwd) for value in literals):
+                deny("コードによる認証情報ファイルの直接読み取りは許可していません。")
 
-        def qualified_name(node):
-            if isinstance(node, ast.Name):
-                return aliases.get(node.id, node.id)
-            if isinstance(node, ast.Attribute):
-                return qualified_name(node.value) + "." + node.attr
-            if isinstance(node, ast.Call) and qualified_name(node.func) in {"getattr", "builtins.getattr"}:
-                if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant) and isinstance(node.args[1].value, str):
-                    return qualified_name(node.args[0]) + "." + node.args[1].value
-            if isinstance(node, ast.Call) and qualified_name(node.func) in {"__import__", "builtins.__import__"}:
-                if node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
-                    return node.args[0].value
-            return ""
 
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Subscript) and qualified_name(node.value) == "os.environ":
-                if isinstance(node.slice, ast.Constant) and secret_name(str(node.slice.value)):
-                    deny("コードからの秘密環境変数の取得は許可していません。")
-            if not isinstance(node, ast.Call):
-                continue
-            name = qualified_name(node.func)
-            if name in {"getattr", "builtins.getattr"}:
-                name = qualified_name(node)
-            process_args = node.args[1:] if name.startswith("os.spawn") else node.args
-            argument = process_args[0] if process_args else next((item.value for item in node.keywords if item.arg == "args"), None)
-            try:
-                if name in {"eval", "exec", "builtins.eval", "builtins.exec"}:
-                    if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
-                        inspect_code(language, argument.value, cwd, depth + 1)
-                elif name in {"subprocess.Popen", "subprocess.run", "subprocess.call", "subprocess.check_call", "subprocess.check_output", "subprocess.getoutput", "subprocess.getstatusoutput"}:
-                    options = {item.arg: item.value.value for item in node.keywords if isinstance(item.value, ast.Constant)}
-                    child_cwd = os.path.normpath(os.path.join(cwd, options["cwd"])) if isinstance(options.get("cwd"), str) else cwd
-                    child = argument.elts if isinstance(argument, (ast.List, ast.Tuple)) else [argument]
-                    if child and all(isinstance(item, ast.Constant) and isinstance(item.value, str) for item in child):
-                        child = [item.value for item in child]
-                        if options.get("shell") or name in {"subprocess.getoutput", "subprocess.getstatusoutput"}:
-                            child = [options.get("executable") or "/bin/sh", "-c"] + child
-                        elif isinstance(options.get("executable"), str):
-                            child[0] = options["executable"]
-                        inspect_argv(child, child_cwd, depth + 1)
-                elif re.match(r"os\.(?:system|popen|exec\w*|spawn\w*|posix_spawnp?)$", name):
-                    if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
-                        if name in {"os.system", "os.popen"}:
-                            scan(argument.value, cwd, depth + 1)
-                        elif len(process_args) > 1:
-                            child = process_args[1].elts if isinstance(process_args[1], (ast.List, ast.Tuple)) else process_args[1:]
-                            if all(isinstance(item, ast.Constant) and isinstance(item.value, str) for item in child):
-                                inspect_argv([argument.value] + [item.value for item in child[1:]], cwd, depth + 1)
-            except UnsupportedSyntax:
-                pass
-            if name in {"os.getenv", "os.environ.get"}:
-                key = node.args[0] if node.args else next((item.value for item in node.keywords if item.arg == "key"), None)
-                if isinstance(key, ast.Constant) and isinstance(key.value, str) and secret_name(key.value):
-                    deny("コードからの秘密環境変数の取得は許可していません。")
-            if (
-                name in {"dict", "list", "print"}
-                and any(qualified_name(item) == "os.environ" for item in node.args)
-                or name in {"os.environ.items", "os.environ.values"}
-            ):
-                deny("環境変数の一括取得は許可していません。")
-            if name.rsplit(".", 1)[-1] in CODE_READERS:
-                receiver = node.func.value if isinstance(node.func, ast.Attribute) else None
-                sources = node.args[:1] + ([receiver] if receiver is not None else [])
-                sources.extend(item.value for item in node.keywords if item.arg in {"file", "filename", "path"})
-                literals = [
-                    item.value
-                    for source in sources
-                    for item in ast.walk(source)
-                    if isinstance(item, ast.Constant) and isinstance(item.value, str)
-                ]
-                if any(credential_path(value, cwd) for value in literals):
-                    deny("コードによる認証情報ファイルの直接読み取りは許可していません。")
-        return
-    executable, strings = mask_code(language, code, cwd, depth)
+def masked_call_options(language, options, strings, cwd):
+    """呼び出しオプションから、shell 指定と作業ディレクトリだけ読み取る。"""
+    shell, child_cwd = False, cwd
+    for key, setting in re.findall(r"([A-Za-z_0-9]+)\s*:\s*([A-Za-z_0-9]+)", options or ""):
+        key_literal = re.fullmatch(r"__string_(\d+)__", key)
+        if key_literal:
+            key = strings[int(key_literal.group(1))]
+        if key == "shell":
+            shell = setting == "true" or setting.startswith("__string_")
+        if key == "cwd" and language == "node":
+            directory = re.fullmatch(r"__string_(\d+)__", setting)
+            if directory:
+                child_cwd = os.path.normpath(os.path.join(cwd, strings[int(directory.group(1))]))
+    return shell, child_cwd
+
+
+def inspect_masked_calls(language, executable, strings, cwd, depth):
+    """マスク済みコードから、静的に決まる子コマンドの起動だけを検査する。"""
     calls = (
         r"\b(eval|exec|execSync|execFile|execFileSync|spawn|spawnSync|system|popen|shell_exec|passthru|proc_open)"
         r"\s*\(?\s*__string_(\d+)__(?:\s*,\s*\[([^\]]*)\])?(?:\s*,\s*\{([^{}]*)\})?"
@@ -1653,17 +1862,7 @@ def inspect_code(language, code, cwd, depth=0):
     for match in re.finditer(calls, executable):
         name, literal, array, options = match.groups()
         value = strings[int(literal)]
-        shell, child_cwd = False, cwd
-        for key, setting in re.findall(r"([A-Za-z_0-9]+)\s*:\s*([A-Za-z_0-9]+)", options or ""):
-            key_literal = re.fullmatch(r"__string_(\d+)__", key)
-            if key_literal:
-                key = strings[int(key_literal.group(1))]
-            if key == "shell":
-                shell = setting == "true" or setting.startswith("__string_")
-            if key == "cwd" and language == "node":
-                directory = re.fullmatch(r"__string_(\d+)__", setting)
-                if directory:
-                    child_cwd = os.path.normpath(os.path.join(cwd, strings[int(directory.group(1))]))
+        shell, child_cwd = masked_call_options(language, options, strings, cwd)
         child = []
         if array is not None:
             child = (
@@ -1698,6 +1897,12 @@ def inspect_code(language, code, cwd, depth=0):
                 scan(value, child_cwd, depth + 1)
         except UnsupportedSyntax:
             pass
+
+
+def inspect_masked_code(language, code, cwd, depth):
+    """コメント・静的文字列を除き、プロセス起動・ファイル読み取り・環境変数取得を検査する。"""
+    executable, strings = mask_code(language, code, cwd, depth)
+    inspect_masked_calls(language, executable, strings, cwd, depth)
     for match in re.finditer(r"\b(?:open|readFile|readFileSync|file_get_contents|readfile|read|file|filebase64)\s*\(?\s*(?:pathexpand\s*\(\s*)?__string_(\d+)__", executable):
         if credential_path(strings[int(match.group(1))], cwd):
             deny("コードによる認証情報ファイルの直接読み取りは許可していません。")
@@ -1717,28 +1922,76 @@ def inspect_code(language, code, cwd, depth=0):
             deny("コードからの秘密環境変数の取得は許可していません。")
 
 
+def inspect_code(language, code, cwd, depth=0):
+    """直接記述されたファイル操作・秘密値取得・プロセス起動だけを検査する。"""
+    if depth > 32:
+        raise ParseError("nested code limit exceeded")
+    if UNKNOWN_ARGUMENT in code:
+        raise UnsupportedSyntax("dynamic inline code")
+    if language in {"python", "python3"}:
+        inspect_python_code(language, code, cwd, depth)
+    else:
+        inspect_masked_code(language, code, cwd, depth)
+
+
 def interpreter_input(command, args):
+    """インラインコード・-m モジュール・スクリプト・位置引数と、位置引数のファイル読み取り有無を返す。"""
     value_flags = {
         "python": {"-W", "-X", "--check-hash-based-pycs"},
         "python3": {"-W", "-X", "--check-hash-based-pycs"},
         "node": {"--input-type", "--require", "-r", "--import", "--loader"},
         "awk": {"-F", "-v", "-f"}, "gawk": {"-F", "-v", "-f"},
-        "ruby": {"-I", "-r"}, "perl": {"-I", "-M"}, "php": {"-d", "-c"},
+        "ruby": {
+            "-I", "-r", "-C", "-E", "--encoding", "--external-encoding", "--internal-encoding",
+            "--enable", "--disable", "--backtrace-limit", "--parser", "--crash-report",
+        },
+        "perl": {"-I", "-M"}, "php": {"-d", "-c"},
     }
-    chunks, script, index = [], None, 0
+    # 束の残りを値として取るフラグ。
+    attached_flags = {"perl": "CDFimx", "ruby": "CEFix"}
+    # 値を 1 文字だけ取るフラグ。
+    single_flags = {"ruby": "K"}
+    # ':' 以降を値として取るフラグ。
+    colon_flags = {"perl": "dV", "ruby": "W"}
+    # 位置引数をファイルとして読むフラグ。perl の -a / -F は -n を暗黙に有効にする。
+    reads_flags = {"perl": "npaF", "ruby": "np"}
+    # 構文検査・情報表示だけの場合は、位置引数の読み取りを省く。
+    no_run_flags = {"perl": "ch?v", "ruby": "ch"}
+    no_run_options = {
+        "perl": {"--help", "--version"},
+        "ruby": {"--help", "--version", "--copyright", "--yydebug"},
+    }
+    chunks, script, operands, index = [], None, [], 0
+    reads = command in {"awk", "gawk"}
+    no_run = False
     while index < len(args):
         arg = args[index]
         if arg == "--":
-            script = args[index + 1] if index + 1 < len(args) else None
+            operands = args[index + 1:]
+            script = operands[0] if operands else None
             break
         if arg == "-":
-            script = arg
+            script, operands = arg, args[index:]
             break
         if arg in value_flags.get(command, set()):
             index += 2
             continue
         if arg.startswith("--"):
-            if arg in {"--eval", "--print"}:
+            if arg in no_run_options.get(command, set()):
+                no_run = True
+            elif command == "ruby" and (arg == "--dump" or arg.startswith("--dump=")):
+                value = arg.partition("=")[2]
+                if arg == "--dump":
+                    index += 1
+                    if index >= len(args):
+                        raise ParseError("dump option is missing")
+                    value = args[index]
+                no_run = no_run or any(
+                    item.partition("+")[0]
+                    in {"version", "copyright", "usage", "help", "yydebug", "syntax", "parsetree", "insns"}
+                    for item in re.split(r"[\s,]+", value)
+                )
+            elif arg in {"--eval", "--print"}:
                 if index + 1 >= len(args):
                     raise ParseError("inline code is missing")
                 index += 1
@@ -1746,10 +1999,28 @@ def interpreter_input(command, args):
             elif arg.startswith(("--eval=", "--print=")):
                 chunks.append(arg.partition("=")[2])
         elif arg.startswith("-"):
+            skip = False
             for position, flag in enumerate(arg[1:], 1):
+                if skip:
+                    skip = False
+                    continue
+                if flag in single_flags.get(command, ""):
+                    skip = True
+                    continue
+                if flag in colon_flags.get(command, "") and (
+                    arg[position + 1:position + 2] == ":"
+                    or command == "perl" and flag == "d" and arg[position + 1:position + 3] == "t:"
+                ):
+                    break
+                if flag in reads_flags.get(command, ""):
+                    reads = True
+                if flag in no_run_flags.get(command, ""):
+                    no_run = True
                 if "-" + flag in value_flags.get(command, set()):
                     if not arg[position + 1:]:
                         index += 1
+                    break
+                if flag in attached_flags.get(command, ""):
                     break
                 is_module = command in {"python", "python3"} and flag == "m"
                 if is_module or flag in CODE_OPTIONS[command]:
@@ -1760,19 +2031,21 @@ def interpreter_input(command, args):
                             raise ParseError("Python module is missing" if is_module else "inline code is missing")
                         value = args[index]
                     if is_module:
-                        return None, [value] + args[index + 1:], None
+                        return None, [value] + args[index + 1:], None, [], False
                     chunks.append(value)
                     break
         else:
             if command in {"awk", "gawk"} and not chunks:
                 chunks.append(arg)
+                operands = args[index + 1:]
             else:
-                script = arg
+                script, operands = arg, args[index:]
             break
         if chunks and command in {"python", "python3"}:
+            operands = args[index + 1:]
             break
         index += 1
-    return "\n".join(chunks) if chunks else None, None, script
+    return "\n".join(chunks) if chunks else None, None, script, operands, reads and not no_run
 
 
 def script_uses_stdin(path):
@@ -1785,9 +2058,8 @@ def script_uses_stdin(path):
     return False
 
 
-def inspect_argv(argv, cwd, depth, stdin=None, external=False):
-    if depth > 32:
-        raise ParseError("nested command limit exceeded")
+def pop_assignments(argv, cwd):
+    """先頭の変数代入を argv から取り除いて検査し、terraform へ引き継ぐ値だけ返す。"""
     assignments = {}
     while argv and ASSIGNMENT.match(argv[0]):
         assignment = argv.pop(0)
@@ -1795,6 +2067,204 @@ def inspect_argv(argv, cwd, depth, stdin=None, external=False):
         name, value = ASSIGNMENT.match(assignment).groups()
         if name == "TF_CLI_ARGS" or name.startswith("TF_CLI_ARGS_"):
             assignments[name] = value
+    return assignments
+
+
+def env_split_args(args):
+    """env -S を静的に分割できる場合だけ個別の引数へ展開する。"""
+    for index, arg in enumerate(args):
+        if arg in {"-S", "--split-string"} or arg.startswith("--split-string="):
+            joined = "=" in arg
+            if not joined and index + 1 >= len(args):
+                raise ParseError("env split string is missing")
+            value = arg.partition("=")[2] if joined else args[index + 1]
+            split, nested = shell_tokens(value)
+            if nested or any(not isinstance(word, Word) for word in split):
+                raise UnsupportedSyntax("unsupported env split string")
+            return args[:index] + [word.value for word in split] + args[index + (1 if joined else 2):]
+    return args
+
+
+def inspect_wrapper(command, args, assignments, cwd, depth, stdin, external):
+    child, child_cwd = unwrap(command, args, cwd, assignments)
+    if command == "env" and not child and not has_option(args, {"--help", "--version"}):
+        deny("環境変数の一括出力は許可していません。")
+    if child:
+        child = [name + "=" + value for name, value in assignments.items()] + child
+        if command == "xargs":
+            inspect_argv(child, child_cwd, depth + 1, None, True)
+        else:
+            inspect_argv(child, child_cwd, depth + 1, stdin, external)
+
+
+def terraform_args(command, args, assignments):
+    """TF_CLI_ARGS の静的な値だけ、実行時と同じサブコマンド直後へ差し込む。"""
+    words = cli_words(command, args)
+    while words and words[0] in {"run", "run-all", "stack"}:
+        words = words[1:]
+    if not words:
+        return args
+    additional = []
+    for name in ("TF_CLI_ARGS", "TF_CLI_ARGS_" + words[0]):
+        split, nested = shell_tokens(assignments.get(name, ""))
+        if not nested and all(isinstance(word, Word) and not word.parameters for word in split):
+            additional.extend(word.value for word in split)
+    position = args.index(words[0]) + 1
+    return args[:position] + additional + args[position:]
+
+
+def inspect_recursive_removal(args, cwd):
+    for target in args:
+        if target.startswith("-") or UNKNOWN_ARGUMENT in target:
+            continue
+        path = os.path.realpath(os.path.join(cwd, os.path.expanduser(target))).rstrip("/") or "/"
+        home = os.path.realpath(os.path.expanduser("~"))
+        if path in {"/", home} or path.startswith("/*") or path.startswith(home + "/*"):
+            deny("ルート・ホーム全体の再帰削除は許可していません。")
+
+
+def inspect_container_exec(command, args, cwd, depth, stdin, external):
+    """コンテナ内で実行される argv を委譲し、コンテナへ渡す資格情報を拒否する。"""
+    if "--" in args and any(word in args[:args.index("--")] for word in {"exec", "rsh", "run"}):
+        inspect_argv(args[args.index("--") + 1:], cwd, depth + 1, stdin, external)
+    elif "exec" in args or "rsh" in args:
+        operation = "exec" if "exec" in args else "rsh"
+        words = cli_words(command, args[args.index(operation) + 1:], {"-e", "--env", "-u", "--user", "-w", "--workdir", "-c", "--container"})
+        if len(words) > 1:
+            inspect_argv(words[1:], cwd, depth + 1, stdin, external)
+    if command in {"docker", "podman", "nerdctl"}:
+        for value in option_values(args, {"-e", "--env", "--build-arg"}):
+            name = value.partition("=")[0]
+            if sensitive_parameter(name) or name in CREDENTIAL_PATH_VARIABLES and "=" not in value:
+                deny("資格情報をコンテナの環境へ渡すことは許可していません。")
+        if has_option(args, {"--ssh"}):
+            deny("認証エージェントをコンテナへ転送することは許可していません。")
+
+
+def inspect_shell(args, cwd, depth, stdin, external):
+    """-c のコマンド文字列とスクリプトを検査し、標準入力を読む起動だけ入力へ進む。"""
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg in {"--rcfile", "--init-file"} or arg.startswith(("--rcfile=", "--init-file=")):
+            deny("シェル起動ファイルの差し替えは許可していません。")
+        if arg in {"-o", "-O", "+o", "+O"}:
+            index += 2
+            continue
+        if arg.startswith("-") and not arg.startswith("--") and "c" in arg[1:]:
+            if index + 1 >= len(args):
+                raise ParseError("shell command string is missing")
+            scan(args[index + 1], cwd, depth + 1, stdin, external)
+            return
+        if not arg.startswith("-"):
+            if credential_path(arg, cwd):
+                deny("認証情報ファイルをスクリプトとして読み込むことは許可していません。")
+            if not script_uses_stdin(arg):
+                return
+            break
+        index += 1
+    if external:
+        raise UnsupportedSyntax("uninspected shell input")
+    if stdin is not None:
+        scan(stdin, cwd, depth + 1)
+
+
+def inspect_eval(command, args, cwd, depth, stdin, external):
+    values = args[1:] if args[:1] == ["--"] else args
+    if values and values[0] not in {"-", "", "-l", "-p"}:
+        scan(" ".join(values) if command == "eval" else values[0], cwd, depth + 1, stdin, external)
+
+
+def inspect_source(args, cwd, depth, stdin, external):
+    if args[:1] == ["--"]:
+        args = args[1:]
+    if args and credential_path(args[0], cwd):
+        deny("認証情報ファイルの source は許可していません。")
+    if args and script_uses_stdin(args[0]):
+        if external:
+            raise UnsupportedSyntax("uninspected source input")
+        if stdin is not None:
+            scan(stdin, cwd, depth + 1)
+
+
+def inspect_osascript(args, stdin):
+    for code in option_values(args, {"-e"}) + ([stdin] if stdin is not None else []):
+        executable = STRING_LITERAL.sub('""', code)
+        if re.search(r"\bdo\s+shell\s+script\b", executable, re.I):
+            deny("AppleScript からのシェル起動は許可していません。")
+
+
+def inspect_find(args, cwd, depth):
+    for index, arg in enumerate(args):
+        if arg in {"-exec", "-execdir", "-ok", "-okdir"}:
+            end = index + 1
+            while end < len(args) and args[end] not in {";", "+"}:
+                end += 1
+            if end == len(args):
+                raise ParseError("unterminated find executor")
+            inspect_argv(args[index + 1:end], cwd, depth + 1)
+
+
+def inspect_submodule_foreach(args, cwd, depth):
+    index = args.index("foreach")
+    if "submodule" in args[:index] and index + 1 < len(args):
+        scan(args[index + 1], cwd, depth + 1)
+
+
+def inspect_runner(command, args, cwd, depth):
+    """-- と exec の位置から子コマンドを取り出し、検査を委譲する。"""
+    for code in option_values(args, {"-c", "--command", "--call"}):
+        scan(code, cwd, depth + 1)
+    if "--" in args:
+        inspect_argv(args[args.index("--") + 1:], cwd, depth + 1)
+    elif command in {"npx", "npm", "pnpm", "mise"}:
+        start = next((index + 1 for index, arg in enumerate(args) if arg in {"exec", "x"}), 0 if command == "npx" else len(args))
+        if start < len(args) and not args[start].startswith("-"):
+            inspect_argv(args[start:], cwd, depth + 1)
+
+
+def inspect_interpreter_operands(language, operands, cwd):
+    """インタプリタが読み込む位置引数のファイルを検査する。"""
+    for operand in operands:
+        # awk の位置引数 var=value はファイル名ではない。
+        if language in {"awk", "gawk"} and re.match(r"[A-Za-z_][A-Za-z_0-9]*=", operand):
+            continue
+        check_path(operand, cwd)
+
+
+def inspect_interpreter(language, args, cwd, depth, stdin, external):
+    code, module, script, operands, reads = interpreter_input(language, args)
+    if module is not None:
+        if UNKNOWN_ARGUMENT in module[0]:
+            raise UnsupportedSyntax("dynamic Python module")
+        if module[0] in {"pip", "pip3"}:
+            inspect_argv(module, cwd, depth + 1)
+        return
+    if code is None and credential_path(script, cwd):
+        deny("認証情報ファイルをコードとして読み込むことは許可していません。")
+    unsupported = None
+    try:
+        if code is not None:
+            inspect_code(language, code, cwd)
+        else:
+            uses_stdin = not script or script == "-" or script_uses_stdin(script)
+            if uses_stdin and external:
+                raise UnsupportedSyntax("uninspected interpreter input")
+            if uses_stdin and stdin is not None:
+                inspect_code(language, stdin, cwd)
+    except UnsupportedSyntax as error:
+        # コードを解析できない場合も、読み込む位置引数は検査する。
+        unsupported = error
+    if reads:
+        inspect_interpreter_operands(language, operands, cwd)
+    if unsupported is not None:
+        raise unsupported
+
+
+def inspect_argv(argv, cwd, depth, stdin=None, external=False):
+    if depth > 32:
+        raise ParseError("nested command limit exceeded")
+    assignments = pop_assignments(argv, cwd)
     if not argv:
         return
     command = os.path.basename(argv[0]).casefold()
@@ -1812,154 +2282,39 @@ def inspect_argv(argv, cwd, depth, stdin=None, external=False):
     ):
         deny("組み込みコマンドによる実行設定の差し替えは許可していません。")
     if command == "env":
-        for index, arg in enumerate(args):
-            if arg in {"-S", "--split-string"} or arg.startswith("--split-string="):
-                joined = "=" in arg
-                if not joined and index + 1 >= len(args):
-                    raise ParseError("env split string is missing")
-                value = arg.partition("=")[2] if joined else args[index + 1]
-                split, nested = shell_tokens(value)
-                if nested or any(not isinstance(word, Word) for word in split):
-                    raise UnsupportedSyntax("unsupported env split string")
-                args = args[:index] + [word.value for word in split] + args[index + (1 if joined else 2):]
-                break
+        args = env_split_args(args)
     if command in WRAPPER_VALUES:
-        child, child_cwd = unwrap(command, args, cwd, assignments)
-        if command == "env" and not child and not has_option(args, {"--help", "--version"}):
-            deny("環境変数の一括出力は許可していません。")
-        if child:
-            child = [name + "=" + value for name, value in assignments.items()] + child
-            if command == "xargs":
-                inspect_argv(child, child_cwd, depth + 1, None, True)
-            else:
-                inspect_argv(child, child_cwd, depth + 1, stdin, external)
+        inspect_wrapper(command, args, assignments, cwd, depth, stdin, external)
         return
     if command in {"terraform", "terragrunt"}:
-        words = cli_words(command, args)
-        while words and words[0] in {"run", "run-all", "stack"}:
-            words = words[1:]
-        if words:
-            additional = []
-            for name in ("TF_CLI_ARGS", "TF_CLI_ARGS_" + words[0]):
-                split, nested = shell_tokens(assignments.get(name, ""))
-                if not nested and all(isinstance(word, Word) and not word.parameters for word in split):
-                    additional.extend(word.value for word in split)
-            position = args.index(words[0]) + 1
-            args = args[:position] + additional + args[position:]
+        args = terraform_args(command, args, assignments)
     inspect_cli(command, args, cwd)
     inspect_paths(command, args, cwd)
     if command in {"terraform", "terragrunt"} and "console" in cli_words(command, args) and stdin is not None:
         inspect_code("terraform", stdin, cwd, depth + 1)
     if command == "rm" and has_option(args, {"--recursive"}, "rR"):
-        for target in args:
-            if target.startswith("-") or UNKNOWN_ARGUMENT in target:
-                continue
-            path = os.path.realpath(os.path.join(cwd, os.path.expanduser(target))).rstrip("/") or "/"
-            home = os.path.realpath(os.path.expanduser("~"))
-            if path in {"/", home} or path.startswith("/*") or path.startswith(home + "/*"):
-                deny("ルート・ホーム全体の再帰削除は許可していません。")
+        inspect_recursive_removal(args, cwd)
     if command in {"kubectl", "oc", "docker", "podman", "nerdctl"}:
-        if "--" in args and any(word in args[:args.index("--")] for word in {"exec", "rsh", "run"}):
-            inspect_argv(args[args.index("--") + 1:], cwd, depth + 1, stdin, external)
-        elif "exec" in args or "rsh" in args:
-            operation = "exec" if "exec" in args else "rsh"
-            words = cli_words(command, args[args.index(operation) + 1:], {"-e", "--env", "-u", "--user", "-w", "--workdir", "-c", "--container"})
-            if len(words) > 1:
-                inspect_argv(words[1:], cwd, depth + 1, stdin, external)
-        if command in {"docker", "podman", "nerdctl"}:
-            for value in option_values(args, {"-e", "--env", "--build-arg"}):
-                name = value.partition("=")[0]
-                if sensitive_parameter(name) or name in CREDENTIAL_PATH_VARIABLES and "=" not in value:
-                    deny("資格情報をコンテナの環境へ渡すことは許可していません。")
-            if has_option(args, {"--ssh"}):
-                deny("認証エージェントをコンテナへ転送することは許可していません。")
+        inspect_container_exec(command, args, cwd, depth, stdin, external)
     if command in SHELLS:
-        index = 0
-        while index < len(args):
-            arg = args[index]
-            if arg in {"--rcfile", "--init-file"} or arg.startswith(("--rcfile=", "--init-file=")):
-                deny("シェル起動ファイルの差し替えは許可していません。")
-            if arg in {"-o", "-O", "+o", "+O"}:
-                index += 2
-                continue
-            if arg.startswith("-") and not arg.startswith("--") and "c" in arg[1:]:
-                if index + 1 >= len(args):
-                    raise ParseError("shell command string is missing")
-                scan(args[index + 1], cwd, depth + 1, stdin, external)
-                return
-            if not arg.startswith("-"):
-                if credential_path(arg, cwd):
-                    deny("認証情報ファイルをスクリプトとして読み込むことは許可していません。")
-                if not script_uses_stdin(arg):
-                    return
-                break
-            index += 1
-        if external:
-            raise UnsupportedSyntax("uninspected shell input")
-        if stdin is not None:
-            scan(stdin, cwd, depth + 1)
+        inspect_shell(args, cwd, depth, stdin, external)
     elif command in {"eval", "trap"}:
-        values = args[1:] if args[:1] == ["--"] else args
-        if values and values[0] not in {"-", "", "-l", "-p"}:
-            scan(" ".join(values) if command == "eval" else values[0], cwd, depth + 1, stdin, external)
+        inspect_eval(command, args, cwd, depth, stdin, external)
     elif command in {"source", "."}:
-        if args[:1] == ["--"]:
-            args = args[1:]
-        if args and credential_path(args[0], cwd):
-            deny("認証情報ファイルの source は許可していません。")
-        if args and script_uses_stdin(args[0]):
-            if external:
-                raise UnsupportedSyntax("uninspected source input")
-            if stdin is not None:
-                scan(stdin, cwd, depth + 1)
+        inspect_source(args, cwd, depth, stdin, external)
     elif command == "osascript":
-        for code in option_values(args, {"-e"}) + ([stdin] if stdin is not None else []):
-            executable = STRING_LITERAL.sub('""', code)
-            if re.search(r"\bdo\s+shell\s+script\b", executable, re.I):
-                deny("AppleScript からのシェル起動は許可していません。")
+        inspect_osascript(args, stdin)
     elif command == "find":
-        for index, arg in enumerate(args):
-            if arg in {"-exec", "-execdir", "-ok", "-okdir"}:
-                end = index + 1
-                while end < len(args) and args[end] not in {";", "+"}:
-                    end += 1
-                if end == len(args):
-                    raise ParseError("unterminated find executor")
-                inspect_argv(args[index + 1:end], cwd, depth + 1)
+        inspect_find(args, cwd, depth)
     elif command == "git" and "foreach" in args:
-        index = args.index("foreach")
-        if "submodule" in args[:index] and index + 1 < len(args):
-            scan(args[index + 1], cwd, depth + 1)
+        inspect_submodule_foreach(args, cwd, depth)
     elif command in {"npx", "npm", "pnpm", "yarn", "mise", "flock", "script"}:
-        for code in option_values(args, {"-c", "--command", "--call"}):
-            scan(code, cwd, depth + 1)
-        if "--" in args:
-            inspect_argv(args[args.index("--") + 1:], cwd, depth + 1)
-        elif command in {"npx", "npm", "pnpm", "mise"}:
-            start = next((index + 1 for index, arg in enumerate(args) if arg in {"exec", "x"}), 0 if command == "npx" else len(args))
-            if start < len(args) and not args[start].startswith("-"):
-                inspect_argv(args[start:], cwd, depth + 1)
+        inspect_runner(command, args, cwd, depth)
     language = re.sub(r"\d+(?:\.\d+)*$", "", command)
     if language == "python":
         language = "python3"
     if language in INTERPRETERS:
-        code, module, script = interpreter_input(language, args)
-        if module is not None:
-            if UNKNOWN_ARGUMENT in module[0]:
-                raise UnsupportedSyntax("dynamic Python module")
-            if module[0] in {"pip", "pip3"}:
-                inspect_argv(module, cwd, depth + 1)
-            return
-        if code is not None:
-            inspect_code(language, code, cwd)
-        else:
-            uses_stdin = not script or script == "-" or script_uses_stdin(script)
-            if uses_stdin and external:
-                raise UnsupportedSyntax("uninspected interpreter input")
-            if uses_stdin and stdin is not None:
-                inspect_code(language, stdin, cwd)
-            if credential_path(script, cwd):
-                deny("認証情報ファイルをコードとして読み込むことは許可していません。")
+        inspect_interpreter(language, args, cwd, depth, stdin, external)
 
 
 def scan(text, cwd, depth=0, input_text=None, input_external=False):

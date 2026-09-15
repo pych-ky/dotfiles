@@ -24,6 +24,12 @@ fi
 [ -r "$HOME/.shell/functions/aws.sh" ] && . "$HOME/.shell/functions/aws.sh"
 
 [ -r "$HOME/.shell/functions/git-worktree.sh" ] && . "$HOME/.shell/functions/git-worktree.sh"
+[ -r "$HOME/.shell/functions/ghq.sh" ] && . "$HOME/.shell/functions/ghq.sh"
+
+# fzf の補完と履歴検索
+if command -v fzf >/dev/null 2>&1; then
+  eval "$(fzf --bash)"
+fi
 
 [ -r "$HOME/.aws/load-active-profile.sh" ] && . "$HOME/.aws/load-active-profile.sh"
 

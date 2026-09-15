@@ -36,6 +36,26 @@ run_with_stdin() {
   fi
 }
 
+# IGNORE_GLOBAL_HOOKS に、物理パスでリポジトリ root と完全一致する行があるか調べる
+ignores_repo() {
+  local file="$1"
+  local root="$2"
+  local line
+
+  root="$(cd -P -- "$root" && pwd -P)" || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -n "$line" ]] || continue
+    # 相対パスは CWD から解決され、どのリポジトリにも一致するため無視する
+    [[ "$line" == /* ]] || continue
+    [[ "$line" == / ]] || line="${line%/}"
+    if [[ -d "$line" ]]; then
+      line="$(cd -P -- "$line" && pwd -P)" || continue
+    fi
+    [[ "$line" == "$root" ]] && return 0
+  done <"$file"
+  return 1
+}
+
 # IGNORE_GLOBAL_HOOKS に列挙されたリポジトリでは、secretlint と denylist だけを省略する。
 # リポジトリ固有・LFS フックは、既存動作や LFS ファイルを壊さないよう継続する。
 hooks_dir="$(cd "$(dirname "$0")" && pwd)"
@@ -45,7 +65,7 @@ git_root="$(git rev-parse --show-superproject-working-tree 2>/dev/null || true)"
   git_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 skip_global_checks=0
 if [[ -f "$ignore_file" && -n "$git_root" ]] &&
-  grep -qF -- "$git_root" "$ignore_file"; then
+  ignores_repo "$ignore_file" "$git_root"; then
   skip_global_checks=1
 fi
 

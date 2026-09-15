@@ -3,25 +3,15 @@
 
 set -euo pipefail
 
-temporary_clone_dir=
-
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 setup_common_library="$script_dir/../lib/setup-common.sh"
 if [[ ! -f "$setup_common_library" || -L "$setup_common_library" ]]; then
-  printf 'error: setup library is missing or unsafe: %s\n' \
+  printf 'error: setup common library is missing or unsafe: %s\n' \
     "$setup_common_library" >&2
   exit 1
 fi
-source_working_dir="$PWD"
-cd "$script_dir/.." || exit 1
-source lib/setup-common.sh
-cd "$source_working_dir" || exit 1
-unset source_working_dir
-
-error() {
-  printf 'error: %s\n' "$1" >&2
-  return 1
-}
+# shellcheck source=lib/setup-common.sh
+source "$setup_common_library"
 
 # / および . / .. 成分を含む絶対パスを拒否
 path_is_safe_absolute() {
@@ -68,138 +58,24 @@ verify_install_paths() {
   local pets_root_physical
 
   repository_physical="$(resolve_physical_path "$1")" || {
-    error 'CODEX_CUSTOM_PETS_REPO_DIR must resolve through directories'
+    setup_error 'CODEX_CUSTOM_PETS_REPO_DIR must resolve through directories'
     return 1
   }
   codex_root_physical="$(resolve_physical_path "$2")" || {
-    error 'CODEX_HOME must resolve through directories'
+    setup_error 'CODEX_HOME must resolve through directories'
     return 1
   }
   if [[ -z "$codex_root_physical" ]]; then
-    error 'CODEX_HOME must not resolve to /'
+    setup_error 'CODEX_HOME must not resolve to /'
     return 1
   fi
   pets_root_physical="$(resolve_physical_path "$codex_root_physical/pets")" || {
-    error 'CODEX_HOME/pets must resolve through directories'
+    setup_error 'CODEX_HOME/pets must resolve through directories'
     return 1
   }
 
   if paths_overlap "$repository_physical" "$pets_root_physical"; then
-    error 'Codex Custom Pets repository must not overlap CODEX_HOME/pets'
-    return 1
-  fi
-}
-
-# repository の配置を直列化
-acquire_repository_lock() {
-  local repository_dir="$1"
-  local actual_repository_physical
-  local repository_physical
-  local repository_parent
-  local lock_file
-
-  if ! command -v lockf >/dev/null 2>&1; then
-    error 'lockf is required for Codex Custom Pets setup'
-    return 1
-  fi
-
-  repository_physical="$(resolve_physical_path "$repository_dir")" || {
-    error 'CODEX_CUSTOM_PETS_REPO_DIR must resolve through directories'
-    return 1
-  }
-  repository_parent="$(dirname "$repository_physical")"
-  lock_file="$repository_parent/.${repository_physical##*/}.setup.lock"
-  mkdir -p "$repository_parent" || return
-  if [[ -L "$lock_file" || (-e "$lock_file" && ! -f "$lock_file") ]]; then
-    error "Codex Custom Pets repository lock is not a regular file: $lock_file"
-    return 1
-  fi
-
-  exec 8>>"$lock_file"
-  if [[ -L "$lock_file" || ! -f "$lock_file" ]]; then
-    exec 8>&-
-    error "Codex Custom Pets repository lock changed unexpectedly: $lock_file"
-    return 1
-  fi
-  if ! lockf -s -t 30 8; then
-    exec 8>&-
-    error "timed out waiting for Codex Custom Pets repository lock: $lock_file"
-    return 1
-  fi
-  actual_repository_physical="$(resolve_physical_path "$repository_dir")" || {
-    error 'CODEX_CUSTOM_PETS_REPO_DIR must resolve through directories'
-    return 1
-  }
-  if [[ "$actual_repository_physical" != "$repository_physical" ]]; then
-    error 'CODEX_CUSTOM_PETS_REPO_DIR changed while acquiring the repository lock'
-    return 1
-  fi
-}
-
-release_repository_lock() {
-  exec 8>&-
-}
-
-# CODEX_HOME/pets へのインストールを直列化
-acquire_install_lock() {
-  local codex_root="$1"
-  local expected_pets_root="$2"
-  local actual_pets_root
-  local lock_file="$expected_pets_root/.custom-pets-setup.lock"
-
-  if ! command -v lockf >/dev/null 2>&1; then
-    error 'lockf is required for Codex Custom Pets setup'
-    return 1
-  fi
-
-  mkdir -p "$expected_pets_root" || return
-  actual_pets_root="$(resolve_physical_path "$codex_root/pets")" || {
-    error 'CODEX_HOME/pets must resolve through directories'
-    return 1
-  }
-  if [[ "$actual_pets_root" != "$expected_pets_root" ]]; then
-    error 'CODEX_HOME/pets changed while acquiring the setup lock'
-    return 1
-  fi
-  if [[ -L "$lock_file" || (-e "$lock_file" && ! -f "$lock_file") ]]; then
-    error "Codex Custom Pets setup lock is not a regular file: $lock_file"
-    return 1
-  fi
-
-  exec 9>>"$lock_file"
-  if [[ -L "$lock_file" || ! -f "$lock_file" ]]; then
-    exec 9>&-
-    error "Codex Custom Pets setup lock changed unexpectedly: $lock_file"
-    return 1
-  fi
-  if ! lockf -s -t 30 9; then
-    exec 9>&-
-    error "timed out waiting for Codex Custom Pets setup lock: $lock_file"
-    return 1
-  fi
-}
-
-# 終了時に一時 clone とロックを解放
-cleanup() {
-  if [[ -n "$temporary_clone_dir" ]]; then
-    rm -rf "$temporary_clone_dir" 2>/dev/null || true
-  fi
-  exec 8>&- 2>/dev/null || true
-  exec 9>&- 2>/dev/null || true
-}
-
-# repository root、origin、install-pet の実行権を検証
-verify_repository() {
-  local repository_error
-
-  if ! repository_error="$(setup_verify_repository \
-    "$1" "$2" \
-    'Codex Custom Pets' \
-    'CODEX_CUSTOM_PETS_REPO_DIR' \
-    'CODEX_CUSTOM_PETS_REPO_URL' \
-    'bin/install-pet' \
-    'Codex Custom Pets installer is missing or not executable')"; then
-    error "$repository_error"
+    setup_error 'Codex Custom Pets repository must not overlap CODEX_HOME/pets'
     return 1
   fi
 }
@@ -224,67 +100,44 @@ install_repository_pets() {
     "$installer" "$pet_id" || return
     found=1
   done
-  ((found)) || error 'Codex Custom Pets repository does not contain installable pets'
+  ((found)) || setup_error 'Codex Custom Pets repository does not contain installable pets'
 }
 
 main() {
-  local skip="${CODEX_CUSTOM_PETS_SKIP:-0}"
-  local strict="${CODEX_CUSTOM_PETS_STRICT:-0}"
+  local skip
+  local strict
   local home_dir="${HOME:-}"
   local codex_home="${CODEX_HOME:-}"
   local codex_root
   local repository_url="${CODEX_CUSTOM_PETS_REPO_URL:-https://github.com/pych-ky/codex-custom-pets.git}"
   local repository_dir
-  local repository_parent
-  local clone_required=0
+  local checkout_status=0
   local pets_root_physical
+  local actual_pets_root
 
   if (($#)); then
-    error 'arguments are not supported'
+    setup_error 'arguments are not supported'
     return 1
   fi
 
-  case "$skip" in
-  0) ;;
-  1)
+  skip="$(setup_read_flag CODEX_CUSTOM_PETS_SKIP)" || return
+  if ((skip)); then
     printf 'Codex Custom Pets setup is disabled; skipping\n'
     return 0
-    ;;
-  *)
-    error 'CODEX_CUSTOM_PETS_SKIP must be 0 or 1'
-    return 1
-    ;;
-  esac
-
-  case "$strict" in
-  0 | 1) ;;
-  *)
-    error 'CODEX_CUSTOM_PETS_STRICT must be 0 or 1'
-    return 1
-    ;;
-  esac
-
-  if [[ -z "$home_dir" || "$home_dir" != /* || "$home_dir" == / || ! -d "$home_dir" ]] ||
-    [[ "$(cd "$home_dir" 2>/dev/null && pwd -P)" == / ]]; then
-    error 'HOME must be an existing absolute path other than /'
-    return 1
   fi
+  strict="$(setup_read_flag CODEX_CUSTOM_PETS_STRICT)" || return
+  setup_validate_home || return
 
   if [[ -n "$codex_home" ]] && ! path_is_safe_absolute "$codex_home"; then
-    error 'CODEX_HOME must be an absolute path other than /'
+    setup_error 'CODEX_HOME must be an absolute path other than /'
     return 1
   fi
 
-  repository_dir="${CODEX_CUSTOM_PETS_REPO_DIR:-$home_dir/src/pych/codex-custom-pets}"
-  while [[ "$repository_dir" != / ]]; do
-    case "$repository_dir" in
-    */) repository_dir="${repository_dir%/}" ;;
-    */.) repository_dir="${repository_dir%/.}" ;;
-    *) break ;;
-    esac
-  done
+  repository_dir="$(setup_normalize_repository_dir \
+    "${CODEX_CUSTOM_PETS_REPO_DIR:-$home_dir/ghq/github.com/pych-ky/codex-custom-pets}" \
+    CODEX_CUSTOM_PETS_REPO_DIR)" || return
   if ! path_is_safe_absolute "$repository_dir"; then
-    error 'CODEX_CUSTOM_PETS_REPO_DIR must be an absolute path other than /'
+    setup_error 'CODEX_CUSTOM_PETS_REPO_DIR must be an absolute path other than /'
     return 1
   fi
 
@@ -294,67 +147,47 @@ main() {
   done
   verify_install_paths "$repository_dir" "$codex_root" || return
 
-  if ! command -v git >/dev/null 2>&1; then
-    error 'git is required for Codex Custom Pets setup'
-    return 1
-  fi
-
-  if [[ -z "$repository_url" ]]; then
-    error 'CODEX_CUSTOM_PETS_REPO_URL must not be empty'
-    return 1
-  fi
-
-  if [[ ! -e "$repository_dir" && ! -L "$repository_dir" ]]; then
-    clone_required=1
-    if ! setup_run_noninteractive_git ls-remote -- "$repository_url" HEAD >/dev/null 2>&1; then
-      if setup_handle_access_failure "$strict" 'Codex Custom Pets'; then
-        return 0
-      fi
-      return 1
-    fi
-  else
-    verify_repository "$repository_dir" "$repository_url" || return
-  fi
-
   if ! command -v jq >/dev/null 2>&1; then
-    error 'jq is required for Codex Custom Pets setup'
+    setup_error 'jq is required for Codex Custom Pets setup'
     return 1
   fi
 
-  trap 'cleanup' EXIT
+  trap 'setup_cleanup_private_checkout' EXIT
+  setup_ensure_private_checkout "$repository_dir" "$repository_url" \
+    'Codex Custom Pets' \
+    'CODEX_CUSTOM_PETS_REPO_DIR' \
+    'CODEX_CUSTOM_PETS_REPO_URL' \
+    'bin/install-pet' \
+    'Codex Custom Pets installer is missing or not executable' \
+    "$strict" || checkout_status=$?
+  case "$checkout_status" in
+  0) ;;
+  3) return 0 ;;
+  *) return 1 ;;
+  esac
 
-  if ((clone_required)); then
-    acquire_repository_lock "$repository_dir" || return
-    repository_parent="$(dirname "$repository_dir")"
-    if [[ ! -e "$repository_dir" && ! -L "$repository_dir" ]]; then
-      mkdir -p "$repository_parent"
-      temporary_clone_dir="$(mktemp -d "$repository_parent/.codex-custom-pets.clone.XXXXXX")"
-
-      if ! setup_run_noninteractive_git clone --quiet --no-recurse-submodules -- \
-        "$repository_url" "$temporary_clone_dir"; then
-        error 'Codex Custom Pets repository could not be cloned'
-        return 1
-      fi
-
-      verify_repository "$temporary_clone_dir" "$repository_url" || return
-      if ! mv "$temporary_clone_dir" "$repository_dir"; then
-        error 'Codex Custom Pets repository could not be placed at its destination'
-        return 1
-      fi
-      temporary_clone_dir=
-    fi
-    verify_repository "$repository_dir" "$repository_url" || return
-    release_repository_lock
-  else
-    verify_repository "$repository_dir" "$repository_url" || return
-  fi
-
+  # CODEX_HOME/pets へのインストールを直列化
   pets_root_physical="$(resolve_physical_path "$codex_root/pets")" || {
-    error 'CODEX_HOME/pets must resolve through directories'
+    setup_error 'CODEX_HOME/pets must resolve through directories'
     return 1
   }
-  acquire_install_lock "$codex_root" "$pets_root_physical" || return
-  verify_repository "$repository_dir" "$repository_url" || return
+  mkdir -p "$pets_root_physical" || return
+  actual_pets_root="$(resolve_physical_path "$codex_root/pets")" || {
+    setup_error 'CODEX_HOME/pets must resolve through directories'
+    return 1
+  }
+  if [[ "$actual_pets_root" != "$pets_root_physical" ]]; then
+    setup_error 'CODEX_HOME/pets changed while acquiring the setup lock'
+    return 1
+  fi
+  process_lock_acquire "$pets_root_physical/.custom-pets-setup.lock" \
+    'Codex Custom Pets install' 30 || return
+  setup_verify_repository_or_error "$repository_dir" "$repository_url" \
+    'Codex Custom Pets' \
+    'CODEX_CUSTOM_PETS_REPO_DIR' \
+    'CODEX_CUSTOM_PETS_REPO_URL' \
+    'bin/install-pet' \
+    'Codex Custom Pets installer is missing or not executable' || return
   verify_install_paths "$repository_dir" "$codex_root" || return
   install_repository_pets "$repository_dir"
 }

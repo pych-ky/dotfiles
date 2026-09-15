@@ -15,6 +15,7 @@ git clone <このリポジトリ> && cd dotfiles
 ```
 
 Homebrew（未導入時は Xcode Command Line Tools も含む）、不足するアプリと開発ツールを導入し、設定を適用します。
+冒頭に `sudo` 認証を行います。Homebrew は認証キャッシュを無効化するため、アプリの導入や `/etc/codex/config.toml` の初回作成時には再認証が必要になる場合があります。
 途中で失敗した場合は、最後に表示される失敗内容を解消して再実行できます。
 `skipped steps` は未実行の処理です。終了状態が 0 でも確認し、必要な認証や前提を揃えて再実行してください。
 終了後は「[手動セットアップ](#手動セットアップ)」を行ってください。
@@ -101,7 +102,9 @@ codex
 - `~/.claude/settings.json` はコピーし、再適用では公開設定を優先します。公開側に同じ ID がない個人のプラグイン・marketplace 登録は保持します。既存設定のマージには `jq` が必要です。
 - `~/.codex/browser/config.toml` はコピーします。Codex の基本設定は `/etc/codex/config.toml` にリンクし、端末固有の `~/.codex/config.toml` で上書きできます。
 - 端末固有設定の旧 `sandbox_mode` / `[sandbox_workspace_write]` は削除してください。`sandbox_mode` が残ると公開側の `default_permissions` が使われません。
-- リンク後は Codex を終了し、新しいセッションを開始してください。
+- Codex App の承認メニューでは「保護付きフルアクセス」を選んでください。組み込みの「フルアクセス」は `approval_policy = "never"` で上書きするため、承認が必要な Computer Use のアプリ接続も拒否されることがあります。
+  最後に選んだ権限は `~/.codex/.codex-global-state.json` に保存され、`default_permissions` より優先されます。この選択は `[desktop]` では管理できないため、端末ごとに App で設定します。
+- リンク後は Codex を終了し、上記の権限を選んで新しいタスクを開始してください。既存タスクはプロファイルを切り替えても承認方式を引き継ぐため、`approval_policy = "on-request"` が適用されたとは限りません。`on-request` は必要な承認を求められる設定で、全操作を毎回確認するものではありません。
 
 ### Git 共通設定
 
@@ -133,7 +136,18 @@ brew bundle upgrade --file=macos/Brewfile            # 管理対象パッケー�
 ```
 
 `bootstrap.sh` はパッケージを一括アップグレードしませんが、Homebrew 本体・パッケージ情報と、不足パッケージの依存関係は更新される場合があります。
+TFLint は mise で管理します。旧 Homebrew 版から移行する場合は `mise install tflint` と `mise exec -- tflint --version` が成功してから、`brew uninstall --cask tflint`、`brew untap terraform-linters/tap` を実行してください。
 一部の GUI アプリは [Brewfile](macos/Brewfile) でコメントアウトしています。必要に応じて別途導入するか、コメントアウトを外して `brew bundle` を再実行してください。
+
+### シェルのファジー検索
+
+新しいターミナルで次の操作を使えます。
+
+- `cghq`（Zsh では `Ctrl+G` も可）: ghq 管理のリポジトリを検索し、Enter で移動します。`cghq dotfiles` のように初期検索語も指定できます。
+- `Ctrl+R`: コマンド履歴を検索します。
+- `Ctrl+T`: ファイル・ディレクトリを検索し、パスを入力します。
+- `Alt+C`: ディレクトリを検索して移動します。
+- `cd **` などの末尾で Tab: パスをファジー補完します。
 
 ### macOS と Typeless
 
@@ -155,6 +169,7 @@ Typeless は macOS と `jq` が必要です。[管理する設定](macos/typeles
 
 - 左 Control / Option / Command は Command / Control / Option に、Caps Lock は Control に変わります。
 - 右 Command / Option で、かな / 英数を切り替えます。
+- `Cmd+Space` で Spotlight の代わりに Raycast を開きます。
 - WezTerm・VS Code 統合ターミナルの `Cmd+C` は、選択中はコピー、未選択時は処理中断です。`Cmd` は OS に送るキーで、Windows の左 Ctrl の位置から操作できます。
 
 外付けキーボードは Mac モードで使用してください。Windows 配列だけの機器は、Karabiner の機器別 Simple Modifications で `left_command → left_control`、`left_option → left_option` を指定します。
@@ -180,7 +195,7 @@ Git、jq、macOS 標準の `lockf` が必要です。
 ./pets/setup.sh
 ```
 
-非公開リポジトリを `$HOME/src/pych/codex-custom-pets` に取得し、収録ペットを `${CODEX_HOME:-$HOME/.codex}` にインストールします。
+非公開リポジトリを `$HOME/ghq/github.com/pych-ky/codex-custom-pets` に取得し、収録ペットを `${CODEX_HOME:-$HOME/.codex}` にインストールします。
 再実行時は既存ペットを置き換え、同ディレクトリの `pets/.backups` に退避します。
 導入後は Codex の `Settings → Pets` で `Refresh` を実行してください。
 
@@ -189,7 +204,7 @@ Git、jq、macOS 標準の `lockf` が必要です。
 既存のチェックアウトは自動更新しません。更新する場合は以下を実行し、dotfiles に戻って `./pets/setup.sh` を再実行します。
 
 ```sh
-cd "${CODEX_CUSTOM_PETS_REPO_DIR:-$HOME/src/pych/codex-custom-pets}"
+cd "${CODEX_CUSTOM_PETS_REPO_DIR:-$HOME/ghq/github.com/pych-ky/codex-custom-pets}"
 git switch main
 git pull --ff-only
 ```
@@ -200,8 +215,8 @@ git pull --ff-only
 ./skills/setup.sh
 ```
 
-非公開リポジトリを `$HOME/src/pych/agent-skills` に取得し、その `setup.sh` で `~/.agents/skills` と `~/.claude/skills` にリンクします。
-同名の未管理オブジェクトは上書きしません。`setup.sh` は Claude のクラウドルーティン同期も行います。
+非公開リポジトリを `$HOME/ghq/github.com/pych-ky/agent-skills` に取得し、その `setup.sh` で `~/.agents/skills` と `~/.claude/skills` にリンクします。
+同名の未管理オブジェクトは上書きしません。Claude のクラウドルーティンの初回登録・変更は、Agent Skills 側の `routines/claude-app/sync.sh` を明示実行します。
 導入後は新しい Codex セッションでスキルを確認してください。
 
 スキルの選択・単体導入は [Agent Skills の README](https://github.com/pych-ky/agent-skills#readme) を参照してください。
@@ -212,7 +227,7 @@ git pull --ff-only
 既存のチェックアウトは自動更新しません。更新する場合は次を実行してください。
 
 ```sh
-repository_dir="${AGENT_SKILLS_REPO_DIR:-$HOME/src/pych/agent-skills}"
+repository_dir="${AGENT_SKILLS_REPO_DIR:-$HOME/ghq/github.com/pych-ky/agent-skills}"
 git -C "$repository_dir" pull --ff-only
 "$repository_dir/setup.sh"
 ```

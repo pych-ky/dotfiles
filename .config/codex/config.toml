@@ -25,6 +25,8 @@ cli_auth_credentials_store = "file"  # CLI 認証情報の保存先 (auto / keyr
 
 ## 承認ポリシー & パーミッション
 
+# Codex App の組み込み「フルアクセス」は approval_policy を never で上書きする。
+# App でも「保護付きフルアクセス」を選び、新しいタスクでこの既定設定を使う。
 approval_policy     = "on-request"          # 操作の承認要否 (untrusted / on-request / never)
 approvals_reviewer  = "user"                # 追加承認はユーザーに確認する
 default_permissions = "保護付きフルアクセス"

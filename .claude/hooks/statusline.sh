@@ -41,29 +41,48 @@ has_command() {
   command -v "$1" >/dev/null 2>&1
 }
 
-# Claude の入力 JSON を 1 回で読み、表示値を設定する
+# 入力 JSON の表示値。jq がないか読み取りに失敗した場合は空のまま使う
+input_cwd=''
+input_model_name=''
+input_effort=''
+input_transcript_path=''
+input_context_used=''
+input_context_input_tokens=''
+input_context_window_size=''
+input_context_window=''
+input_used_tokens=''
+input_five_hour_limit=''
+input_weekly_limit=''
+
+# 入力 JSON を 1 回読み、jq の出力順に表示値を設定する
 read_input_json() {
   local payload="$1"
-  local key
-  local value
 
   [[ -n "$payload" ]] || return 0
   has_command jq || return 0
 
-  while IFS= read -r -d '' key && IFS= read -r -d '' value; do
-    case "$key" in
-    cwd | model_name | effort | transcript_path | context_used | context_input_tokens | context_window_size | context_window | used_tokens | five_hour_limit | weekly_limit)
-      printf -v "input_$key" '%s' "$value"
-      ;;
-    esac
-  done < <(
+  {
+    IFS= read -r -d '' input_cwd &&
+      IFS= read -r -d '' input_model_name &&
+      IFS= read -r -d '' input_effort &&
+      IFS= read -r -d '' input_transcript_path &&
+      IFS= read -r -d '' input_context_used &&
+      IFS= read -r -d '' input_context_input_tokens &&
+      IFS= read -r -d '' input_context_window_size &&
+      IFS= read -r -d '' input_context_window &&
+      IFS= read -r -d '' input_used_tokens &&
+      IFS= read -r -d '' input_five_hour_limit &&
+      IFS= read -r -d '' input_weekly_limit
+  } < <(
     jq -j '
       . as $root
       | (try $root.model catch null) as $model
       |
       [
-        ["cwd", (try ($root.workspace.current_dir // $root.cwd) catch null)],
-        ["model_name", (
+        # input_cwd
+        (try ($root.workspace.current_dir // $root.cwd) catch null),
+        # input_model_name
+        (
           if ($model | type) == "object" then
             $model.display_name // $model.name // $model.id
           elif ($model | type) == "string" then
@@ -71,64 +90,66 @@ read_input_json() {
           else
             null
           end
-        )],
-        ["effort", (try $root.effort.level catch null)],
-        ["transcript_path", (try $root.transcript_path catch null)],
-        ["context_used", (
-          try $root.context_window.used_percentage catch null
-        )],
-        ["context_input_tokens", (
-          try $root.context_window.total_input_tokens catch null
-        )],
-        ["context_window_size", (
-          try $root.context_window.context_window_size catch null
-        )],
-        ["context_window", (try (
+        ),
+        # input_effort
+        (try $root.effort.level catch null),
+        # input_transcript_path
+        (try $root.transcript_path catch null),
+        # input_context_used
+        (try $root.context_window.used_percentage catch null),
+        # input_context_input_tokens
+        (try $root.context_window.total_input_tokens catch null),
+        # input_context_window_size
+        (try $root.context_window.context_window_size catch null),
+        # input_context_window
+        (try (
           $root.model_context_window //
           $root.context.window //
           $root.usage.context_window
-        ) catch null)],
-        ["used_tokens", (try (
+        ) catch null),
+        # input_used_tokens
+        (try (
           $root.usage.total_tokens //
           $root.context.total_tokens //
           $root.context.used_tokens
-        ) catch null)],
-        ["five_hour_limit", (
-          try $root.rate_limits.five_hour.used_percentage catch null
-        )],
-        ["weekly_limit", (
-          try $root.rate_limits.seven_day.used_percentage catch null
-        )]
+        ) catch null),
+        # input_five_hour_limit
+        (try $root.rate_limits.five_hour.used_percentage catch null),
+        # input_weekly_limit
+        (try $root.rate_limits.seven_day.used_percentage catch null)
       ]
       | .[]
-      | .[0] + "\u0000" + (.[1] // "" | tostring) + "\u0000"
-    ' 2>/dev/null <<<"$payload" || true
-  )
+      | (. // "" | tostring) + "\u0000"
+    ' 2>/dev/null <<<"$payload"
+  ) || true
 }
 
-# Claude 設定を 1 回で読み、入力 JSON のフォールバック値を設定する
+# Claude 設定から読む入力 JSON のフォールバック値
+settings_model=''
+settings_effort=''
+
+# Claude 設定を 1 回読み、jq の出力順にフォールバック値を設定する
 read_claude_settings() {
   local file="$1"
-  local key
-  local value
 
   [[ -r "$file" ]] || return 0
   has_command jq || return 0
 
-  while IFS= read -r -d '' key && IFS= read -r -d '' value; do
-    case "$key" in
-    model | effort) printf -v "settings_$key" '%s' "$value" ;;
-    esac
-  done < <(
+  {
+    IFS= read -r -d '' settings_model &&
+      IFS= read -r -d '' settings_effort
+  } < <(
     jq -j '
       [
-        ["model", (try .model catch null)],
-        ["effort", (try .effortLevel catch null)]
+        # settings_model
+        (try .model catch null),
+        # settings_effort
+        (try .effortLevel catch null)
       ]
       | .[]
-      | .[0] + "\u0000" + (.[1] // "" | tostring) + "\u0000"
-    ' "$file" 2>/dev/null || true
-  )
+      | (. // "" | tostring) + "\u0000"
+    ' "$file" 2>/dev/null
+  ) || true
 }
 
 # TOML から単純な scalar 値を取り出す
@@ -231,18 +252,7 @@ last_transcript_usage_total() {
     tail -n 1 || true
 }
 
-# Codex の baseline を差し引いた context 使用率を返す
-context_used_percent() {
-  local used_tokens="$1"
-  local context_window="$2"
-
-  [[ "$used_tokens" =~ ^[0-9]+$ ]] || used_tokens=0
-  [[ "$context_window" =~ ^[0-9]+$ ]] || context_window="$default_claude_context_window"
-
-  token_usage_percent "$used_tokens" "$context_window" "$codex_context_baseline_tokens"
-}
-
-# baseline がある場合は差し引き、context window に対する使用率を返す
+# baseline があれば差し引き、context window に対する使用率を切り上げずに返す
 token_usage_percent() {
   local used_tokens="$1"
   local context_window="$2"
@@ -251,7 +261,8 @@ token_usage_percent() {
   [[ "$used_tokens" =~ ^[0-9]+$ ]] || return 0
   [[ "$context_window" =~ ^[0-9]+$ ]] || return 0
 
-  awk \
+  # ceil_percent が読めるよう、ロケールによらず小数点を . にする
+  LC_ALL=C awk \
     -v used_tokens="$used_tokens" \
     -v context_window="$context_window" \
     -v baseline="$baseline" '
@@ -268,17 +279,8 @@ token_usage_percent() {
           used = 0
         }
 
-        percent = (used / (context_window - baseline)) * 100
-        if (percent > 100) {
-          percent = 100
-        }
-
-        rounded = int(percent)
-        if (percent > rounded) {
-          rounded += 1
-        }
-
-        printf "%d", rounded
+        # ceil_percent で切り上げるため、小数の精度を保つ
+        printf "%.17f", (used / (context_window - baseline)) * 100
       }
     '
 }
@@ -323,13 +325,13 @@ styled() {
   fi
 
   case "$item" in
-  model | model-name | model-with-reasoning | reasoning | run-state | status | fast-mode | raw-output | permissions | approval-mode | approval | codex-version | thread-id | session-id)
+  model | model-name | model-with-reasoning | reasoning | fast-mode)
     code=36
     ;;
-  current-dir | project-name | project | project-root | context-remaining | context-used | context-usage | context-window-size | used-tokens | total-input-tokens | total-output-tokens | task-progress)
+  current-dir | context-used | context-usage)
     code=32
     ;;
-  git-branch | pull-request-number | branch-changes | five-hour-limit | weekly-limit | thread-title)
+  git-branch | five-hour-limit | weekly-limit)
     code=35
     ;;
   *)
@@ -360,19 +362,6 @@ main() {
   local input
   input="$(cat)"
 
-  local input_cwd=''
-  local input_model_name=''
-  local input_effort=''
-  local input_transcript_path=''
-  local input_context_used=''
-  local input_context_input_tokens=''
-  local input_context_window_size=''
-  local input_context_window=''
-  local input_used_tokens=''
-  local input_five_hour_limit=''
-  local input_weekly_limit=''
-  local settings_model=''
-  local settings_effort=''
   read_input_json "$input"
   read_claude_settings "$claude_settings"
 
@@ -395,10 +384,13 @@ main() {
     context_used="$(token_usage_percent "$input_context_input_tokens" "$input_context_window_size")"
   fi
   if [[ -z "$context_used" ]]; then
-    local used_tokens
-    used_tokens="$input_used_tokens"
+    # Codex の baseline を差し引いた使用率にする
+    local used_tokens="$input_used_tokens"
     [[ -n "$used_tokens" ]] || used_tokens="$(last_transcript_usage_total "$input_transcript_path")"
-    context_used="$(context_used_percent "$used_tokens" "$input_context_window")"
+    [[ "$used_tokens" =~ ^[0-9]+$ ]] || used_tokens=0
+    local context_window="$input_context_window"
+    [[ "$context_window" =~ ^[0-9]+$ ]] || context_window="$default_claude_context_window"
+    context_used="$(token_usage_percent "$used_tokens" "$context_window" "$codex_context_baseline_tokens")"
   fi
   context_used="$(ceil_percent "$context_used")"
 

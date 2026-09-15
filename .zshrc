@@ -35,6 +35,18 @@ done
 unset f
 
 [[ -r "$HOME/.shell/functions/git-worktree.sh" ]] && . "$HOME/.shell/functions/git-worktree.sh"
+[[ -r "$HOME/.shell/functions/ghq.sh" ]] && . "$HOME/.shell/functions/ghq.sh"
+
+# fzf の補完・履歴検索と ghq リポジトリへの移動
+if command -v fzf >/dev/null 2>&1; then
+  . <(fzf --zsh)
+  _cghq_widget() {
+    cghq
+    zle reset-prompt
+  }
+  zle -N _cghq_widget
+  bindkey '^G' _cghq_widget
+fi
 
 # 端末ローカル設定の読み込み (組織固有の設定やツールの自動追記の受け皿、git 管理外)
 [[ -r "$HOME/.zshrc.local" ]] && . "$HOME/.zshrc.local"
