@@ -1,4 +1,4 @@
-# Homebrew の PATH と HOMEBREW_PREFIX を反映 (Apple Silicon: /opt/homebrew, Intel: /usr/local)
+# Homebrew の PATH と HOMEBREW_PREFIX を反映
 if [ -x /opt/homebrew/bin/brew ]; then
   eval "$(/opt/homebrew/bin/brew shellenv)"
 elif [ -x /usr/local/bin/brew ]; then
@@ -16,7 +16,6 @@ done
 unset dir
 export PATH
 
-# mise: リポジトリごとに開発ツールのバージョンを切り替える
 if command -v mise >/dev/null 2>&1; then
   eval "$(mise activate bash)"
 fi
@@ -33,6 +32,6 @@ fi
 
 [ -r "$HOME/.aws/load-active-profile.sh" ] && . "$HOME/.aws/load-active-profile.sh"
 
-# 端末ローカル設定の読み込み (組織固有の設定やツールの自動追記の受け皿、git 管理外)
+# 組織固有設定・ツールの自動追記は Git 管理外のローカル設定に置く
 # shellcheck source=/dev/null
 [ -r "$HOME/.bashrc.local" ] && . "$HOME/.bashrc.local"

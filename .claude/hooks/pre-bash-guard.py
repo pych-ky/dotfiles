@@ -242,7 +242,7 @@ def cli_words(command, args, extra_values=()):
 
 
 def matches_subcommand(words, forms):
-    return any(words[:len(form.split())] == form.split() for form in forms)
+    return any(words[:len(parts)] == parts for parts in map(str.split, forms))
 
 
 def secret_name(name):
@@ -836,7 +836,7 @@ def inspect_grep_paths(args, cwd):
         "--ignore-file", "--exclude-from", "--replace", "--type-add", "--type-clear", "--max-depth",
     })
     check_path_values(values, {"-f", "--file", "--ignore-file", "--exclude-from"}, cwd)
-    if not any(option in values for option in {"-e", "--regexp", "-f", "--file"}):
+    if not values.keys() & {"-e", "--regexp", "-f", "--file"}:
         operands = operands[1:]
     return operands, cwd
 
@@ -865,7 +865,7 @@ def inspect_filter_paths(command, args, cwd):
         args = remaining
     operands, values = path_arguments(args, program_options)
     check_path_values(values, {"-f", "--file", "--from-file"}, cwd)
-    if not any(option in values for option in {"-e", "--expression", "-f", "--file", "--from-file"}):
+    if not values.keys() & {"-e", "--expression", "-f", "--file", "--from-file"}:
         operands = operands[1:]
     if command in {"awk", "gawk", "mawk", "nawk"}:
         operands = [operand for operand in operands if not re.match(r"[A-Za-z_][A-Za-z_0-9]*=", operand)]
@@ -888,10 +888,11 @@ def inspect_reader_paths(command, args, cwd):
         "diff": {"-I", "-L", "--label", "-x", "--exclude", "-X", "--exclude-from", "-F"},
         "cmp": {"-i", "--ignore-initial", "-n", "--bytes"},
     }
-    operands, values = path_arguments(args, reader_options.get(command, set()))
     if command in {"base64", "base32"}:
         operands, values = path_arguments(args, {"-i", "--input", "-o", "--output", "-w", "--wrap"})
         check_path_values(values, {"-i", "--input"}, cwd)
+    else:
+        operands, values = path_arguments(args, reader_options.get(command, set()))
     check_path_values(values, {"--files0-from", "--random-source"}, cwd)
     if command in {"hexdump", "file"}:
         check_path_values(values, {"-f", "--files-from", "-m", "--magic-file"}, cwd)
@@ -998,7 +999,7 @@ def inspect_tar_paths(args, cwd):
 
 
 def gh_file_options(args, direct_options, indirect_options, ignored_options):
-    """gh はサブコマンドでファイル指定の短縮形が変わるため、補正した集合とサブコマンドを返す。"""
+    """gh のサブコマンド別にファイル指定の短縮形を補正する。"""
     direct_options, indirect_options = set(direct_options), set(indirect_options)
     ignored_options = ignored_options | {
         "-a", "--add", "-b", "--body", "-d", "--desc", "-f", "--filename",
@@ -1114,7 +1115,7 @@ def inspect_container_paths(args, cwd):
 
 
 def inspect_paths(command, args, cwd):
-    """コマンドごとの検査へ振り分け、返された位置引数と基準ディレクトリでパスを検査する。"""
+    """コマンド別の入力パスと基準ディレクトリを検査する。"""
     if command in {"echo", "printf", "test", "[", "[[", "ls", "stat", "touch", "mkdir", "chmod", "chown", "chgrp", "rm", "rmdir", "mv", "ln"}:
         return
     if command in {"grep", "egrep", "fgrep", "rg"}:
@@ -1268,7 +1269,6 @@ def heredoc_delimiter(text, index):
             if char in " \t":
                 if started:
                     break
-                # 区切り語が始まる前の空白は読み飛ばす。
                 index += 1
                 continue
             if char in "\r\n|&;()<>":
@@ -1372,7 +1372,6 @@ def group_end(text, start, opening, closing, heredocs=False):
             comment = True
         elif heredocs and not comment and not backtick and not arithmetic and text.startswith("<<", index):
             if text.startswith("<<<", index):
-                # here-string は heredoc ではないため、演算子ごと読み飛ばす。
                 index += 3
                 continue
             strip_tabs = text.startswith("<<-", index)
@@ -1760,7 +1759,7 @@ def qualified_name(node, aliases):
 
 
 def inspect_python_process(language, name, node, cwd, depth):
-    """Python コードからの再評価と子プロセス起動を、子コマンドとして検査する。"""
+    """Python の再評価コードと子コマンドを検査する。"""
     process_args = node.args[1:] if name.startswith("os.spawn") else node.args
     argument = process_args[0] if process_args else next((item.value for item in node.keywords if item.arg == "args"), None)
     if name in {"eval", "exec", "builtins.eval", "builtins.exec"}:
@@ -1788,7 +1787,7 @@ def inspect_python_process(language, name, node, cwd, depth):
 
 
 def inspect_python_code(language, code, cwd, depth):
-    """Python の構文木から、秘密値の取得・認証情報ファイルの読み取り・プロセス起動だけを検査する。"""
+    """Python の構文木から秘密値取得・認証情報の読み取り・プロセス起動を検査する。"""
     try:
         tree = ast.parse(code)
     except (SyntaxError, ValueError) as error:
@@ -2224,7 +2223,6 @@ def inspect_runner(command, args, cwd, depth):
 
 
 def inspect_interpreter_operands(language, operands, cwd):
-    """インタプリタが読み込む位置引数のファイルを検査する。"""
     for operand in operands:
         # awk の位置引数 var=value はファイル名ではない。
         if language in {"awk", "gawk"} and re.match(r"[A-Za-z_][A-Za-z_0-9]*=", operand):

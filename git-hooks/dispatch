@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# core.hooksPath から secretlint → denylist → .git/hooks → Git LFS の順に実行し、失敗を伝播する。
-# core.hooksPath で参照されなくなる .git/hooks も、ここで引き継ぐ。
-# pre-commit などのフック名で symlink を張る（$0 のファイル名で判定）。
+# secretlint → denylist → .git/hooks → Git LFS の順に実行し、失敗を伝播する
+# pre-commit などのフック名で symlink を張り、$0 のファイル名で判定する
 
 set -uo pipefail
 
@@ -44,7 +43,6 @@ ignores_repo() {
 
   root="$(cd -P -- "$root" && pwd -P)" || return 1
   while IFS= read -r line || [[ -n "$line" ]]; do
-    [[ -n "$line" ]] || continue
     # 相対パスは CWD から解決され、どのリポジトリにも一致するため無視する
     [[ "$line" == /* ]] || continue
     [[ "$line" == / ]] || line="${line%/}"
@@ -56,8 +54,7 @@ ignores_repo() {
   return 1
 }
 
-# IGNORE_GLOBAL_HOOKS に列挙されたリポジトリでは、secretlint と denylist だけを省略する。
-# リポジトリ固有・LFS フックは、既存動作や LFS ファイルを壊さないよう継続する。
+# IGNORE_GLOBAL_HOOKS では secretlint と denylist だけを省略し、固有・LFS フックは継続する
 hooks_dir="$(cd "$(dirname "$0")" && pwd)"
 ignore_file="$(dirname "$hooks_dir")/IGNORE_GLOBAL_HOOKS"
 git_root="$(git rev-parse --show-superproject-working-tree 2>/dev/null || true)"

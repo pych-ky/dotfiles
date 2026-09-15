@@ -1,34 +1,30 @@
-# Homebrew の PATH と HOMEBREW_PREFIX を反映 (Apple Silicon: /opt/homebrew, Intel: /usr/local)
+# Homebrew の PATH と HOMEBREW_PREFIX を反映
 if [[ -x /opt/homebrew/bin/brew ]]; then
   eval "$(/opt/homebrew/bin/brew shellenv)"
 elif [[ -x /usr/local/bin/brew ]]; then
   eval "$(/usr/local/bin/brew shellenv)"
 fi
 
-# typeset -U で path / PATH の重複要素を自動的に除去
+# PATH の重複を除き、(N-/) の項目はディレクトリがある場合だけ追加する
 typeset -U path PATH
 path=(
-  "$HOME/.local/bin"                                 # ユーザーローカルのバイナリ (常に追加)
-  ${HOMEBREW_PREFIX:-/usr/local}/opt/git/bin(N-/)    # Homebrew 版 git (存在時のみ)
-  ${HOMEBREW_PREFIX:-/usr/local}/opt/libpq/bin(N-/)  # keg-only の libpq (psql など、存在時のみ)
-  $HOME/.rd/bin(N-/)                                 # Rancher Desktop の CLI (docker / kubectl など、存在時のみ)
+  "$HOME/.local/bin"
+  ${HOMEBREW_PREFIX:-/usr/local}/opt/git/bin(N-/)
+  ${HOMEBREW_PREFIX:-/usr/local}/opt/libpq/bin(N-/) # keg-only の libpq (psql など)
+  $HOME/.rd/bin(N-/)                            # Rancher Desktop の CLI
   $path
 )
 
-# mise: リポジトリごとに開発ツールのバージョンを切り替える
 if command -v mise >/dev/null 2>&1; then
   eval "$(mise activate zsh)"
 fi
 
-# dumb ターミナル以外で starship プロンプトを初期化
 if [[ "$TERM" != "dumb" ]] && command -v starship >/dev/null 2>&1; then
   eval "$(starship init zsh)"
 fi
 
-# cd 拡張 zoxide
 command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init zsh)"
 
-# 外部 zsh プラグインの一括ロード
 for f in "$HOME"/.zsh/plugins/*/*.plugin.zsh(N); do
   . "$f"
 done
@@ -48,5 +44,5 @@ if command -v fzf >/dev/null 2>&1; then
   bindkey '^G' _cghq_widget
 fi
 
-# 端末ローカル設定の読み込み (組織固有の設定やツールの自動追記の受け皿、git 管理外)
+# 組織固有設定・ツールの自動追記は Git 管理外のローカル設定に置く
 [[ -r "$HOME/.zshrc.local" ]] && . "$HOME/.zshrc.local"
