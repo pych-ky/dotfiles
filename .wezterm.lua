@@ -1,10 +1,10 @@
 local wezterm = require("wezterm")
 
 return {
-  -- TUI から要求された Kitty keyboard protocol のキーエンコーディングを有効化
+  -- TUI が要求する Kitty keyboard protocol に対応
   enable_kitty_keyboard = true,
   keys = {
-    -- 選択中はメニュー処理を介さずコピーし、選択がなければ中断
+    -- メニューを介さず選択をコピーし、未選択なら中断
     {
       key = "c",
       mods = "CMD",
@@ -17,6 +17,7 @@ return {
         end
       end),
     },
+    -- Cmd+A/E/R を Ctrl+A/E/R として送信
     {
       key = "a",
       mods = "CMD",
@@ -32,7 +33,7 @@ return {
       mods = "CMD",
       action = wezterm.action.SendKey({ key = "r", mods = "CTRL" }),
     },
-    -- 標準の「全選択」では取り切れないスクロールバック全体をコピー
+    -- 標準の「全選択」が含めないスクロールバックもコピー
     {
       key = "a",
       mods = "CMD|SHIFT",

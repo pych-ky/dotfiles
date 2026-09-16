@@ -1,7 +1,5 @@
-# AWS SSO プロファイルを切り替えて永続化するシェル関数
-# AWS_PROFILE だけを扱い、一時認証情報は AWS SDK に解決を任せる
-
-# Claude Code のシェルスナップショットで除外されないよう __aws_* 名にする
+# AWS SSO プロファイルを永続化し、一時認証情報の解決は AWS SDK に任せる
+# Claude Code の shell snapshot に含めるため __aws_* 名を使う
 
 [ -n "${__AWS_FUNCTIONS_LOADED:-}" ] && return
 __AWS_FUNCTIONS_LOADED=1
@@ -28,7 +26,7 @@ __aws_has_credential_provider() {
   local variable
 
   while IFS= read -r variable; do
-    # 値を展開せず、空でない変数だけを provider とみなす
+    # 値を展開せず、空でない変数の有無だけを確認
     eval "[ \"\${$variable:+x}\" = x ]" && return 0
   done < <(__aws_credential_provider_variables)
 
@@ -51,7 +49,6 @@ __aws_run_without_credentials() (
   "$@"
 )
 
-# AWS_PROFILE 候補だけを使って疎通を確認
 __aws_verify_profile_credentials() (
   local profile="$1"
 
@@ -75,7 +72,7 @@ __aws_require_sso_profile() {
   fi
 }
 
-# 次回のシェル起動時に復元するプロファイル名を保存する
+# 次回のシェル起動用にプロファイル名を保存
 __aws_persist_active_profile() {
   local profile="${1:?usage: __aws_persist_active_profile <profile>}"
   local file="$HOME/.aws/active-profile"
@@ -104,14 +101,12 @@ aws-use() {
   __aws_require_sso_profile "$profile" || return
   __aws_run_without_credentials aws sso login --profile "$profile" || return
 
-  # 候補の疎通確認後に永続化し、現在の shell へ反映
   __aws_verify_profile_credentials "$profile" || return
   __aws_persist_active_profile "$profile" || return
   __aws_clear_credentials || return
   export AWS_PROFILE="$profile"
 }
 
-# 明示的な credential provider と永続化ファイルを削除
 aws-clear() {
   local clear_status=0
 

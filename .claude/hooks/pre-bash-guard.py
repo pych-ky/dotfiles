@@ -220,7 +220,6 @@ def has_option(args, names, short="", value_options=(), negated=()):
 
 
 def cli_words(command, args, extra_values=()):
-    """既知の値付きオプションを除いたサブコマンドと位置引数。"""
     values = CLI_VALUE_OPTIONS.get(command, set()) | set(extra_values)
     words = []
     index = 0
@@ -362,7 +361,7 @@ def inspect_security(args, words):
 def inspect_aws(args, words):
     if has_option(args, {"--version"}):
         return
-    # API オプションの値を help と誤認しないよう、既知のグローバル指定だけを除く。
+    # 値を help と誤認しないよう、既知のグローバル指定だけを除く。
     help_words = []
     index = 0
     while index < len(args):
@@ -672,7 +671,7 @@ CREDENTIAL_PATH_VARIABLES = {
 
 
 def path_spellings(value, cwd):
-    """既知のホーム表記と symlink を、ファイル本文を読まずに解決する。"""
+    """本文を読まず、既知のホーム表記と symlink を解決する。"""
     if UNKNOWN_ARGUMENT in value:
         return set()
     if value.startswith(("file://", "fileb://")):
@@ -716,7 +715,7 @@ def credential_path(value, cwd):
 
 
 def path_exposes_credentials(value, cwd):
-    """コピー・マウントでは既知の保管先の親ディレクトリも保護する。"""
+    """コピー・マウントは既知の保管先の親も保護する。"""
     if credential_path(value, cwd):
         return True
     if re.search(r"(?:^|/)\.codex-account-[^/]+/?$", value, re.IGNORECASE):
@@ -740,7 +739,7 @@ def path_exposes_credentials(value, cwd):
 
 
 def path_arguments(args, value_options=()):
-    """既知の値付きオプションを除き、位置引数とオプション値を返す。"""
+    """位置引数と既知のオプション値を分けて返す。"""
     operands, values = [], {}
     index = 0
     while index < len(args):
@@ -781,7 +780,7 @@ GIT_CONTENT_OPTIONS = {
 
 
 def git_metadata_only(operation, args):
-    """統計はパッチに追加され、no-patch は先行するパッチ指定を解除する。"""
+    """統計はパッチに追加、no-patch は先行パッチ指定を解除する。"""
     metadata, patch, names_only = operation in {"log", "reflog"}, False, False
     index = 0
     while index < len(args) and args[index] != "--":
@@ -816,7 +815,6 @@ def git_metadata_only(operation, args):
 
 
 def check_path(value, cwd, recursive=False):
-    """recursive では既知の保管先を含む親ディレクトリも拒否する。"""
     predicate = path_exposes_credentials if recursive else credential_path
     if predicate(value, cwd):
         deny("認証情報ファイルの直接読み取り・持ち出しは許可していません。")
@@ -925,7 +923,7 @@ def inspect_dd_paths(args, cwd):
 
 
 def inspect_git_paths(args, cwd):
-    """-C で変わる相対パスの基準も、共通検査へ返す。"""
+    """-C 適用後の基準ディレクトリも返す。"""
     global_options = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"}
     index = 0
     while index < len(args) and args[index].startswith("-"):
@@ -999,7 +997,7 @@ def inspect_tar_paths(args, cwd):
 
 
 def gh_file_options(args, direct_options, indirect_options, ignored_options):
-    """gh のサブコマンド別にファイル指定の短縮形を補正する。"""
+    """gh サブコマンドごとのファイル指定の短縮形を補正する。"""
     direct_options, indirect_options = set(direct_options), set(indirect_options)
     ignored_options = ignored_options | {
         "-a", "--add", "-b", "--body", "-d", "--desc", "-f", "--filename",
@@ -1115,7 +1113,6 @@ def inspect_container_paths(args, cwd):
 
 
 def inspect_paths(command, args, cwd):
-    """コマンド別の入力パスと基準ディレクトリを検査する。"""
     if command in {"echo", "printf", "test", "[", "[[", "ls", "stat", "touch", "mkdir", "chmod", "chown", "chgrp", "rm", "rmdir", "mv", "ln"}:
         return
     if command in {"grep", "egrep", "fgrep", "rg"}:
@@ -1232,7 +1229,7 @@ def ansi_c_quote(text, index):
 
 
 def heredoc_delimiter(text, index):
-    """引用を外した区切り語と次の位置を返す。コマンド置換を含む区切り語は None にする。"""
+    """引用を外した区切り語と次の位置を返す。コマンド置換を含めば None。"""
     delimiter, quote, substituted, started = [], None, False, False
     while index < len(text):
         char = text[index]
@@ -1247,7 +1244,6 @@ def heredoc_delimiter(text, index):
             if index + 1 >= len(text):
                 raise ParseError("unfinished shell escape")
             following = text[index + 1]
-            # shell_tokens と同じく行継続は捨て、二重引用内は $ ` " \ だけを外す。
             if following != "\n":
                 if quote == '"' and following not in '$`"\\':
                     delimiter.append("\\")
@@ -1278,7 +1274,7 @@ def heredoc_delimiter(text, index):
                 delimiter.append(decoded)
                 started = True
                 continue
-        # 区切り語は展開せず、範囲を確定できないコマンド置換だけ heredoc として扱わない。
+        # 区切り語は展開せず、範囲不明のコマンド置換だけ heredoc から除外する。
         if char == "`" or text.startswith("$(", index):
             substituted = started = True
             index += 1
@@ -1311,7 +1307,7 @@ def heredoc_delimiter(text, index):
 
 
 def heredoc_body(text, index, delimiter, strip_tabs):
-    """heredoc 本文と、区切り語の直後の位置を返す。"""
+    """heredoc 本文と区切り語直後の位置を返す。"""
     body = []
     while index < len(text):
         end = text.find("\n", index)
@@ -1340,7 +1336,7 @@ def group_end(text, start, opening, closing, heredocs=False):
             index += 2
             continue
         if heredocs and not comment and quote != "'" and text.startswith("$(", index) and not text.startswith("$((", index):
-            # 入れ子のコマンド置換は引用が独立するため、内側をまとめて読み飛ばす。
+            # 入れ子のコマンド置換は引用が独立するため、まとめて読み飛ばす。
             index = group_end(text, index + 2, "(", ")", heredocs=True) + 1
             continue
         if quote:
@@ -1349,10 +1345,10 @@ def group_end(text, start, opening, closing, heredocs=False):
         elif char in "'\"":
             quote = char
         elif heredocs and char == "`":
-            # バッククォート置換の内側は shell_tokens が別途走査するため、heredoc を読まない。
+            # バッククォート内は shell_tokens が走査するため、heredoc を読まない。
             backtick = not backtick
         elif heredocs and text.startswith("((", index):
-            # 二重括弧内の << は算術の左シフトなので、heredoc として読まない。
+            # 二重括弧内の << は左シフトで、heredoc ではない。
             arithmetic.append(depth)
             depth += 2
             index += 2
@@ -1365,10 +1361,10 @@ def group_end(text, start, opening, closing, heredocs=False):
                 return index
             while arithmetic and depth <= arithmetic[-1]:
                 arithmetic.pop()
-            # 内側の括弧で登録した heredoc は本文を読めないため、閉じたところで捨てる。
+            # 閉じた括弧内の heredoc は本文を読めないため捨てる。
             pending = [item for item in pending if item[0] <= depth]
         elif heredocs and char == "#" and text[index - 1] in " \t\n;&|(":
-            # 引用外の # 以降は行末まで heredoc 演算子を読まない（引用と括弧の追跡は続ける）。
+            # 行末まで heredoc 演算子を読まないが、引用と括弧は追跡する。
             comment = True
         elif heredocs and not comment and not backtick and not arithmetic and text.startswith("<<", index):
             if text.startswith("<<<", index):
@@ -1384,13 +1380,13 @@ def group_end(text, start, opening, closing, heredocs=False):
             if pending and not backtick:
                 _, delimiter, strip_tabs = pending.pop(0)
                 body, index = heredoc_body(text, index + 1, delimiter, strip_tabs)
-                # 対応の取れない閉じ括弧を含む本文は、そこで展開を終端する shell があり解釈を確定できない。
+                # 余分な閉じ括弧で展開を終端する shell があり、解釈を確定できない。
                 level = 0
                 for item in body:
                     level += (item == opening) - (item == closing)
                     if level < 0:
                         raise ParseError("unbalanced heredoc body")
-                # 区切り語で始まり閉じ括弧が続く行は、そこを終端とみなす shell があり解釈を確定できない。
+                # 区切り語で始まり閉じ括弧が続く行も、shell により終端の解釈が異なる。
                 if any(line.startswith(delimiter) and closing in line for line in body.split("\n")):
                     raise ParseError("ambiguous heredoc terminator")
                 continue
@@ -1486,7 +1482,7 @@ def shell_tokens(text, literal=False):
                 parameters.add(match.group())
             _, inner = shell_tokens(body, literal=True)
             nested.extend(inner)
-            # heredoc の区切り語は展開されないため、HOME も文字どおりに残す。
+            # heredoc 区切り語は展開されないため、HOME もそのまま残す。
             heredoc_word = tokens and tokens[-1] in ("<<", "<<-")
             value.append(os.path.expanduser("~") if body == "HOME" and not heredoc_word else text[index:end + 1])
             started = True
@@ -1519,7 +1515,6 @@ def shell_tokens(text, literal=False):
                 if operator == "\n":
                     for token_index, delimiter, strip_tabs, is_quoted in pending:
                         body, index = heredoc_body(text, index, delimiter, strip_tabs)
-                        # 次の heredoc 本文は区切り語の行の後から始まる。
                         end = text.find("\n", index)
                         index = len(text) if end < 0 else end + 1
                         names = set()
@@ -1687,7 +1682,7 @@ STRING_LITERAL = re.compile(r'''"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*' ''', re.S | 
 
 
 def mask_code(language, code, cwd, depth):
-    """コメントと静的文字列を除き、補間式は独立したコードとして検査する。"""
+    """コメントと静的文字列を除き、補間式を別途検査する。"""
     strings, executable = [], []
     index = 0
     while index < len(code):
@@ -1744,7 +1739,7 @@ def mask_code(language, code, cwd, depth):
 
 
 def qualified_name(node, aliases):
-    """import の別名を解いて、呼び出し先の完全修飾名を組み立てる。"""
+    """import の別名を解き、呼び出し先の完全修飾名を返す。"""
     if isinstance(node, ast.Name):
         return aliases.get(node.id, node.id)
     if isinstance(node, ast.Attribute):
@@ -1759,7 +1754,6 @@ def qualified_name(node, aliases):
 
 
 def inspect_python_process(language, name, node, cwd, depth):
-    """Python の再評価コードと子コマンドを検査する。"""
     process_args = node.args[1:] if name.startswith("os.spawn") else node.args
     argument = process_args[0] if process_args else next((item.value for item in node.keywords if item.arg == "args"), None)
     if name in {"eval", "exec", "builtins.eval", "builtins.exec"}:
@@ -1787,7 +1781,6 @@ def inspect_python_process(language, name, node, cwd, depth):
 
 
 def inspect_python_code(language, code, cwd, depth):
-    """Python の構文木から秘密値取得・認証情報の読み取り・プロセス起動を検査する。"""
     try:
         tree = ast.parse(code)
     except (SyntaxError, ValueError) as error:
@@ -1837,7 +1830,6 @@ def inspect_python_code(language, code, cwd, depth):
 
 
 def masked_call_options(language, options, strings, cwd):
-    """呼び出しオプションから、shell 指定と作業ディレクトリだけ読み取る。"""
     shell, child_cwd = False, cwd
     for key, setting in re.findall(r"([A-Za-z_0-9]+)\s*:\s*([A-Za-z_0-9]+)", options or ""):
         key_literal = re.fullmatch(r"__string_(\d+)__", key)
@@ -1853,7 +1845,7 @@ def masked_call_options(language, options, strings, cwd):
 
 
 def inspect_masked_calls(language, executable, strings, cwd, depth):
-    """マスク済みコードから、静的に決まる子コマンドの起動だけを検査する。"""
+    """マスク済みコードの静的に決まる子コマンドだけを検査する。"""
     calls = (
         r"\b(eval|exec|execSync|execFile|execFileSync|spawn|spawnSync|system|popen|shell_exec|passthru|proc_open)"
         r"\s*\(?\s*__string_(\d+)__(?:\s*,\s*\[([^\]]*)\])?(?:\s*,\s*\{([^{}]*)\})?"
@@ -1899,7 +1891,6 @@ def inspect_masked_calls(language, executable, strings, cwd, depth):
 
 
 def inspect_masked_code(language, code, cwd, depth):
-    """コメント・静的文字列を除き、プロセス起動・ファイル読み取り・環境変数取得を検査する。"""
     executable, strings = mask_code(language, code, cwd, depth)
     inspect_masked_calls(language, executable, strings, cwd, depth)
     for match in re.finditer(r"\b(?:open|readFile|readFileSync|file_get_contents|readfile|read|file|filebase64)\s*\(?\s*(?:pathexpand\s*\(\s*)?__string_(\d+)__", executable):
@@ -1934,7 +1925,7 @@ def inspect_code(language, code, cwd, depth=0):
 
 
 def interpreter_input(command, args):
-    """インラインコード・-m モジュール・スクリプト・位置引数と、位置引数のファイル読み取り有無を返す。"""
+    """コード・-m モジュール・スクリプト・位置引数・位置引数のファイル読み取り有無を返す。"""
     value_flags = {
         "python": {"-W", "-X", "--check-hash-based-pycs"},
         "python3": {"-W", "-X", "--check-hash-based-pycs"},
@@ -1946,15 +1937,15 @@ def interpreter_input(command, args):
         },
         "perl": {"-I", "-M"}, "php": {"-d", "-c"},
     }
-    # 束の残りを値として取るフラグ。
+    # 同じ引数の残りを値にするフラグ
     attached_flags = {"perl": "CDFimx", "ruby": "CEFix"}
-    # 値を 1 文字だけ取るフラグ。
+    # 値を 1 文字だけ取る。
     single_flags = {"ruby": "K"}
-    # ':' 以降を値として取るフラグ。
+    # ':' 以降を値にする。
     colon_flags = {"perl": "dV", "ruby": "W"}
-    # 位置引数をファイルとして読むフラグ。perl の -a / -F は -n を暗黙に有効にする。
+    # 位置引数をファイルとして読む。perl の -a / -F は -n を暗黙に有効にする。
     reads_flags = {"perl": "npaF", "ruby": "np"}
-    # 構文検査・情報表示だけの場合は、位置引数の読み取りを省く。
+    # 構文検査・情報表示では位置引数を読まない。
     no_run_flags = {"perl": "ch?v", "ruby": "ch"}
     no_run_options = {
         "perl": {"--help", "--version"},
@@ -2058,7 +2049,7 @@ def script_uses_stdin(path):
 
 
 def pop_assignments(argv, cwd):
-    """先頭の変数代入を argv から取り除いて検査し、terraform へ引き継ぐ値だけ返す。"""
+    """先頭の代入を取り除いて検査し、terraform 用の値だけ返す。"""
     assignments = {}
     while argv and ASSIGNMENT.match(argv[0]):
         assignment = argv.pop(0)
@@ -2070,7 +2061,7 @@ def pop_assignments(argv, cwd):
 
 
 def env_split_args(args):
-    """env -S を静的に分割できる場合だけ個別の引数へ展開する。"""
+    """env -S を静的に分割できる場合だけ引数へ展開する。"""
     for index, arg in enumerate(args):
         if arg in {"-S", "--split-string"} or arg.startswith("--split-string="):
             joined = "=" in arg
@@ -2097,7 +2088,7 @@ def inspect_wrapper(command, args, assignments, cwd, depth, stdin, external):
 
 
 def terraform_args(command, args, assignments):
-    """TF_CLI_ARGS の静的な値だけ、実行時と同じサブコマンド直後へ差し込む。"""
+    """TF_CLI_ARGS の静的な値だけ、実行時同様サブコマンド直後へ差し込む。"""
     words = cli_words(command, args)
     while words and words[0] in {"run", "run-all", "stack"}:
         words = words[1:]
@@ -2123,7 +2114,6 @@ def inspect_recursive_removal(args, cwd):
 
 
 def inspect_container_exec(command, args, cwd, depth, stdin, external):
-    """コンテナ内で実行される argv を委譲し、コンテナへ渡す資格情報を拒否する。"""
     if "--" in args and any(word in args[:args.index("--")] for word in {"exec", "rsh", "run"}):
         inspect_argv(args[args.index("--") + 1:], cwd, depth + 1, stdin, external)
     elif "exec" in args or "rsh" in args:
@@ -2141,7 +2131,7 @@ def inspect_container_exec(command, args, cwd, depth, stdin, external):
 
 
 def inspect_shell(args, cwd, depth, stdin, external):
-    """-c のコマンド文字列とスクリプトを検査し、標準入力を読む起動だけ入力へ進む。"""
+    """-c とスクリプトを検査し、標準入力を読む起動だけ入力を検査する。"""
     index = 0
     while index < len(args):
         arg = args[index]
@@ -2211,7 +2201,6 @@ def inspect_submodule_foreach(args, cwd, depth):
 
 
 def inspect_runner(command, args, cwd, depth):
-    """-- と exec の位置から子コマンドを取り出し、検査を委譲する。"""
     for code in option_values(args, {"-c", "--command", "--call"}):
         scan(code, cwd, depth + 1)
     if "--" in args:
@@ -2224,7 +2213,7 @@ def inspect_runner(command, args, cwd, depth):
 
 def inspect_interpreter_operands(language, operands, cwd):
     for operand in operands:
-        # awk の位置引数 var=value はファイル名ではない。
+        # awk の var=value はファイル名ではない。
         if language in {"awk", "gawk"} and re.match(r"[A-Za-z_][A-Za-z_0-9]*=", operand):
             continue
         check_path(operand, cwd)
@@ -2251,7 +2240,7 @@ def inspect_interpreter(language, args, cwd, depth, stdin, external):
             if uses_stdin and stdin is not None:
                 inspect_code(language, stdin, cwd)
     except UnsupportedSyntax as error:
-        # コードを解析できない場合も、読み込む位置引数は検査する。
+        # コードが未対応でも、読み込む位置引数は検査する。
         unsupported = error
     if reads:
         inspect_interpreter_operands(language, operands, cwd)

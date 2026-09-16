@@ -26,7 +26,6 @@ setup_run_noninteractive_git() {
     git "$@"
 }
 
-# HOME がルート以外の既存絶対パスか検証
 setup_validate_home() {
   local home_dir="${HOME:-}"
   local physical_home
@@ -43,7 +42,7 @@ setup_validate_home() {
   fi
 }
 
-# 0/1 の環境変数を検証して標準出力へ出す。未設定は 0
+# 環境変数を 0/1 として読み出す（未設定は 0）
 setup_read_flag() {
   local variable_name="$1"
   local value="${!variable_name:-0}"
@@ -57,7 +56,7 @@ setup_read_flag() {
   esac
 }
 
-# 末尾の / と /. を除いた絶対パスを標準出力へ出す
+# 末尾の / と /. を除いた絶対パスを返す
 setup_normalize_repository_dir() {
   local repository_dir="$1"
   local variable_name="$2"
@@ -76,7 +75,6 @@ setup_normalize_repository_dir() {
   printf '%s\n' "$repository_dir"
 }
 
-# private repository のアクセス失敗を strict 指定に応じてエラーまたはスキップにする
 setup_handle_access_failure() {
   local strict="$1"
   local label="$2"
@@ -135,7 +133,6 @@ setup_verify_repository() {
   fi
 }
 
-# setup_verify_repository と同じ引数で検証し、エラーを stderr に出す
 setup_verify_repository_or_error() {
   local repository_error
 
@@ -145,7 +142,7 @@ setup_verify_repository_or_error() {
   fi
 }
 
-# private repository の checkout を用意。アクセス不可でスキップ時は 3 を返す
+# private checkout を用意。アクセス不可でスキップ時は 3 を返す
 setup_ensure_private_checkout() {
   local repository_dir="$1"
   local repository_url="$2"
@@ -199,7 +196,7 @@ setup_ensure_private_checkout() {
   process_lock_release
 }
 
-# 一時 clone と自プロセスが所有する公開ロックを終了時に清掃
+# 終了時に一時 clone と自プロセスの公開ロックを清掃
 setup_cleanup_private_checkout() {
   [[ -z "$SETUP_TEMPORARY_CLONE_DIR" ]] || rm -rf "$SETUP_TEMPORARY_CLONE_DIR"
   process_lock_release 2>/dev/null || true

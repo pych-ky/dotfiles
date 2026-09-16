@@ -1,6 +1,5 @@
-# Bash / Zsh 共通の fzf worktree 作成関数
+# fzf で選んだ複数ブランチを .worktrees/<leaf> に展開（Bash / Zsh 共通）
 
-# ローカル / origin のブランチを重複排除して列挙する
 _wto_branches() {
   local repository_root="$1"
 
@@ -13,7 +12,6 @@ _wto_branches() {
     awk '!seen[$0]++'
 }
 
-# パス衝突回避用の安定したサフィックスを返す
 _wto_hash6() {
   if command -v shasum >/dev/null 2>&1; then
     printf '%s' "$1" | shasum -a 1
@@ -28,7 +26,7 @@ _wto_path_has_branch() {
   local branch="$3"
   local worktree_path_physical
 
-  # /tmp と /private/tmp を同じパスとして比較する
+  # /tmp と /private/tmp を同一視
   worktree_path_physical="$(cd "$worktree_path" 2>/dev/null && pwd -P)" || return 1
 
   git -C "$repository_root" worktree list --porcelain |
@@ -40,7 +38,6 @@ _wto_path_has_branch() {
   '
 }
 
-# fzf で複数ブランチを選択し、まとめて .worktrees/<leaf> に worktree を作成
 wto() {
   local repository_root
   repository_root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
@@ -69,7 +66,7 @@ wto() {
     leaf="${branch##*/}"
     dir="$worktrees_root/$leaf"
 
-    # 同名の末尾要素を持つ別ブランチとのパス衝突を避ける
+    # 別ブランチの同名 leaf との衝突を回避
     if [ -e "$dir" ] && ! _wto_path_has_branch "$repository_root" "$dir" "$branch"; then
       dir="$worktrees_root/${leaf}__$(_wto_hash6 "$branch")"
     fi

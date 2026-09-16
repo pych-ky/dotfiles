@@ -6,7 +6,7 @@
 .config/codex/tmp/
 
 ## Claude Code
-# 端末固有の権限・プロンプト履歴を除き、追跡対象だけを許可する
+# 追跡対象だけを許可し、端末固有の権限・履歴は除外
 .claude/*
 !.claude/CLAUDE.md
 !.claude/settings.json
@@ -33,7 +33,7 @@ work/
 __pycache__/
 *.pyc
 
-# 認証情報・秘密鍵 (誤追加防止)
+# 認証情報・秘密鍵
 
 ## 環境変数
 .env

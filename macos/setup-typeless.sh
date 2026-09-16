@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Typeless の共通設定だけを既存のユーザー設定へ反映する。
+# Typeless の既存設定に共通設定を反映
 
 set -euo pipefail
 
@@ -40,7 +40,7 @@ if [[ -L "$settings_file" || (-e "$settings_file" && ! -f "$settings_file") ]]; 
   exit 1
 fi
 
-# 次回起動時の旧設定移行で管理ショートカットが上書きされるのを防ぐ
+# 次回の旧設定移行による管理ショートカットの上書きを防ぐ
 if [[ -f "$settings_file" ]] &&
   jq -e '
     (.__COMPATIBLE_FEATURE_SHORTCUT_BINDINGS_MIGRATED_FLAG | IN(null, false, 0, "")) and
@@ -50,7 +50,7 @@ if [[ -f "$settings_file" ]] &&
   exit 1
 fi
 
-# 一致する場合は起動中でも設定を書き換えない
+# 一致すれば起動中でも終了不要
 if [[ -f "$settings_file" ]] &&
   jq -e --slurpfile managed "$managed_settings" \
     '. == (. * $managed[0])' "$settings_file" >/dev/null; then
@@ -67,7 +67,7 @@ mkdir -p "$(dirname "$settings_file")"
 temporary_settings="$(mktemp "$settings_file.XXXXXX")"
 trap 'rm -f -- "$temporary_settings"' EXIT
 
-# 未指定の設定を保持し、書き出しに成功してから置き換える
+# 未指定の設定を保持し、書き出し成功後に置換
 if [[ -f "$settings_file" ]]; then
   jq -s '
     if length == 2 and all(.[]; type == "object") then

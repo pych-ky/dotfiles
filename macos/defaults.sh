@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# macOS 設定のうち、デフォルトから意図的に変更した項目を適用する。
-# 冪等なので何度実行してもよい。一部の項目は再ログイン後に反映される。
+# macOS の独自設定を適用
+# 再実行可（一部は再ログイン後に反映）
 
 set -euo pipefail
 
@@ -16,12 +16,11 @@ fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Rectangle の終了待機は 0.2 秒間隔で最大 10 秒とする
+# Rectangle の終了を最大 10 秒待機
 rectangle_shutdown_max_attempts=50
 rectangle_shutdown_interval=0.2
 rectangle_restart_pending=0
 
-# Rectangle の終了をタイムアウト付きで待機
 wait_for_rectangle_exit() {
   local attempts=0
 
@@ -36,14 +35,12 @@ wait_for_rectangle_exit() {
   done
 }
 
-# import 前に停止した Rectangle を一度だけ再起動
 restart_rectangle() {
   ((rectangle_restart_pending)) || return 0
   rectangle_restart_pending=0
   open -a Rectangle
 }
 
-# 終了時に Rectangle の稼働状態を復元し、終了コードを保持
 restore_rectangle_on_exit() {
   local status="$1"
   local restart_status
@@ -62,8 +59,7 @@ restore_rectangle_on_exit() {
   exit "$status"
 }
 
-# デスクトップの並べ方だけを変更し、アイコンサイズなどの表示設定を保持する。
-# defaults write は辞書全体を置き換えるため、既存の plist を編集して読み込む。
+# defaults write は辞書を置換するため、既存 plist の並べ方だけを変更
 set_desktop_arrangement() {
   local value="$1"
   local keypath
@@ -71,7 +67,7 @@ set_desktop_arrangement() {
 
   plist="$(defaults export com.apple.finder -)"
 
-  # デスクトップの表示オプションを保存していない端末には入れ子の辞書が無い
+  # 表示設定の未保存端末には入れ子の辞書が無い
   for keypath in DesktopViewSettings DesktopViewSettings.IconViewSettings; do
     if ! printf '%s' "$plist" |
       plutil -extract "$keypath" xml1 -o /dev/null -- - >/dev/null 2>&1; then
@@ -90,14 +86,14 @@ set_desktop_arrangement() {
 
 # キーボード
 
-# キーのリピート速度を最速に、リピート入力認識までの時間を最短に
+# キーリピートを最速、開始待ちを最短に
 defaults write NSGlobalDomain KeyRepeat -int 2
 defaults write NSGlobalDomain InitialKeyRepeat -int 15
 
-# F1、F2 などのキーを標準のファンクションキーとして使用
+# F1、F2 などを標準のファンクションキーに
 defaults write NSGlobalDomain com.apple.keyboard.fnState -bool true
 
-# スペル自動修正・文頭の自動大文字化・スマート引用符/ダッシュ・ピリオド自動挿入を無効化
+# スペル修正・文頭大文字化・スマート引用符/ダッシュ・ピリオド自動挿入を無効化
 defaults write NSGlobalDomain NSAutomaticSpellingCorrectionEnabled -bool false
 defaults write NSGlobalDomain NSAutomaticCapitalizationEnabled -bool false
 defaults write NSGlobalDomain NSAutomaticQuoteSubstitutionEnabled -bool false
@@ -136,13 +132,13 @@ defaults write NSGlobalDomain AppleInterfaceStyle -string Dark
 
 # Dock / Mission Control
 
-# Dock に提案および最近使用したアプリを表示しない
+# Dock の提案・最近使ったアプリを非表示
 defaults write com.apple.dock show-recents -bool false
 
 # Dock のアイコンサイズ
 defaults write com.apple.dock tilesize -int 72
 
-# 最新の使用状況に基づいて操作スペースを自動的に並べ替えない
+# 使用状況による操作スペースの自動並べ替えを無効化
 defaults write com.apple.dock mru-spaces -bool false
 
 # Finder
@@ -150,16 +146,16 @@ defaults write com.apple.dock mru-spaces -bool false
 # 隠しファイルを表示
 defaults write com.apple.finder AppleShowAllFiles -bool true
 
-# すべてのファイル名拡張子を表示
+# 全ファイルの拡張子を表示
 defaults write NSGlobalDomain AppleShowAllExtensions -bool true
 
 # パスバーを表示
 defaults write com.apple.finder ShowPathbar -bool true
 
-# デフォルトの表示スタイルをリスト表示に
+# デフォルトをリスト表示に
 defaults write com.apple.finder FXPreferredViewStyle -string Nlsv
 
-# デスクトップのアイコンをグリッドに沿って並べる
+# デスクトップのアイコンをグリッドに整列
 set_desktop_arrangement grid
 
 # メニューバー / コントロールセンター
@@ -169,7 +165,7 @@ defaults write com.apple.controlcenter "NSStatusItem Visible Sound" -bool true
 
 # Rectangle (ウィンドウ管理)
 
-# 終了時の旧設定書き戻しと import の競合を避けるため、停止して終了を待つ
+# 終了時の旧設定書き戻しと import の競合を防ぐ
 if pgrep -xq Rectangle; then
   rectangle_restart_pending=1
   trap 'restore_rectangle_on_exit "$?"' EXIT
@@ -177,22 +173,19 @@ if pgrep -xq Rectangle; then
   wait_for_rectangle_exit
 fi
 
-# エクスポート済みの設定 (ショートカット・スナップ挙動) を取り込み
+# 保存済みのショートカット・スナップ設定を取り込み
 defaults import com.knollsoft.Rectangle "$script_dir/rectangle.plist"
 
-# 電源管理 (認証済み sudo が必要。未認証時はプロンプトを出さず警告して続行)
+# 電源管理 (sudo 未認証時はプロンプトなしで警告し続行)
 
-# 電源アダプタ接続時は自動スリープさせない
+# 電源接続時の自動スリープを無効化
 sudo -n pmset -c sleep 0 2>/dev/null || printf 'warning: skipped pmset sleep setting\n' >&2
 
-# 反映
-
-# 設定を反映するため関連プロセスを再起動
+# プロセス再起動で反映
 killall Dock 2>/dev/null || true
 killall Finder 2>/dev/null || true
 killall ControlCenter 2>/dev/null || true
 
-# Rectangle を再起動して復旧 trap を解除
 restart_rectangle
 trap - EXIT
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# private Agent Skills の checkout を用意し、repository 側の setup.sh に配置を委譲する。
+# private Agent Skills を取得し、付属 setup.sh で配置
 
 set -euo pipefail
 
