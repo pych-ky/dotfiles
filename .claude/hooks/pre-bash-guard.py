@@ -1180,15 +1180,15 @@ class Word:
 
 
 def ansi_c_quote(text, index):
-    value = []
+    value = bytearray()
     escapes = dict(zip("abefnrtvE", "\a\b\x1b\f\n\r\t\v\x1b"))
     while index < len(text):
         char = text[index]
         index += 1
         if char == "'":
-            return "".join(value), index
+            return os.fsdecode(bytes(value)), index
         if char != "\\":
-            value.append(char)
+            value.extend(os.fsencode(char))
             continue
         if index >= len(text):
             break
@@ -1209,12 +1209,14 @@ def ansi_c_quote(text, index):
             if not match:
                 raise ParseError("invalid ANSI-C escape")
             number = int(match.group(), base)
+            index += len(match.group())
             if escape not in "uU":
                 number %= 256
-                if number >= 128:
-                    raise ParseError("unsupported ANSI-C byte encoding")
+                if number == 0:
+                    raise ParseError("NUL in ANSI-C quote")
+                value.append(number)
+                continue
             char = chr(number)
-            index += len(match.group())
         elif escape == "c":
             if index >= len(text) or not text[index].isascii() or text[index] == "\\":
                 raise ParseError("unsupported ANSI-C control escape")
@@ -1224,7 +1226,7 @@ def ansi_c_quote(text, index):
             char = "\\" + escape
         if "\0" in char:
             raise ParseError("NUL in ANSI-C quote")
-        value.append(char)
+        value.extend(os.fsencode(char))
     raise ParseError("unterminated ANSI-C quote")
 
 
@@ -1269,6 +1271,9 @@ def heredoc_delimiter(text, index):
                 continue
             if char in "\r\n|&;()<>":
                 break
+            if text.startswith('$"', index):
+                index += 1
+                continue
             if text.startswith("$'", index):
                 decoded, index = ansi_c_quote(text, index + 2)
                 delimiter.append(decoded)
@@ -1425,7 +1430,8 @@ def shell_tokens(text, literal=False):
             quoted = started = True
             continue
         if not literal and quote is None and text.startswith('$"', index):
-            raise ParseError("locale-dependent shell quote")
+            index += 1
+            continue
         if char == "\\":
             if index + 1 >= len(text):
                 raise ParseError("unfinished shell escape")
