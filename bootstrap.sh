@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 新しい Mac の設定とツールを一括セットアップする。
+# 新しい Mac を一括セットアップ
 
 set -euo pipefail
 
@@ -20,12 +20,12 @@ step() {
   printf '\n==> %s\n' "$1"
 }
 
-# 独立したステップの失敗を記録し、残りのセットアップを続行
+# 失敗を記録し、後続ステップを続行
 record_failure() {
   local label="$1"
   local status="$2"
 
-  # 中断は集約せず、その終了状態を返す
+  # 中断は即時伝播
   if ((status == 130 || status == 143)); then
     return "$status"
   fi
@@ -34,7 +34,6 @@ record_failure() {
   printf 'warning: %s failed (exit %d), continuing\n' "$label" "$status" >&2
 }
 
-# 未実行のステップは失敗と区別し、サマリに必ず表示する
 record_skip() {
   local reason="$1"
 
@@ -53,7 +52,6 @@ run_and_record() {
   fi
 }
 
-# sudo timestamp が有効なら再利用し、失効済みなら端末から再認証する
 ensure_sudo() {
   if sudo -n -v 2>/dev/null; then
     return 0
@@ -68,7 +66,6 @@ ensure_sudo() {
   sudo -v
 }
 
-# 取得に成功した非空のインストーラだけを実行
 run_downloaded_installer() {
   local url="$1"
   local interpreter="$2"
@@ -88,7 +85,6 @@ run_downloaded_installer() {
   fi
 }
 
-# PATH、ユーザー向けインストール先の順で CLI を解決
 resolve_user_executable() {
   local name="$1"
   local candidate
@@ -122,7 +118,6 @@ install_user_cli() {
     run_downloaded_installer "$url" "$interpreter" "$environment_assignment"
 }
 
-# Homebrew の実体を、現在の PATH と標準のインストール先から解決する
 resolve_homebrew_executable() {
   local candidate
 
@@ -155,7 +150,6 @@ setup_homebrew() {
       return 1
     fi
 
-    # インストーラ取得後に sudo timestamp を更新
     ensure_sudo || return
     env NONINTERACTIVE=1 /bin/bash <<<"$homebrew_installer" || return
     brew_executable="$(resolve_homebrew_executable || true)"
@@ -184,7 +178,7 @@ setup_homebrew_and_bundle() {
   fi
 
   step 'brew bundle'
-  # MDM 初期構成などで Homebrew ディレクトリの所有者が変わっていると bundle が失敗する
+  # MDM などによる所有者変更で bundle が失敗する場合の案内
   brew_cellar="$("$brew_executable" --prefix)/Cellar"
   if [[ -d "$brew_cellar" && ! -w "$brew_cellar" ]]; then
     printf 'warning: %s is not writable\n' "$brew_cellar" >&2
@@ -192,7 +186,7 @@ setup_homebrew_and_bundle() {
       "$(id -un)" "$brew_cellar" >&2
   fi
 
-  # Homebrew は起動時に sudo timestamp を無効化するため、必要な認証は Homebrew に任せる
+  # Homebrew は起動時に sudo timestamp を無効化するため、認証も任せる
   run_and_record \
     'brew bundle' \
     "$brew_executable" bundle --no-upgrade --file="$repo_dir/macos/Brewfile"
@@ -202,7 +196,7 @@ setup_login_items() {
   local logi_options_app=/Applications/logioptionsplus.app
   local login_item_app
 
-  # Logi Options+ はバックグラウンドサービスで常駐するため、メインアプリのログイン項目を除去する。
+  # Logi Options+ はサービスで常駐するため、メインアプリの自動起動は不要
   run_and_record \
     "login item removed: $logi_options_app" \
     osascript - "$logi_options_app" <<'APPLESCRIPT'
@@ -245,7 +239,7 @@ APPLESCRIPT
 }
 
 setup_mise_tools() {
-  # 設定がなくても mise install は成功するため、リンク失敗を先に検出する。
+  # mise install は設定なしでも成功するため、リンク失敗を先に検出
   local mise_config="${XDG_CONFIG_HOME:-$HOME/.config}/mise/config.toml"
 
   if ! command -v mise >/dev/null 2>&1; then
@@ -330,7 +324,7 @@ list_claude_user_plugins() {
     '
 }
 
-# 未登録の公式 marketplace を追加。0=登録済み、1=登録不可、それ以外=中断
+# 公式 marketplace を登録。戻り値は 0=登録済み、1=登録不可、他=中断
 ensure_claude_marketplace() {
   local executable="$1"
   local marketplaces="$2"
@@ -354,7 +348,7 @@ ensure_claude_marketplace() {
     verify_status=$?
   fi
 
-  # 追加失敗と検証失敗の重複記録を避ける
+  # 追加失敗との重複記録を避ける
   if ((add_status == 0)); then
     record_failure 'Claude Code marketplace verification' "$verify_status" || return
   fi
@@ -390,7 +384,7 @@ setup_claude_plugins() {
   marketplace_status=0
   ensure_claude_marketplace "$executable" "$marketplaces" || marketplace_status=$?
   if ((marketplace_status != 0)); then
-    # 中断は集約せず、その終了状態を返す
+    # 中断は即時伝播
     ((marketplace_status == 1)) || return "$marketplace_status"
     record_skip 'Claude Code plugins (公式 marketplace を登録できないため)'
     return 0
@@ -473,7 +467,7 @@ setup_private_overlay() {
     return 0
   fi
 
-  # publish-lock の親が未作成の取得先自身にならないよう末尾の / を除く
+  # publish-lock の親が未作成の取得先にならないよう末尾の / を除く
   overlay_dir="$(setup_normalize_repository_dir \
     "${DOTFILES_PRIVATE_DIR:-$HOME/ghq/github.com/pych-ky/dotfiles-private}" \
     DOTFILES_PRIVATE_DIR)" || {
@@ -507,7 +501,7 @@ fi
 setup_validate_home
 
 step 'sudo'
-# 認証処理を含むどの経路で終了しても sudo timestamp を無効化する
+# 認証中の終了でも sudo timestamp を無効化
 trap 'sudo -k 2>/dev/null || true' EXIT
 ensure_sudo
 
@@ -520,7 +514,7 @@ setup_homebrew_and_bundle
 step 'scripts/link-dotfiles.sh'
 run_and_record 'scripts/link-dotfiles.sh' "$repo_dir/scripts/link-dotfiles.sh"
 
-# 以降は管理者権限を使わないため、ここで timestamp を無効化する
+# 以降は管理者権限が不要
 sudo -k 2>/dev/null || true
 trap - EXIT
 

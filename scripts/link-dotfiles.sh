@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# dotfiles を $HOME 配下へリンク・コピーし、既存の実体は退避する。
+# dotfiles を $HOME 配下へリンク・コピーし、既存の実体は退避
 
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-backup_root=           # HOME 検証後に初期化
-backup_dir=            # 最初の退避時に今回分の世代を確保
-backup_target=         # 直近の退避先
-backup_compare_target= # 直近の退避元と比較すべきパス
+backup_root=
+backup_dir=
+backup_target=
+backup_compare_target= # dry-run では退避元、通常は退避先
 dry_run=0
 backup_created=0
 backup_keep=5
@@ -64,7 +64,7 @@ report_link() {
   printf '%s: %s -> %s\n' "$verb" "$1" "$2"
 }
 
-# ツールによる書き込みをリポジトリから分離する設定を通常ファイルとして配置
+# ツールの書き込みをリポジトリから分離するためコピー
 copy_regular_file() {
   local source_relative="$1"
   local target_relative="${2:-$1}"
@@ -96,14 +96,13 @@ copy_regular_file() {
   fi
 }
 
-# Claude の公開設定を優先し、個人のプラグイン登録だけ保持して配置
+# Claude の公開設定を優先し、個人のプラグイン登録を保持
 install_claude_settings() {
   local source_relative='.claude/settings.json'
   local source="$repo_dir/$source_relative"
   local target="$HOME/$source_relative"
   local merged_settings
 
-  # 不正な source とマージ不要な既存設定は通常のコピーに任せる
   if [[ ! -f "$source" || -L "$source" || ! -f "$target" ]] ||
     cmp -s "$source" "$target"; then
     copy_regular_file "$source_relative"
@@ -133,7 +132,7 @@ install_claude_settings() {
   fi
 
   run mkdir -p "$(dirname "$target")" || return
-  # マージ済みの内容を書くため、退避元とリポジトリ版の差異は記録しない
+  # マージ済みなのでリポジトリ版との差異は記録しない
   backup_existing_target "$target" || return
 
   if ((dry_run)); then
@@ -145,12 +144,11 @@ install_claude_settings() {
   fi
 }
 
-# $HOME からの相対パスをバックアップ先における同じ相対パスへ変換
 backup_path() {
   printf '%s/%s' "$backup_dir" "${1#"$HOME"/}"
 }
 
-# 秒が同じ再実行でも衝突しないバックアップ世代を確保
+# 同秒の再実行でも衝突しない退避先を確保
 ensure_backup_dir() {
   local timestamp
   local candidate
@@ -178,7 +176,7 @@ ensure_backup_dir() {
   printf '%s\n' 'link-dotfiles-v1' >"$backup_dir/.dotfiles-backup-generation"
 }
 
-# 実体を退避し、退避先と比較対象を渡す。シンボリックリンクは退避せず削除する
+# 実体は退避、シンボリックリンクは削除
 backup_existing_target() {
   local target="$1"
 
@@ -208,7 +206,6 @@ backup_existing_target() {
   fi
 }
 
-# 古いバックアップを backup_keep 世代だけ残して削除
 prune_backups() {
   local candidate
   local name
@@ -224,7 +221,7 @@ prune_backups() {
         printf '%s\n' "$candidate"
       fi
     done < <(find "$backup_root" -mindepth 1 -maxdepth 1 -type d -print)
-    # dry-run では未作成の今回分 backup_dir も削除候補の算出に含める
+    # dry-run でも未作成の今回分を世代数に含める
     if ((dry_run && backup_created)) &&
       [[ "${backup_dir%/*}" == "$backup_root" ]] &&
       [[ "${backup_dir##*/}" =~ ^[0-9]{14}(-[0-9]{6})?$ ]]; then
@@ -242,7 +239,7 @@ is_correct_symlink() {
   [[ -L "$1" && "$(readlink "$1")" == "$2" ]]
 }
 
-# 自リポジトリ由来の管理対象外シンボリックリンクだけを削除
+# 自リポジトリ由来の廃止リンクだけを削除
 remove_obsolete_symlink() {
   local source_relative="$1"
   local target_relative="${2:-$1}"
@@ -253,14 +250,13 @@ remove_obsolete_symlink() {
   run rm "$target"
 }
 
-# repo_dir の relative を $HOME 配下にシンボリックリンクとして作成し、既存の実体は退避
 link_file() {
   local source_relative="$1"
   local target_relative="${2:-$1}"
   local source="$repo_dir/$source_relative"
   local target="$HOME/$target_relative"
 
-  # -e では検出できない壊れたシンボリックリンクも source として扱う
+  # 壊れたリンクも source として扱う
   if [[ ! -e "$source" && ! -L "$source" ]]; then
     printf 'missing source: %s\n' "$source" >&2
     return 1
@@ -274,7 +270,6 @@ link_file() {
   run mkdir -p "$(dirname "$target")" || return
 
   backup_existing_target "$target" || return
-  # ローカル変更の見落としを防ぐため、ディレクトリも再帰比較して差異を記録する
   if [[ -e "$backup_compare_target" && -e "$source" ]] &&
     ! diff -rq "$backup_compare_target" "$source" >/dev/null 2>&1; then
     backup_diffs+=("$target (backup: $backup_target)")
@@ -285,12 +280,11 @@ link_file() {
     managed_targets+=("$target")
   fi
 
-  # -h で競合するディレクトリリンクを辿らず、配下への誤作成を防ぐ
+  # -h でディレクトリリンク配下への誤作成を防ぐ
   run ln -sh "$source" "$target" || return
   report_link "$target" "$source"
 }
 
-# config.toml より優先される /etc/codex/managed_config.toml の残存を警告
 warn_legacy_codex_managed_config() {
   local target="/etc/codex/managed_config.toml"
 
@@ -300,7 +294,6 @@ warn_legacy_codex_managed_config() {
   printf '         remove it if you want Codex App local config to override dotfiles defaults\n' >&2
 }
 
-# Codex ベース設定を /etc/codex/config.toml へ sudo でシンボリックリンク作成
 link_codex_system_config() {
   local source="$repo_dir/.config/codex/config.toml"
   local target="/etc/codex/config.toml"
@@ -315,7 +308,7 @@ link_codex_system_config() {
     return 0
   fi
 
-  # link_file と異なりシステム領域 (/etc) のファイルは退避せず、競合時は中断
+  # /etc の既存ファイルは退避せず、競合時は中断
   if [[ -L "$target" ]]; then
     printf 'existing symlink is different: %s -> %s\n' "$target" "$(readlink "$target")" >&2
     return 1
@@ -359,7 +352,6 @@ main() {
     trap 'process_lock_release' EXIT
   fi
 
-  # リポジトリと $HOME で同じ相対パスに配置する管理対象
   local files=(
     # shell
     ".bash_profile"
@@ -374,9 +366,8 @@ main() {
     ".config/starship.toml"
     ".config/git/ignore"
     ".config/gh/config.yml"
-    # Karabiner が変更を検知できるよう、ファイル単体ではなくディレクトリごとリンク
+    # Karabiner の変更検知のためディレクトリごとリンク
     ".config/karabiner"
-    # 開発ツールのバージョン管理
     ".config/mise/config.toml"
     # AI エージェント
     ".config/agents/AGENTS.md"
@@ -384,14 +375,12 @@ main() {
     ".claude/hooks/pre-bash-guard.py"
     ".claude/hooks/pre-bash-guard.sh"
     ".claude/hooks/statusline.sh"
-    # AWS プロファイル復元
     ".aws/load-active-profile.sh"
   )
 
   local file
   local failed_items=()
 
-  # 廃止したリンクは、自リポジトリ由来の場合だけ除去
   for file in \
     .zsh/functions/git-worktree.zsh \
     .claude/hooks/inject-guidelines-context.sh \
@@ -401,7 +390,6 @@ main() {
     fi
   done
 
-  # 廃止した認証 CLI 用 rule は旧配置先のリンクだけを除去する
   if ! remove_obsolete_symlink ".config/codex/rules/authenticated-cli.rules" ".codex/rules/authenticated-cli.rules"; then
     failed_items+=(".codex/rules/authenticated-cli.rules (obsolete symlink)")
   fi

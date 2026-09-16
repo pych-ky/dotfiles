@@ -1,5 +1,5 @@
-# バージョンを切り替えるグローバル開発ツールを管理し、macos/Brewfile と重複させない
-# ~/.config/mise/config.toml に配置し、リポジトリごとの mise 設定で上書きする
+# 開発ツールのバージョン管理。macos/Brewfile と重複させない
+# ~/.config/mise/config.toml に配置し、リポジトリの mise 設定で上書き可能
 
 [tools]
 "aqua:secretlint/secretlint" = "13.0.5"
@@ -11,7 +11,7 @@ deno = "latest"
 go = "latest"
 golangci-lint = "latest"
 node = "lts"
-npm = "11"  # node 同梱版を上書きし、メジャーバージョンを固定する
+npm = "11"  # node 同梱版を上書きし、メジャーを固定
 pnpm = "latest"
 terraform = "latest"
 tflint = "latest"

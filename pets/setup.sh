@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# private Codex Custom Pets の checkout を用意し、repository 側のインストーラへ処理を委譲する。
+# private Codex Custom Pets を取得し、付属インストーラで導入
 
 set -euo pipefail
 
@@ -13,7 +13,6 @@ fi
 # shellcheck source=lib/setup-common.sh
 source "$setup_common_library"
 
-# / および . / .. 成分を含む絶対パスを拒否
 path_is_safe_absolute() {
   [[ "$1" == /* && "$1" != / ]] || return 1
   case "$1" in
@@ -51,7 +50,6 @@ paths_overlap() {
   [[ "$1" == "$2" || "$1" == "$2"/* || "$2" == "$1"/* ]]
 }
 
-# repository と CODEX_HOME/pets の物理パス重複を検証
 verify_install_paths() {
   local repository_physical
   local codex_root_physical
@@ -80,7 +78,7 @@ verify_install_paths() {
   fi
 }
 
-# 一括インストールを優先し、未対応の checkout では個別に導入
+# 一括インストール未対応なら個別に導入
 install_repository_pets() {
   local repository_dir="$1"
   local installer="$repository_dir/bin/install-pet"

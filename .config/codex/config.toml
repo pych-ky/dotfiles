@@ -1,51 +1,44 @@
-## Codex ベース設定 (/etc/codex/config.toml として配置)
-
-# 起動時に ~/.codex/config.toml (git 管理外) とマージし、同じキーはローカル設定を優先する
+## Codex ベース設定 (/etc/codex/config.toml)
+# 起動時に ~/.codex/config.toml (Git 管理外) とマージし、同じキーはローカルを優先
 
 
 ## コア設定
 
-model        = "gpt-6-astra"  # 通常タスク用モデル
-review_model = "gpt-6-astra"  # コードレビュー用モデル
+model        = "gpt-6-astra"  # 通常利用モデル
+review_model = "gpt-6-astra"  # レビュー用モデル
 
-# 推論関連
-model_reasoning_effort   = "ultra"   # 推論の深さ
-model_reasoning_summary  = "auto"    # 推論要約の形式 (auto / concise / detailed / none)
-hide_agent_reasoning     = true      # エージェント推論過程を非表示
-show_raw_agent_reasoning = false     # 生の推論データを非表示
+model_reasoning_effort   = "ultra"  # 推論の深さ
+model_reasoning_summary  = "auto"   # 推論要約の形式
+hide_agent_reasoning     = true     # 推論過程を非表示
+show_raw_agent_reasoning = false    # 生の推論データの表示
 
-personality = "pragmatic"  # 性格プリセット (none / friendly / pragmatic)
+personality = "pragmatic"  # 応答スタイル
 
-web_search = "live"  # Web 検索モード (disabled / cached / live)
+web_search = "live"  # Web 検索モード
 
-# Codex の認証情報を外部 CLI の credential store と分け、~/.codex/auth.json を Claude の Read deny で保護する。
-# Git などが credential helper 経由で Keychain を内部利用することは制限しない。
-cli_auth_credentials_store = "file"  # CLI 認証情報の保存先 (auto / keyring / file)
+# 認証情報を外部 CLI の store と分け、~/.codex/auth.json を Claude の Read deny で保護
+cli_auth_credentials_store = "file"
 
 
 ## 承認ポリシー & パーミッション
 
-# Codex App の組み込み「フルアクセス」は approval_policy を never で上書きする。
-# App でも「保護付きフルアクセス」を選び、新しいタスクでこの既定設定を使う。
-approval_policy     = "on-request"          # 操作の承認要否 (untrusted / on-request / never)
-approvals_reviewer  = "user"                # 追加承認はユーザーに確認する
-default_permissions = "保護付きフルアクセス"
+# App の「フルアクセス」は approval_policy を never に上書きする
+approval_policy     = "on-request"            # 承認方式
+approvals_reviewer  = "user"                  # 承認の確認先
+default_permissions = "保護付きフルアクセス"  # 既定の権限プロファイル
 
 
-## 既定許可と認証情報・shell 履歴の保護
-# 会話履歴・session transcript・file history・paste cache の調査は許可する。
-# permission profile は旧 sandbox_mode / [sandbox_workspace_write] と併用しない。
+# 旧 sandbox_mode / [sandbox_workspace_write] とは併用しない
 [permissions."保護付きフルアクセス"]
 description = "AI エージェントの認証情報と shell 履歴・snapshot を除くフルアクセス"
 
 [permissions."保護付きフルアクセス".filesystem]
-":root" = "write"
-"~/.codex/plugins/cache/openai-bundled/browser" = "read"  # 信頼済み Browser RPC のコードを変更不可にする
+":root" = "write"                                         # ルート全体の読み書きを許可
+"~/.codex/plugins/cache/openai-bundled/browser" = "read"  # 信頼済み Browser RPC の改変を防ぐ
 
-# 外部 CLI の設定・認証ストア、秘密鍵、keystore、service-account、環境ファイルは、CLI の通常利用のため filesystem deny に含めない。
-# 認証情報の直接取得は AGENTS.md で禁止し、内容の直接取得と秘密値を返す既知の操作を PreToolUse で拒否する。
+# 外部 CLI の設定・認証ストア・秘密鍵・keystore・service-account・環境ファイルは内部利用のため deny 対象外
 
-# AI エージェントの認証情報・shell snapshot
+# エージェントの認証情報・snapshot へのアクセスを禁止
 "~/.codex/auth.json"                          = "deny"
 "~/.codex/shell_snapshots"                    = "deny"
 "~/.codex-account-*/auth.json"                = "deny"
@@ -57,7 +50,7 @@ description = "AI エージェントの認証情報と shell 履歴・snapshot �
 "~/.claude.json.backup"                       = "deny"
 "~/.claude/backups"                           = "deny"
 
-# シェル履歴
+# シェル履歴へのアクセスを禁止
 "~/.zsh_history"                              = "deny"
 "~/.bash_history"                             = "deny"
 "~/.zsh_sessions"                             = "deny"
@@ -66,19 +59,19 @@ description = "AI エージェントの認証情報と shell 履歴・snapshot �
 
 
 [permissions."保護付きフルアクセス".network]
-enabled = true  # コマンドのネットワークアクセスを制限しない
+enabled = true  # コマンドのネットワーク利用を許可
 
 
 ## シェル環境
 
 [shell_environment_policy]
-inherit                 = "all"   # CLI の通常設定を継承し、秘密値だけを下で除外する
-ignore_default_excludes = true    # TOKEN_FILE などの非秘密パスまで落とす既定除外は使わない
-set                     = { GIT_TERMINAL_PROMPT = "0", AWS_PAGER = "" }  # Git の認証待ちと AWS の外部 pager 起動を防ぐ
+inherit                 = "all"                                          # 起動元の環境変数を継承
+ignore_default_excludes = true                                           # TOKEN_FILE 等の非秘密パスを既定除外から保護
+set                     = { GIT_TERMINAL_PROMPT = "0", AWS_PAGER = "" }  # Git 認証待ち・AWS 外部 pager を抑止
 
-# filters はテーブルで指定する。exclude / include_only 配列との併用は読み込み時に拒否される。
-# filter 名は大文字小文字を区別しないため、大小文字違いを重ねない。
-# 秘密を環境変数に設定していない新しいターミナルから起動し、非秘密の認証・実行設定を継承する。
+# 秘密値名に一致する環境変数を除外
+# filters はテーブルで指定。exclude / include_only 配列との併用は読み込み時に拒否
+# 名前は大小文字を区別しない
 [shell_environment_policy.filters]
 "*PASSWORD"                       = "exclude"
 "*PASSPHRASE"                     = "exclude"
@@ -101,7 +94,7 @@ set                     = { GIT_TERMINAL_PROMPT = "0", AWS_PAGER = "" }  # Git �
 "COMPOSER_AUTH"                   = "exclude"
 "CREDENTIALS"                     = "exclude"
 "DOCKER_AUTH_CONFIG"              = "exclude"
-# JSON とパスを兼用するため除外する。パス用途は GOOGLE_APPLICATION_CREDENTIALS を使う。
+# JSON とパスの兼用変数は除外。パスには GOOGLE_APPLICATION_CREDENTIALS を使う
 "GOOGLE_CREDENTIALS"              = "exclude"
 "HELM_KUBETOKEN"                  = "exclude"
 "PGPASSWORD"                      = "exclude"
@@ -111,43 +104,41 @@ set                     = { GIT_TERMINAL_PROMPT = "0", AWS_PAGER = "" }  # Git �
 ## ターミナル表示
 
 [tui]
-notifications          = true  # デスクトップ通知を有効化
-status_line_use_colors = true  # ステータスラインの項目別色分けを有効化
-# ステータスラインの表示項目は Codex と Claude で共用
+notifications          = true  # デスクトップ通知
+status_line_use_colors = true  # ステータスラインの項目別色分け
+# ステータスラインの表示項目（Claude と共用）
 status_line = [
-  "model-with-reasoning",  # 使用モデルと推論レベル
-  "permissions",           # 現在有効な permission profile または sandbox mode
-  "current-dir",
-  "git-branch",
-  "context-used",          # 使用中のコンテキスト量
-  "five-hour-limit",       # 5 時間単位の利用上限
+  "model-with-reasoning",  # モデル・推論強度
+  "permissions",           # 有効な権限プロファイル / sandbox mode
+  "current-dir",           # 現在のディレクトリ
+  "git-branch",            # ブランチ
+  "context-used",          # コンテキスト使用量
+  "five-hour-limit",       # 5 時間の利用上限
   "weekly-limit",          # 週次の利用上限
-  "fast-mode",
+  "fast-mode",             # 高速モード
 ]
 
-## 履歴
-
 [history]
-persistence = "save-all"  # 履歴の永続化 (none / save-all)
+persistence = "save-all"  # 履歴の保存方式
 
 
 ## 機能フラグ
 
 [features]
-hooks              = true   # 共通 PreToolUse ガードを有効にする
-shell_snapshot     = false  # shell 状態や環境変数を平文ファイルへ保存しない
-prevent_idle_sleep = true  # アイドル時のスリープを防止
+hooks              = true   # 共通 PreToolUse ガードを有効化
+shell_snapshot     = false  # shell 状態・環境変数の平文保存を防ぐ
+prevent_idle_sleep = true   # アイドル時のスリープ防止
 
 
 ## 実行前ガード
 
 [[hooks.PreToolUse]]
-matcher = "^Bash$"
+matcher = "^Bash$"  # ガード対象のツール名
 
 [[hooks.PreToolUse.hooks]]
 type          = "command"
 command       = "\"$HOME/.claude/hooks/pre-bash-guard.sh\" || exit 2"
-timeout       = 30
+timeout       = 30  # ガードの制限時間
 statusMessage = "Bash コマンドを検査中"
 
 
@@ -199,34 +190,34 @@ enabled = true
 ## Codex App
 
 [desktop]
-enabled-reasoning-efforts = ["low", "medium", "high", "xhigh", "persistent", "max", "ultra"]  # 選択肢に表示する推論強度
+enabled-reasoning-efforts = ["low", "medium", "high", "xhigh", "persistent", "max", "ultra"]  # 推論強度の選択肢
 
-ambient-suggestions-enabled = false  # 提案表示を無効化
+ambient-suggestions-enabled = false  # 提案表示
 
-"browser-family-enabled:chrome" = true  # Composer で Chrome のブラウザ参照を有効にする
+"browser-family-enabled:chrome" = true  # Composer の Chrome 参照
 
-appshotSoundEnabled = false  # 撮影時の効果音を無効化
+appshotSoundEnabled = false  # 撮影時の効果音
 
-hotkey-window-projectless-default-enabled = true  # グローバルホットキーでプロジェクトなしウィンドウを開く
+hotkey-window-projectless-default-enabled = true  # ホットキーでプロジェクトなしウィンドウを開く
 
-followUpQueueMode = "steer"  # 実行中の follow-up で現在の turn を steer
+followUpQueueMode = "steer"  # 実行中の追加指示を現在の turn に反映
 
 # Git 操作
-git-branch-prefix       = ""  # 作成ブランチに接頭辞を付けない
-git-commit-instructions = ""  # 指示は共通 AGENTS.md に集約
+git-branch-prefix       = ""  # 作成ブランチの接頭辞
+git-commit-instructions = ""  # 指示は AGENTS.md に集約
 git-pr-instructions     = ""
 
 # 表示
-conversationDetailMode    = "STEPS_COMMANDS"  # 会話詳細にステップとコマンドを表示
-git-show-sidebar-pr-icons = true              # Git サイドバーに PR アイコンを表示
-mac-menu-bar-enabled      = false             # メニューバー項目を表示しない
-show-context-window-usage = true              # コンテキスト使用量を表示
+conversationDetailMode    = "STEPS_COMMANDS"  # 会話詳細にステップ・コマンドを表示
+git-show-sidebar-pr-icons = true              # Git サイドバーの PR アイコン
+mac-menu-bar-enabled      = false             # メニューバー項目
+show-context-window-usage = true              # コンテキスト使用量の表示
 
-reviewDelivery = "inline"  # レビュー結果をインラインで表示
+reviewDelivery = "inline"  # レビュー結果の表示先
 
 # 電源管理
-preventSleepWhileRunning             = true  # チャット実行中のスリープを防止
-keepRemoteControlAwakeWhilePluggedIn = true  # 電源接続中の Remote Control で app suspension を防止
+preventSleepWhileRunning             = true  # 実行中のスリープ防止
+keepRemoteControlAwakeWhilePluggedIn = true  # 電源接続中の Remote Control でアプリ休止を防止
 
 [desktop.open-in-target-preferences]
-global = "vscode"  # ファイルを開く既定ターゲット
+global = "vscode"  # ファイルを開く既定アプリ

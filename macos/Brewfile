@@ -1,5 +1,5 @@
-# OS 全体の CLI・GUI アプリを管理し、ランタイムは .config/mise/config.toml で管理する
-# 任意の GUI アプリはコメントアウトを外して brew bundle --file=macos/Brewfile で導入する
+# OS 全体の CLI・GUI を管理。開発ツールは .config/mise/config.toml に集約
+# 任意の GUI はコメントアウトを外し、brew bundle --file=macos/Brewfile で導入
 
 # CLI (formula)
 
@@ -22,15 +22,14 @@ brew "git-lfs"
 brew "gibo"
 brew "gh"
 brew "ghq"
-# secretlint は公式バイナリを mise 側で管理する
+# secretlint は mise の公式バイナリを使用
 
 # ランタイム / パッケージツール
 brew "mise"
 brew "uv"
 
 # クラウド / IaC / ポリシー / Kubernetes
-# aws / terraform / terragrunt / tflint は mise 側で管理し、ここには重複して置かない
-# kubectl / helm は Rancher Desktop 同梱 (~/.rd/bin) を使う
+# aws / terraform / terragrunt / tflint は mise、kubectl / helm は Rancher Desktop (~/.rd/bin)
 brew "azure-cli"
 brew "opa"
 brew "openshift-cli"
@@ -38,7 +37,7 @@ brew "rosa-cli"
 brew "trivy"
 
 # DB
-# keg-only のため psql 等の PATH 追加は .zshrc 側で行う
+# keg-only の psql 等は .zshrc で PATH に追加
 brew "libpq"
 
 # GUI アプリ (cask)
@@ -77,7 +76,7 @@ cask "raycast"
 
 # コンテナ / 仮想化 (docker / kubectl / helm の CLI は ~/.rd/bin 同梱)
 cask "rancher"
-# Rancher Desktop と競合するため、使う場合はどちらか一方にする
+# Rancher Desktop と競合するため併用しない
 # cask "docker-desktop"
 
 # クラウド CLI (cask 配布)

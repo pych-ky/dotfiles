@@ -2,6 +2,5 @@
 
 [ -r "$HOME/.aws/load-active-profile.sh" ] && . "$HOME/.aws/load-active-profile.sh"
 
-# 非公開側で配置する、組織固有・個人の環境変数
-# 対話シェル向けの設定は .zshrc が読む ~/.zshrc.local 側に置く
+# 組織固有・個人の環境変数を非公開側から配置。対話用設定は ~/.zshrc.local へ
 [ -r "$HOME/.zshenv.local" ] && . "$HOME/.zshenv.local"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Claude Code ステータスラインを Codex TUI の表示構成に合わせる
+# Claude Code のステータスラインを Codex TUI に合わせる
 
 set -euo pipefail
 
@@ -40,7 +40,7 @@ has_command() {
   command -v "$1" >/dev/null 2>&1
 }
 
-# 入力 JSON の表示値。jq がないか読み取りに失敗した場合は空のまま使う
+# jq 不在・読み取り失敗時は空値を使う
 input_cwd=''
 input_model_name=''
 input_effort=''
@@ -53,7 +53,6 @@ input_used_tokens=''
 input_five_hour_limit=''
 input_weekly_limit=''
 
-# jq の出力順に表示値を設定する
 read_input_json() {
   local payload="$1"
 
@@ -112,7 +111,7 @@ read_input_json() {
   ) || true
 }
 
-# Claude 設定から読む入力 JSON のフォールバック値
+# 入力 JSON の欠損を Claude 設定で補う
 settings_model=''
 settings_effort=''
 
@@ -137,7 +136,6 @@ read_claude_settings() {
   ) || true
 }
 
-# TOML から単純な scalar 値を取り出す
 toml_scalar() {
   local file="$1"
   local key="$2"
@@ -158,7 +156,6 @@ toml_scalar() {
   ' "$file" 2>/dev/null || true
 }
 
-# Codex の status_line 配列から表示項目を 1 行ずつ返す
 read_status_items() {
   local file="$1"
 
@@ -170,7 +167,6 @@ read_status_items() {
     tr -d '"' || true
 }
 
-# ホームディレクトリ配下のパスを ~ 表記に変換する
 format_directory_display() {
   local dir="${1:-$PWD}"
 
@@ -190,7 +186,6 @@ current_git_branch() {
   git -C "$dir" branch --show-current 2>/dev/null | sed -n '1p' || true
 }
 
-# パーセント値を切り上げた 0-100 の整数に整形する
 ceil_percent() {
   local value="$1"
 
@@ -212,7 +207,6 @@ ceil_percent() {
   '
 }
 
-# Claude transcript の末尾から直近の合計トークン数を返す
 last_transcript_usage_total() {
   local transcript_path="$1"
 
@@ -236,7 +230,7 @@ last_transcript_usage_total() {
     tail -n 1 || true
 }
 
-# baseline があれば差し引き、context window に対する使用率を切り上げずに返す
+# baseline を差し引いた使用率を未丸めで返す
 token_usage_percent() {
   local used_tokens="$1"
   local context_window="$2"
@@ -245,7 +239,7 @@ token_usage_percent() {
   [[ "$used_tokens" =~ ^[0-9]+$ ]] || return 0
   [[ "$context_window" =~ ^[0-9]+$ ]] || return 0
 
-  # ceil_percent が読めるよう、ロケールによらず小数点を . にする
+  # ceil_percent が読めるよう、小数点を . に固定する
   LC_ALL=C awk \
     -v used_tokens="$used_tokens" \
     -v context_window="$context_window" \
@@ -263,13 +257,13 @@ token_usage_percent() {
           used = 0
         }
 
-        # ceil_percent で切り上げるため、小数の精度を保つ
+        # ceil_percent の切り上げ用に精度を保つ
         printf "%.17f", (used / (context_window - baseline)) * 100
       }
     '
 }
 
-# reasoning 未指定時は Codex と同じ default 表示にする
+# 未指定時は Codex と同じ default 表示
 reasoning_label() {
   local value="$1"
 
@@ -280,7 +274,6 @@ reasoning_label() {
   fi
 }
 
-# rate limit の使用率が取れたときだけ表示用ラベルを返す
 rate_limit_label() {
   local label="$1"
   local used_percentage="$2"
@@ -363,7 +356,6 @@ main() {
     context_used="$(token_usage_percent "$input_context_input_tokens" "$input_context_window_size")"
   fi
   if [[ -z "$context_used" ]]; then
-    # Codex の baseline を差し引いた使用率にする
     local used_tokens="$input_used_tokens"
     [[ -n "$used_tokens" ]] || used_tokens="$(last_transcript_usage_total "$input_transcript_path")"
     [[ "$used_tokens" =~ ^[0-9]+$ ]] || used_tokens=0

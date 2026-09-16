@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 全端末で共通にする Git 設定を適用する。
+# 全端末共通の Git 設定を適用
 
 set -euo pipefail
 
@@ -51,7 +51,6 @@ if ((10#$git_major < 2 || (10#$git_major == 2 && 10#$git_minor < 37))); then
   exit 1
 fi
 
-# 個人情報や端末固有の設定を残し、共通項目だけを更新
 git config --global --replace-all user.useConfigOnly true
 git config --global --replace-all fetch.prune true
 git config --global --replace-all init.defaultBranch 'main'
@@ -62,7 +61,6 @@ git config --global --replace-all transfer.credentialsInUrl 'die'
 git config --global --replace-all pull.ff 'only'
 git config --global --replace-all merge.conflictStyle 'zdiff3'
 
-# ~/.gitconfig.local に identity がある場合だけ global の重複を削除
 gitconfig_local="$HOME/.gitconfig.local"
 if [[ -f "$gitconfig_local" ]] &&
   git config --file "$gitconfig_local" --get user.email >/dev/null 2>&1; then
@@ -79,7 +77,7 @@ else
     "$gitconfig_local" >&2
 fi
 
-# 継承した helper を空設定でリセットし、gh の二重登録を防ぐ
+# 空設定で継承 helper をリセットし、gh の二重登録を防ぐ
 git config --global --replace-all 'credential.https://github.com.helper' ''
 git config --global --add \
   'credential.https://github.com.helper' '!gh auth git-credential'
@@ -90,16 +88,16 @@ if ! command -v gh >/dev/null 2>&1; then
   printf "         install it, then run \`gh auth login\` (agents need a user request or approval)\n" >&2
 fi
 
-# 組織固有の includeIf や helper 上書き用。未作成のファイルは Git が無視する
+# 組織固有の includeIf・helper 上書き用。未作成なら Git が無視
 if ! git config --global --get-all include.path 2>/dev/null |
   grep -qxF \~/.gitconfig.local; then
   git config --global --add include.path \~/.gitconfig.local
 fi
 
-# dispatch は dirname $0 から deny-private-strings を参照するため、同じ場所に配置
+# dispatch が dirname $0 から deny-private-strings を参照するため同じ場所に配置
 hooks_dir="$HOME/.local/share/dotfiles/git-hooks"
 
-# Git が壊れたリンクを無視するため、core.hooksPath の変更前に実行権を検証
+# Git が壊れたリンクを無視するため、core.hooksPath 設定前に実行権を検証
 link_hook() {
   local source="$1"
   local target="$hooks_dir/$2"

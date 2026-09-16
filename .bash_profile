@@ -1,2 +1,2 @@
-# bash はログインシェルだと .bashrc を読まないので明示的にロード
+# ログインシェルでも .bashrc を読み込む
 [ -r "$HOME/.bashrc" ] && . "$HOME/.bashrc"

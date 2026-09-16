@@ -6,14 +6,13 @@ process_lock_file_identity() {
   stat -L -f '%d:%i' "$1" 2>/dev/null
 }
 
-# 開いたロック記述子を閉じてエラーを表示する
 process_lock_fail() {
   exec 9>&-
   printf 'error: %s\n' "$1" >&2
   return 1
 }
 
-# lockf で排他し、取得前後のファイル同一性を検査
+# lockf で排他し、ロック取得前後のすり替えを検出
 process_lock_acquire() {
   local lock_path="$1"
   local label="$2"
@@ -36,7 +35,7 @@ process_lock_acquire() {
     return 1
   fi
 
-  # bash 3.2 の exec は記述子を変数指定できないため、9 を直接指定
+  # bash 3.2 は記述子の変数指定に非対応
   if ! exec 9>>"$lock_path"; then
     printf 'error: failed to open %s lock: %s\n' "$label" "$lock_path" >&2
     return 1

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 非公開 denylist に一致する文字列のコミット・push を止めるフック
+# 非公開 denylist に一致するコミット・push を阻止
 
 set -uo pipefail
 
@@ -11,20 +11,20 @@ if [[ "$mode" != pre-commit && "$mode" != pre-push ]]; then
 fi
 
 config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/dotfiles"
-# 非公開側で配置する、1 行 1 固定文字列のパターン（大文字小文字を区別しない）
+# 非公開側で配置。1 行 1 固定文字列、大文字小文字を区別しない
 denylist_file="$config_dir/denylist.txt"
-# 全 remote URL がパターンのいずれかを含む場合だけ検査を省略する
+# 全 remote URL がいずれかのパターンを含む場合だけ検査を省略
 work_remotes_file="$config_dir/work-remotes.txt"
 
 [[ -r "$denylist_file" ]] || exit 0
 
-# 空パターンは全行に一致するため、前後の空白・コメント行・空行を除く
+# 空パターンの全行一致を防ぐため、前後空白・コメント行・空行を除去
 strip_pattern_file() {
   sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -- "$1" |
     grep -v -e '^#' -e '^$' || true
 }
 
-# 非公開パターンをディスクに残さず、プロセス置換で検査へ渡す
+# 非公開パターンはディスクに残さずプロセス置換で渡す
 patterns() {
   strip_pattern_file "$denylist_file"
 }
@@ -50,7 +50,7 @@ resolve_path() {
   printf '%s/%s\n' "$dir" "$(basename "$path")"
 }
 
-# パターン自身が一致する配置元リポジトリは、denylist 検査だけを省略する
+# パターン自身が一致する配置元リポジトリは denylist 検査を省略
 denylist_source="$(resolve_path "$denylist_file" 2>/dev/null || true)"
 current_repo="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 denylist_repo=
@@ -120,7 +120,7 @@ scan_pre_commit() {
   )"
   [[ -n "$hit" ]] && report 'ステージ済みのパス名が一致しました' <<<"$hit"
 
-  # index の対象ファイル全体を検査する（-I でバイナリを除外）
+  # 対象ファイル全体を index で検査（-I でバイナリを除外）
   hit="$(
     git grep --cached --no-color -I -n -i -F -f <(patterns) -- "${paths[@]}" ||
       true
@@ -141,8 +141,8 @@ scan_pre_push() {
     [[ "$local_sha" =~ ^0+$ ]] && continue
 
     if [[ "${remote_sha:-}" =~ ^0+$ ]]; then
-      # 新規 ref は送信先 remote にあるコミットだけを除く。
-      # --remotes は private remote の履歴を public へ初回 push する際に検査を飛ばすため使わない。
+      # 新規 ref は送信先 remote のコミットだけを除外
+      # --remotes では private の履歴を public へ初回 push する検査が抜ける
       remote_tips=()
       if [[ -n "$remote_name" ]]; then
         while IFS= read -r commit; do
@@ -164,7 +164,7 @@ scan_pre_push() {
         "$count" >&2
     fi
 
-    # 追加後に削除された内容も検出するため、範囲全体の差分ではなく各コミットを検査する
+    # 追加後に削除された内容も検出するため、各コミットを検査
     while IFS= read -r commit; do
       [[ -n "$commit" ]] || continue
       hit="$(
