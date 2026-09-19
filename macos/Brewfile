@@ -8,6 +8,7 @@ brew "bash"
 brew "starship"
 brew "fzf"
 brew "zoxide"
+brew "herdr"
 
 # 基本ユーティリティ
 brew "ripgrep"
@@ -19,6 +20,7 @@ brew "shfmt"
 # Git / GitHub
 brew "git"
 brew "git-lfs"
+brew "lazygit"
 brew "gibo"
 brew "gh"
 brew "ghq"

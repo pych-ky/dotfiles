@@ -6,6 +6,7 @@
 
 model        = "gpt-6-astra"  # 通常利用モデル
 review_model = "gpt-6-astra"  # レビュー用モデル
+service_tier = "default"      # 標準速度
 
 model_reasoning_effort   = "ultra"  # 推論の深さ
 model_reasoning_summary  = "auto"   # 推論要約の形式
@@ -94,7 +95,6 @@ set                     = { GIT_TERMINAL_PROMPT = "0", AWS_PAGER = "" }  # Git �
 "COMPOSER_AUTH"                   = "exclude"
 "CREDENTIALS"                     = "exclude"
 "DOCKER_AUTH_CONFIG"              = "exclude"
-# JSON とパスの兼用変数は除外。パスには GOOGLE_APPLICATION_CREDENTIALS を使う
 "GOOGLE_CREDENTIALS"              = "exclude"
 "HELM_KUBETOKEN"                  = "exclude"
 "PGPASSWORD"                      = "exclude"
@@ -106,7 +106,7 @@ set                     = { GIT_TERMINAL_PROMPT = "0", AWS_PAGER = "" }  # Git �
 [tui]
 notifications          = true  # デスクトップ通知
 status_line_use_colors = true  # ステータスラインの項目別色分け
-# ステータスラインの表示項目（Claude と共用）
+# ステータスラインの表示項目
 status_line = [
   "model-with-reasoning",  # モデル・推論強度
   "permissions",           # 有効な権限プロファイル / sandbox mode
@@ -128,6 +128,7 @@ persistence = "save-all"  # 履歴の保存方式
 hooks              = true   # 共通 PreToolUse ガードを有効化
 shell_snapshot     = false  # shell 状態・環境変数の平文保存を防ぐ
 prevent_idle_sleep = true   # アイドル時のスリープ防止
+memories           = true   # 会話からのメモリ生成・利用
 
 
 ## 実行前ガード
@@ -144,6 +145,9 @@ statusMessage = "Bash コマンドを検査中"
 
 ## Plugins
 
+[plugins."codex-app-tools@openai-bundled"]
+enabled = true
+
 [plugins."browser@openai-bundled"]
 enabled = true
 
@@ -151,6 +155,12 @@ enabled = true
 enabled = true
 
 [plugins."computer-use@openai-bundled"]
+enabled = true
+
+[plugins."unified-computer-use@openai-bundled"]
+enabled = true
+
+[plugins."computer-history@openai-bundled"]
 enabled = true
 
 [plugins."github@openai-curated-remote"]
@@ -200,12 +210,14 @@ appshotSoundEnabled = false  # 撮影時の効果音
 
 hotkey-window-projectless-default-enabled = true  # ホットキーでプロジェクトなしウィンドウを開く
 
-followUpQueueMode = "steer"  # 実行中の追加指示を現在の turn に反映
+followUpQueueMode      = "steer"  # 実行中の追加指示を現在の turn に反映
+composerEnterBehavior = "enter"  # Enter で送信
 
 # Git 操作
-git-branch-prefix       = ""  # 作成ブランチの接頭辞
-git-commit-instructions = ""  # 指示は AGENTS.md に集約
-git-pr-instructions     = ""
+git-branch-prefix             = ""        # 作成ブランチの接頭辞
+git-commit-instructions       = ""        # 指示は AGENTS.md に集約
+git-pr-instructions           = ""
+git-pull-request-merge-method = "squash"  # PR のマージ方式
 
 # 表示
 conversationDetailMode    = "STEPS_COMMANDS"  # 会話詳細にステップ・コマンドを表示
@@ -213,7 +225,8 @@ git-show-sidebar-pr-icons = true              # Git サイドバーの PR アイ
 mac-menu-bar-enabled      = false             # メニューバー項目
 show-context-window-usage = true              # コンテキスト使用量の表示
 
-reviewDelivery = "inline"  # レビュー結果の表示先
+reviewDelivery                 = "inline"          # レビュー結果の表示先
+open-link-in-target-preference = "in-app-browser"  # リンクをアプリ内ブラウザで開く
 
 # 電源管理
 preventSleepWhileRunning             = true  # 実行中のスリープ防止

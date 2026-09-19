@@ -94,11 +94,9 @@ codex
 既存の通常ファイル・ディレクトリは `~/.dotfiles-backup/<timestamp>[-<sequence>]/` に退避し、スクリプトが作成した最新 5 世代を保持する。
 差異を警告されたら、端末の変更をリポジトリか `~/.zshrc.local` などへ統合して再リンクする。
 
-| 設定 | 配置 |
-| --- | --- |
-| `~/.claude/settings.json` | コピー（既存設定は `jq` で公開側を優先してマージし、同じ ID がない個人のプラグイン・marketplace は保持） |
-| `~/.codex/browser/config.toml` | コピー |
-| `/etc/codex/config.toml` | リンク（`~/.codex/config.toml` で上書き可能） |
+- `~/.claude/settings.json`: コピー（既存設定は `jq` で公開側を優先してマージし、同じ ID がない個人のプラグイン・marketplace は保持）
+- `~/.codex/browser/config.toml`: コピー
+- `/etc/codex/config.toml`: リンク（`~/.codex/config.toml` で上書き可能）
 
 端末固有設定の旧 `sandbox_mode` / `[sandbox_workspace_write]` は削除する。
 `sandbox_mode` が残ると公開側の `default_permissions` が使われない。
