@@ -2,4 +2,4 @@ approval_mode = "never_ask"          # サイト操作の承認
 history_approval_mode = "never_ask"  # 履歴取得の承認
 download_approval_mode = "never_ask" # ダウンロードの承認
 upload_approval_mode = "never_ask"   # アップロードの承認
-full_cdp_access_enabled = false      # CDP フルアクセス
+full_cdp_access_enabled = true       # CDP フルアクセス

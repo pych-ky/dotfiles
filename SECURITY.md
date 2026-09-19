@@ -8,11 +8,11 @@
 秘密値の直接取得・持ち出し、重大な破壊、保護機構の迂回を制限し、認証済み CLI の内部認証は許可する。
 ユーザー承認と規約に従う運用であり、改ざん耐性のある実行時境界ではない。
 
-| 保護 | 範囲 |
-| --- | --- |
-| [共通 PreToolUse ガード](.claude/hooks/pre-bash-guard.py) | コマンド・直接渡したコードや設定から、既知の危険操作を拒否する |
-| [Claude Code の設定](.claude/settings.json) | 固定コマンドと認証情報の `Read` を拒否する。同じパスへの Edit / Write・認識可能な Bash ファイル操作も対象とし、任意スクリプト・CLI 内部の間接アクセスには適用しない |
-| [Codex の権限](.config/codex/config.toml) | ルートの読み書き・ネットワークを許可し、エージェント自身の認証情報・バックアップ、shell 履歴・snapshot を固定 deny にする。アカウント別保存先も対象とし、会話履歴・session transcript・file history・paste cache は固定 deny にしない |
+- [共通 PreToolUse ガード](.claude/hooks/pre-bash-guard.py): コマンド・直接渡したコードや設定から、既知の危険操作を拒否する
+- [Claude Code の設定](.claude/settings.json): 固定コマンドと認証情報の `Read` を拒否する
+  - 同じパスへの Edit / Write・認識可能な Bash ファイル操作も対象とし、任意スクリプト・CLI 内部の間接アクセスには適用しない
+- [Codex の権限](.config/codex/config.toml): ルートの読み書き・ネットワークを許可し、エージェント自身の認証情報・バックアップ、shell 履歴・snapshot を固定 deny にする
+  - アカウント別保存先も対象とし、会話履歴・session transcript・file history・paste cache は固定 deny にしない
 
 フックはエージェント・permission mode によらず deny だけを返し、それ以外は無出力で通常の権限判定へ委ねる。
 起動失敗・不正入力・内部エラーは終了コード `2` で拒否し、有効な未対応構文は通常の判定へ進める。
@@ -70,18 +70,21 @@ Codex の shell snapshot は無効化し、Claude Code の snapshot は直接参
 
 以下は未実施で、記載した残存リスクを受容する暫定運用。
 
-| 未対策 | 現状と残存リスク |
-| --- | --- |
-| 管理設定の root 所有化・managed-only lock | Claude Code の設定は通常ファイル、フックは追跡ファイルへの symlink のため、エージェントが制限自体を編集できる |
-| Keychain IPC の OS 拒否・別ユーザー境界 | 標準の `security` 秘密出力は拒否するが、Security.framework の直接呼び出しは判定できない。共通規約の絶対禁止と会社の EDR による検知・確認を前提とする |
-| Git の追跡済み内容・履歴の安全な仲介 | 既知パスの直接取得は拒否するが、パスなしの広い差分・履歴参照、blob ID・glob・pathspec magic は網羅しない。秘密を commit しないことが前提で、誤 commit 後の Git object database からの除去・表示の仲介は未導入 |
-| AWS の署名ブローカー・隔離 runner、GitHub 認証の broker / wrapper | CLI が SSO キャッシュや認証ストアへ直接到達できる。`credential_process` が生の認証情報を AI 制御下へ返すだけの構成は最終解としない |
-| AI 専用 Docker デーモン・VM | ホストのソケットへ接続する。既知の資格情報・保管先・socket の直接指定は拒否するが、通常フォルダの再帰走査や Compose・`.dockerignore` の評価は行わず、build context・mount への資格情報混入リスクが残る |
-| AI 専用 Chrome プロファイル・Computer Use の固定承認 | 個人用プロファイルを接続しない前提を運用で守り、macOS 全アプリ共通の固定承認は未導入 |
-| コマンド・インタプリタの OS 隔離 | Claude Code の Bash と Codex のコマンドを隔離していない。`terraform plan` / `apply` などのプラグインや動的コードも、限定 wrapper・broker・隔離 runner が必要 |
-| ブローカーの検証 | socket の最終 allowlist と実認証を伴うエンドツーエンド検証は未実施 |
+- 管理設定の root 所有化・managed-only lock: Claude Code の設定は通常ファイル、フックは追跡ファイルへの symlink のため、エージェントが制限自体を編集できる
+- Keychain IPC の OS 拒否・別ユーザー境界: 標準の `security` 秘密出力は拒否するが、Security.framework の直接呼び出しは判定できない
+  - 共通規約の絶対禁止と会社の EDR による検知・確認を前提とする
+- Git の追跡済み内容・履歴の安全な仲介: 既知パスの直接取得は拒否するが、パスなしの広い差分・履歴参照、blob ID・glob・pathspec magic は網羅しない
+  - 秘密を commit しないことが前提で、誤 commit 後の Git object database からの除去・表示の仲介は未導入
+- AWS の署名ブローカー・隔離 runner、GitHub 認証の broker / wrapper: CLI が SSO キャッシュや認証ストアへ直接到達できる
+  - `credential_process` が生の認証情報を AI 制御下へ返すだけの構成は最終解としない
+- AI 専用 Docker デーモン・VM: ホストのソケットへ接続する
+  - 既知の資格情報・保管先・socket の直接指定は拒否するが、通常フォルダの再帰走査や Compose・`.dockerignore` の評価は行わず、build context・mount への資格情報混入リスクが残る
+- AI 専用 Chrome プロファイル・Computer Use の固定承認: 個人用プロファイルを接続しない前提を運用で守り、macOS 全アプリ共通の固定承認は未導入
+- コマンド・インタプリタの OS 隔離: Claude Code の Bash と Codex のコマンドを隔離していない
+  - `terraform plan` / `apply` などのプラグインや動的コードも、限定 wrapper・broker・隔離 runner が必要
+- ブローカーの検証: socket の最終 allowlist と実認証を伴うエンドツーエンド検証は未実施
 
-Chrome 拡張・外部ブラウザ機能は有効で、[Browser 設定](.codex/browser/config.toml)はサイト利用・履歴取得・ファイル転送を `never_ask` で自動承認し、CDP フルアクセスは無効。
+Chrome 拡張・外部ブラウザ機能は有効で、[Browser 設定](.codex/browser/config.toml)はサイト利用・履歴取得・ファイル転送を `never_ask` で自動承認し、CDP フルアクセスも有効。
 Computer Use は別の承認境界で、`Always allow` を選んだアプリは以後の確認を省略する。
 ログイン済みサイトの表示内容・セッション権限による操作と、履歴取得・ファイル転送の確認省略は残存リスクとする。
 
