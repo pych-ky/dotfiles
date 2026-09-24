@@ -98,6 +98,12 @@ codex
 - `~/.codex/browser/config.toml`: コピー
 - `/etc/codex/config.toml`: リンク（`~/.codex/config.toml` で上書き可能）
 
+Codex の共通設定は `.config/codex/config.toml` で管理し、`~/.codex/config.toml` には端末固有の設定だけを置く。
+Orca はユーザー設定を専用の Codex 設定へ同期するため、共通設定の値を両方に重複して書かない。
+Orca 専用ファイルを dotfiles へのリンクに置き換えると、Orca の書き込みがリポジトリに届くため避ける。
+Claude Code のエフォートは `.claude/settings.json` の `modelSettings` でモデル別に指定する。
+Opus 5.5 以降はユーザー設定のトップレベル `effortLevel` を使わないため、モデル更新時はモデル別設定も確認する。
+
 端末固有設定の旧 `sandbox_mode` / `[sandbox_workspace_write]` は削除する。
 `sandbox_mode` が残ると公開側の `default_permissions` が使われない。
 
