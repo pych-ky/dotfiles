@@ -292,12 +292,8 @@
     "enabled": false
   },
   "alwaysThinkingEnabled": true,
-  "effortLevel": "xhigh",
   "modelSettings": {
-    "claude-fable-5": {
-      "effortLevel": "xhigh"
-    },
-    "claude-opus-5": {
+    "claude-fable-5-1": {
       "effortLevel": "xhigh"
     },
     "claude-opus-5-5": {
