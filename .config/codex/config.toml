@@ -143,6 +143,22 @@ timeout       = 30  # ガードの制限時間
 statusMessage = "Bash コマンドを検査中"
 
 
+## スキル
+
+# 無効化するスキルの SKILL.md を絶対パスで指定
+[[skills.config]]
+path = "/Users/pych-ky/ghq/github.com/pych-ky/agent-skills/skills/propose-agent-rules/SKILL.md"
+enabled = false
+
+[[skills.config]]
+path = "/Users/pych-ky/ghq/github.com/pych-ky/agent-skills/skills/check-chrome-compatibility/SKILL.md"
+enabled = false
+
+[[skills.config]]
+path = "/Users/pych-ky/ghq/github.com/pych-ky/agent-skills/skills/resolve-coderabbit/SKILL.md"
+enabled = false
+
+
 ## Plugins
 
 [plugins."codex-app-tools@openai-bundled"]
