@@ -5,6 +5,7 @@ set -uo pipefail
 
 mode="${1:-}"
 remote_name="${2:-}"
+remote_url="${3:-}"
 if [[ "$mode" != pre-commit && "$mode" != pre-push ]]; then
   printf 'usage: %s (pre-commit|pre-push)\n' "$(basename "$0")" >&2
   exit 2
@@ -13,7 +14,7 @@ fi
 config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/dotfiles"
 # 非公開側で配置。1 行 1 固定文字列、大文字小文字を区別しない
 denylist_file="$config_dir/denylist.txt"
-# 全 remote URL がいずれかのパターンを含む場合だけ検査を省略
+# 全 remote URL と push の実送信先が業務用パターンに一致する場合だけ省略
 work_remotes_file="$config_dir/work-remotes.txt"
 
 [[ -r "$denylist_file" ]] || exit 0
@@ -71,6 +72,12 @@ is_work_repository() {
 
   [[ -r "$work_remotes_file" ]] || return 1
   [[ -n "$(strip_pattern_file "$work_remotes_file")" ]] || return 1
+
+  if [[ "$mode" == pre-push ]]; then
+    [[ -n "$remote_url" ]] || return 1
+    printf '%s\n' "$remote_url" |
+      grep -qiF -f <(strip_pattern_file "$work_remotes_file") || return 1
+  fi
 
   while IFS= read -r url; do
     [[ -n "$url" ]] || continue
@@ -133,7 +140,7 @@ scan_pre_commit() {
 scan_pre_push() {
   local _local_ref local_sha _remote_ref remote_sha
   local -a range remote_tips
-  local commit hit count
+  local commit hit count commits tips
 
   while read -r _local_ref local_sha _remote_ref remote_sha; do
     [[ -n "${local_sha:-}" ]] || continue
@@ -141,16 +148,16 @@ scan_pre_push() {
     [[ "$local_sha" =~ ^0+$ ]] && continue
 
     if [[ "${remote_sha:-}" =~ ^0+$ ]]; then
-      # 新規 ref は送信先 remote のコミットだけを除外
+      # fetch 先と実送信先が一致する場合だけ、remote のコミットを除外
       # --remotes では private の履歴を public へ初回 push する検査が抜ける
       remote_tips=()
-      if [[ -n "$remote_name" ]]; then
+      if [[ -n "$remote_name" && -n "$remote_url" ]] &&
+        [[ "$(git remote get-url "$remote_name" 2>/dev/null)" == "$remote_url" ]]; then
+        tips="$(git for-each-ref --format='%(objectname)' \
+          "refs/remotes/$remote_name/" 2>/dev/null)" || return 1
         while IFS= read -r commit; do
           [[ -n "$commit" ]] && remote_tips+=("$commit")
-        done < <(
-          git for-each-ref --format='%(objectname)' \
-            "refs/remotes/$remote_name/" 2>/dev/null || true
-        )
+        done <<<"$tips"
       fi
       range=("$local_sha")
       ((${#remote_tips[@]} == 0)) || range+=(--not "${remote_tips[@]}")
@@ -158,23 +165,24 @@ scan_pre_push() {
       range=("$remote_sha..$local_sha")
     fi
 
-    count="$(git rev-list --count "${range[@]}" 2>/dev/null || printf '0')"
+    count="$(git rev-list --count "${range[@]}" 2>/dev/null)" || return 1
     if ((count > 1000)); then
       printf 'denylist: %s 件のコミットを検査します (時間がかかります)\n' \
         "$count" >&2
     fi
 
     # 追加後に削除された内容も検出するため、各コミットを検査
+    commits="$(git rev-list "${range[@]}" 2>/dev/null)" || return 1
     while IFS= read -r commit; do
       [[ -n "$commit" ]] || continue
       hit="$(
         git show --format='%B' -U0 --no-color --no-ext-diff --no-textconv \
-          "$commit" -- |
-          grep -iF -f <(patterns) || true
-      )"
+          "$commit" -- 2>/dev/null |
+          { grep -iF -f <(patterns) || [[ $? == 1 ]]; }
+      )" || return 1
       [[ -n "$hit" ]] &&
         report "コミット ${commit:0:12} の内容が一致しました" <<<"$hit"
-    done < <(git rev-list "${range[@]}" 2>/dev/null || true)
+    done <<<"$commits"
   done
 
   return 0
@@ -182,7 +190,12 @@ scan_pre_push() {
 
 case "$mode" in
 pre-commit) scan_pre_commit ;;
-pre-push) scan_pre_push ;;
+pre-push)
+  if ! scan_pre_push; then
+    printf 'denylist: 履歴の取得または検査に失敗したため、push を中止します。\n' >&2
+    exit 1
+  fi
+  ;;
 esac
 
 if ((found)); then

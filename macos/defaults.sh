@@ -189,4 +189,7 @@ killall ControlCenter 2>/dev/null || true
 restart_rectangle
 trap - EXIT
 
-printf 'done: some settings take effect after re-login\n'
+if [[ ${DOTFILES_BOOTSTRAP:-0} != 1 ]]; then
+  printf 'ok: macOS settings applied\n'
+  printf 'info: some settings take effect after re-login\n'
+fi

@@ -50,7 +50,7 @@ validate_environment() {
 
 run() {
   if ((dry_run)); then
-    printf 'DRY-RUN:'
+    printf 'info: would run:'
     printf ' %q' "$@"
     printf '\n'
   else
@@ -59,9 +59,8 @@ run() {
 }
 
 report_link() {
-  local verb='linked'
-  ((dry_run)) && verb='would link'
-  printf '%s: %s -> %s\n' "$verb" "$1" "$2"
+  ((dry_run)) && return 0
+  printf 'changed: linked %s -> %s\n' "$1" "$2"
 }
 
 # ツールの書き込みをリポジトリから分離するためコピー
@@ -72,12 +71,11 @@ copy_regular_file() {
   local target="$HOME/$target_relative"
 
   if [[ ! -f "$source" || -L "$source" ]]; then
-    printf 'missing regular source: %s\n' "$source" >&2
+    printf 'error: missing regular source: %s\n' "$source" >&2
     return 1
   fi
 
   if [[ -f "$target" && ! -L "$target" ]] && cmp -s "$source" "$target"; then
-    printf 'ok: %s (regular copy of %s)\n' "$target" "$source"
     return 0
   fi
 
@@ -85,14 +83,16 @@ copy_regular_file() {
   backup_existing_target "$target" || return
   if [[ -e "$backup_compare_target" ]] &&
     ! cmp -s "$backup_compare_target" "$source"; then
-    backup_diffs+=("$target (backup: $backup_target)")
+    if ((dry_run)); then
+      backup_diffs+=("$target (planned backup: $backup_target)")
+    else
+      backup_diffs+=("$target (backup: $backup_target)")
+    fi
   fi
 
   run cp -p "$source" "$target" || return
-  if ((dry_run)); then
-    printf 'would copy: %s <- %s\n' "$target" "$source"
-  else
-    printf 'copied: %s <- %s\n' "$target" "$source"
+  if ((!dry_run)); then
+    printf 'changed: copied %s <- %s\n' "$target" "$source"
   fi
 }
 
@@ -127,7 +127,6 @@ install_claude_settings() {
   )" || return
   if [[ ! -L "$target" ]] &&
     cmp -s "$target" <(printf '%s\n' "$merged_settings"); then
-    printf 'ok: %s (user plugin settings preserved)\n' "$target"
     return 0
   fi
 
@@ -136,11 +135,11 @@ install_claude_settings() {
   backup_existing_target "$target" || return
 
   if ((dry_run)); then
-    printf 'would copy: %s <- %s\n' "$target" "$source"
+    printf 'info: would update Claude settings: %s (user plugin settings preserved)\n' "$target"
   else
     printf '%s\n' "$merged_settings" >"$target" || return
     chmod 600 "$target" || return
-    printf 'copied: %s <- %s\n' "$target" "$source"
+    printf 'changed: updated Claude settings: %s (user plugin settings preserved)\n' "$target"
   fi
 }
 
@@ -247,7 +246,10 @@ remove_obsolete_symlink() {
   local target="$HOME/$target_relative"
 
   is_correct_symlink "$target" "$source" || return 0
-  run rm "$target"
+  run rm "$target" || return
+  if ((!dry_run)); then
+    printf 'changed: removed obsolete link: %s\n' "$target"
+  fi
 }
 
 link_file() {
@@ -258,12 +260,11 @@ link_file() {
 
   # 壊れたリンクも source として扱う
   if [[ ! -e "$source" && ! -L "$source" ]]; then
-    printf 'missing source: %s\n' "$source" >&2
+    printf 'error: missing source: %s\n' "$source" >&2
     return 1
   fi
 
   if is_correct_symlink "$target" "$source"; then
-    printf 'ok: %s -> %s\n' "$target" "$source"
     return 0
   fi
 
@@ -272,7 +273,11 @@ link_file() {
   backup_existing_target "$target" || return
   if [[ -e "$backup_compare_target" && -e "$source" ]] &&
     ! diff -rq "$backup_compare_target" "$source" >/dev/null 2>&1; then
-    backup_diffs+=("$target (backup: $backup_target)")
+    if ((dry_run)); then
+      backup_diffs+=("$target (planned backup: $backup_target)")
+    else
+      backup_diffs+=("$target (backup: $backup_target)")
+    fi
   fi
 
   if [[ -f "$backup_compare_target" ]] &&
@@ -299,22 +304,21 @@ link_codex_system_config() {
   local target="/etc/codex/config.toml"
 
   if [[ ! -e "$source" ]]; then
-    printf 'missing source: %s\n' "$source" >&2
+    printf 'error: missing source: %s\n' "$source" >&2
     return 1
   fi
 
   if is_correct_symlink "$target" "$source"; then
-    printf 'ok: %s -> %s\n' "$target" "$source"
     return 0
   fi
 
   # /etc の既存ファイルは退避せず、競合時は中断
   if [[ -L "$target" ]]; then
-    printf 'existing symlink is different: %s -> %s\n' "$target" "$(readlink "$target")" >&2
+    printf 'error: existing symlink is different: %s -> %s\n' "$target" "$(readlink "$target")" >&2
     return 1
   elif [[ -e "$target" ]]; then
-    printf 'existing file: %s\n' "$target" >&2
-    printf 'move or remove it before installing the Codex base config symlink\n' >&2
+    printf 'error: existing file: %s\n' "$target" >&2
+    printf '       move or remove it before installing the Codex base config symlink\n' >&2
     return 1
   fi
 
@@ -363,6 +367,7 @@ main() {
     ".shell/functions/ghq.sh"
     # terminal
     ".wezterm.lua"
+    ".config/ghostty/config.ghostty"
     ".config/starship.toml"
     ".config/git/ignore"
     ".config/gh/config.yml"
@@ -421,19 +426,22 @@ main() {
     if ((backup_created)); then
       prune_backups
     fi
-    printf 'dry run complete\n'
   elif [[ -n "$backup_dir" && -d "$backup_dir" ]]; then
-    printf 'backups: %s\n' "$backup_dir"
+    printf 'info: backup directory: %s\n' "$backup_dir"
     if ((backup_created)); then
       prune_backups
-      printf 'kept latest %d backup generations\n' "$backup_keep"
+      printf 'info: backup retention: up to %d generations\n' "$backup_keep"
     fi
   fi
 
   if ((${#backup_diffs[@]} > 0)); then
-    printf 'warning: replaced files differed from the repository version:\n' >&2
+    if ((dry_run)); then
+      printf 'warning: files to replace differ from the repository version:\n' >&2
+    else
+      printf 'warning: replaced files differed from the repository version:\n' >&2
+    fi
     printf '  %s\n' "${backup_diffs[@]}" >&2
-    printf '         merge local changes into the repository or ~/.zshrc.local, then relink\n' >&2
+    printf '         review the differences and merge intended changes into the corresponding repository files\n' >&2
   fi
 
   if ((${#managed_targets[@]} > 0)); then
@@ -445,15 +453,16 @@ main() {
   fi
 
   if ((${#failed_items[@]} > 0)); then
-    printf 'failed items:\n' >&2
+    printf 'error: dotfiles setup failed for:\n' >&2
     printf '  %s\n' "${failed_items[@]}" >&2
     return 1
   fi
 
-  if ((!dry_run)); then
-    printf 'restart Codex to load updated hooks and permissions\n'
-    printf 'in Codex App, select "保護付きフルアクセス" and start a new task to apply the configured approval policy\n'
-    printf 'the built-in "Full access" mode overrides config.toml with approval_policy=never\n'
+  if ((dry_run)); then
+    printf 'ok: Dotfiles (dry-run; no files changed)\n'
+  elif [[ ${DOTFILES_BOOTSTRAP:-0} != 1 ]]; then
+    printf 'ok: Dotfiles\n'
+    printf 'info: restart Codex to apply configuration changes; see README.md > Codex App の権限\n'
   fi
 }
 

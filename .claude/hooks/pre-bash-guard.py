@@ -265,6 +265,49 @@ def git_exec_key(key):
     )
 
 
+def git_command_context(args, cwd):
+    global_options = CLI_VALUE_OPTIONS["git"]
+    index = 0
+    while index < len(args) and args[index].startswith("-"):
+        argument = args[index]
+        index += 2 if argument in global_options else 1
+    for directory in option_values(args[:index], {"-C"}):
+        if "$" in directory or UNKNOWN_ARGUMENT in directory:
+            cwd = None
+            continue
+        directory = os.path.expanduser(directory)
+        if os.path.isabs(directory):
+            cwd = os.path.realpath(directory)
+        elif cwd is not None:
+            cwd = os.path.realpath(os.path.join(cwd, directory))
+    return index, cwd
+
+
+def git_alias_directory(args, cwd):
+    index, cwd = git_command_context(args, cwd)
+    work_trees = option_values(args[:index], {"--work-tree"})
+    if "--bare" in args[:index]:
+        return cwd
+    # shell alias はリポジトリ直下で動く。設定本文は読まず .git の有無だけを調べる。
+    directory = os.path.realpath(cwd) if cwd is not None else None
+    if directory is not None and not option_values(args[:index], {"--git-dir"}):
+        while not os.path.exists(os.path.join(directory, ".git")):
+            parent = os.path.dirname(directory)
+            if parent == directory:
+                return cwd
+            directory = parent
+    if work_trees:
+        if "$" in work_trees[-1] or UNKNOWN_ARGUMENT in work_trees[-1]:
+            return None
+        directory = os.path.expanduser(work_trees[-1])
+        if not os.path.isabs(directory):
+            if cwd is None:
+                return None
+            directory = os.path.join(cwd, directory)
+        return os.path.realpath(directory)
+    return directory
+
+
 def inspect_git(args, words, cwd):
     for setting in option_values(args, {"--config-env"}):
         if git_exec_key(setting.split("=", 1)[0]):
@@ -281,6 +324,8 @@ def inspect_git(args, words, cwd):
             deny(EXEC_OVERRIDE_REASON)
         if key.casefold() in GIT_COMMAND_KEYS and value:
             scan(value, cwd)
+        elif key.casefold().startswith("alias.") and value.startswith("!"):
+            scan(value[1:], git_alias_directory(args, cwd))
     for value in option_values(args, {"--receive-pack", "--upload-pack", "--exec"}):
         scan(value, cwd)
     if any(argument.startswith("--exec-path=") for argument in args):
@@ -303,7 +348,8 @@ def inspect_git(args, words, cwd):
             deny(SECRET_OUTPUT_REASON)
         if reads and not names_only and any(secret_name(key) or "extraheader" in key.casefold() for key in operands):
             deny(SECRET_OUTPUT_REASON)
-        if not names_only and has_option(args, {"--get-urlmatch"}) and operands[:1] == ["http"]:
+        url_read = has_option(args, {"--get-urlmatch"}) or verb == "get" and bool(option_values(args, {"--url"}))
+        if reads and not names_only and url_read and operands and "." not in operands[0]:
             deny(SECRET_OUTPUT_REASON)
         if not reads and not removes and any(git_exec_key(key) for key in operands):
             deny(EXEC_OVERRIDE_REASON)
@@ -312,7 +358,7 @@ def inspect_git(args, words, cwd):
             if key.casefold() in GIT_COMMAND_KEYS:
                 scan(value, cwd)
             elif key.casefold().startswith("alias.") and value.startswith("!"):
-                scan(value[1:], cwd)
+                scan(value[1:], git_alias_directory(args, cwd))
     if not words:
         return
     command = words[0]
@@ -679,7 +725,10 @@ def path_spellings(value, cwd):
     home = os.path.expanduser("~")
     value = re.sub(r"\$(?:HOME\b|\{HOME\})", lambda _match: home, value)
     value = os.path.expanduser(value)
-    path = os.path.join(cwd, value)
+    if cwd is None and not os.path.isabs(value):
+        # 基準が未確定でも、相対パス内の既知の秘密名は検査する。
+        return {"./" + os.path.normpath(value).casefold()}
+    path = value if os.path.isabs(value) else os.path.join(cwd, value)
     return {os.path.normpath(path).casefold(), os.path.realpath(path).casefold()}
 
 
@@ -734,6 +783,7 @@ def path_exposes_credentials(value, cwd):
     return any(
         target.startswith(path.rstrip("/") + "/")
         for path in path_spellings(value, cwd)
+        if os.path.isabs(path)
         for target in protected
     )
 
@@ -924,14 +974,7 @@ def inspect_dd_paths(args, cwd):
 
 def inspect_git_paths(args, cwd):
     """-C 適用後の基準ディレクトリも返す。"""
-    global_options = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"}
-    index = 0
-    while index < len(args) and args[index].startswith("-"):
-        argument = args[index]
-        index += 2 if argument in global_options else 1
-    _operands, globals_ = path_arguments(args[:index], global_options)
-    for directory in globals_.get("-C", []):
-        cwd = os.path.normpath(os.path.join(cwd, directory))
+    index, cwd = git_command_context(args, cwd)
     if index >= len(args):
         return
     operation, args = args[index], args[index + 1:]
@@ -991,7 +1034,10 @@ def inspect_tar_paths(args, cwd):
         check_path_values(values, {"-f", "--file"}, cwd)
         return
     for directory in values.get("-C", []) + values.get("--directory", []):
-        cwd = os.path.normpath(os.path.join(cwd, directory))
+        if os.path.isabs(directory):
+            cwd = os.path.normpath(directory)
+        elif cwd is not None:
+            cwd = os.path.normpath(os.path.join(cwd, directory))
     for operand in operands:
         check_path(operand, cwd, recursive=True)
 
@@ -1177,6 +1223,7 @@ class Word:
     value: str
     parameters: set = field(default_factory=set)
     quoted: bool = False
+    substitutions: list = field(default_factory=list)
 
 
 def ansi_c_quote(text, index):
@@ -1401,19 +1448,19 @@ def group_end(text, start, opening, closing, heredocs=False):
 
 def shell_tokens(text, literal=False):
     """引用と演算子を区別する。変数値・関数・実行結果は推論しない。"""
-    tokens, nested, pending = [], [], []
-    value, parameters = [], set()
+    tokens, pending = [], []
+    value, parameters, substitutions = [], set(), []
     quote, quoted, started = None, False, False
     index = 0
 
     def flush():
-        nonlocal value, parameters, quoted, started
+        nonlocal value, parameters, substitutions, quoted, started
         if started:
-            word = Word("".join(value), parameters, quoted)
+            word = Word("".join(value), parameters, quoted, substitutions)
             if tokens and tokens[-1] in ("<<", "<<-"):
                 pending.append((len(tokens), word.value, tokens[-1] == "<<-", quoted))
             tokens.append(word)
-        value, parameters, quoted, started = [], set(), False, False
+        value, parameters, substitutions, quoted, started = [], set(), [], False, False
 
     while index < len(text):
         char = text[index]
@@ -1459,7 +1506,7 @@ def shell_tokens(text, literal=False):
                 end += 2 if text[end] == "\\" else 1
             if end >= len(text):
                 raise ParseError("unterminated command substitution")
-            nested.append(text[index + 1:end])
+            substitutions.append(text[index + 1:end])
             value.append("$()")
             started = True
             index = end + 1
@@ -1470,10 +1517,10 @@ def shell_tokens(text, literal=False):
             body = text[index + 2:end]
             if arithmetic:
                 _, inner = shell_tokens(body[1:-1], literal=True)
-                nested.extend(inner)
+                substitutions.extend(inner)
                 parameters.update(PARAMETER.findall(body))
             else:
-                nested.append(body)
+                substitutions.append(body)
             value.append("$()")
             started = True
             index = end + 1
@@ -1487,7 +1534,7 @@ def shell_tokens(text, literal=False):
             if match and not body[match.end():].startswith(("+", ":+")):
                 parameters.add(match.group())
             _, inner = shell_tokens(body, literal=True)
-            nested.extend(inner)
+            substitutions.extend(inner)
             # heredoc 区切り語は展開されないため、HOME もそのまま残す。
             heredoc_word = tokens and tokens[-1] in ("<<", "<<-")
             value.append(os.path.expanduser("~") if body == "HOME" and not heredoc_word else text[index:end + 1])
@@ -1523,13 +1570,12 @@ def shell_tokens(text, literal=False):
                         body, index = heredoc_body(text, index, delimiter, strip_tabs)
                         end = text.find("\n", index)
                         index = len(text) if end < 0 else end + 1
-                        names = set()
+                        names, inner = set(), []
                         if not is_quoted:
                             expanded, inner = shell_tokens(body, literal=True)
-                            nested.extend(inner)
                             for word in expanded:
                                 names.update(word.parameters)
-                        tokens[token_index] = Word(body, names, is_quoted)
+                        tokens[token_index] = Word(body, names, is_quoted, inner)
                     pending.clear()
                 continue
         value.append(char)
@@ -1540,7 +1586,7 @@ def shell_tokens(text, literal=False):
     flush()
     if pending:
         raise ParseError("heredoc body is missing")
-    return tokens, nested
+    return tokens, [body for token in tokens if isinstance(token, Word) for body in token.substitutions]
 
 
 def inspect_assignment(value, cwd):
@@ -1655,7 +1701,11 @@ def unwrap(command, args, cwd, inherited_assignments):
             if option in {"-D", "--chdir"} or command == "env" and option == "-C":
                 if "$" in value:
                     raise UnsupportedSyntax("dynamic working directory")
-                cwd = os.path.abspath(os.path.join(cwd, os.path.expanduser(value)))
+                directory = os.path.expanduser(value)
+                if os.path.isabs(directory):
+                    cwd = os.path.abspath(directory)
+                elif cwd is not None:
+                    cwd = os.path.abspath(os.path.join(cwd, directory))
         elif command == "env" and arg in {"-i", "--ignore-environment"}:
             inherited_assignments.clear()
         elif arg not in WRAPPER_FLAGS[command]:
@@ -1767,7 +1817,13 @@ def inspect_python_process(language, name, node, cwd, depth):
             inspect_code(language, argument.value, cwd, depth + 1)
     elif name in {"subprocess.Popen", "subprocess.run", "subprocess.call", "subprocess.check_call", "subprocess.check_output", "subprocess.getoutput", "subprocess.getstatusoutput"}:
         options = {item.arg: item.value.value for item in node.keywords if isinstance(item.value, ast.Constant)}
-        child_cwd = os.path.normpath(os.path.join(cwd, options["cwd"])) if isinstance(options.get("cwd"), str) else cwd
+        directory = options.get("cwd")
+        child_cwd = cwd
+        if isinstance(directory, str):
+            if os.path.isabs(directory):
+                child_cwd = os.path.normpath(directory)
+            elif cwd is not None:
+                child_cwd = os.path.normpath(os.path.join(cwd, directory))
         child = argument.elts if isinstance(argument, (ast.List, ast.Tuple)) else [argument]
         if child and all(isinstance(item, ast.Constant) and isinstance(item.value, str) for item in child):
             child = [item.value for item in child]
@@ -1846,7 +1902,11 @@ def masked_call_options(language, options, strings, cwd):
         if key == "cwd" and language == "node":
             directory = re.fullmatch(r"__string_(\d+)__", setting)
             if directory:
-                child_cwd = os.path.normpath(os.path.join(cwd, strings[int(directory.group(1))]))
+                value = strings[int(directory.group(1))]
+                if os.path.isabs(value):
+                    child_cwd = os.path.normpath(value)
+                elif cwd is not None:
+                    child_cwd = os.path.normpath(os.path.join(cwd, value))
     return shell, child_cwd
 
 
@@ -2113,7 +2173,12 @@ def inspect_recursive_removal(args, cwd):
     for target in args:
         if target.startswith("-") or UNKNOWN_ARGUMENT in target:
             continue
-        path = os.path.realpath(os.path.join(cwd, os.path.expanduser(target))).rstrip("/") or "/"
+        path = os.path.expanduser(target)
+        if not os.path.isabs(path):
+            if cwd is None:
+                continue
+            path = os.path.join(cwd, path)
+        path = os.path.realpath(path).rstrip("/") or "/"
         home = os.path.realpath(os.path.expanduser("~"))
         if path in {"/", home} or path.startswith("/*") or path.startswith(home + "/*"):
             deny("ルート・ホーム全体の再帰削除は許可していません。")
@@ -2310,7 +2375,57 @@ def inspect_argv(argv, cwd, depth, stdin=None, external=False):
         inspect_interpreter(language, args, cwd, depth, stdin, external)
 
 
+def changed_directory(argv, cwd):
+    assignments = []
+    while argv and ASSIGNMENT.match(argv[0]):
+        assignments.append(argv.pop(0))
+    while argv and argv[0] in {"builtin", "command"}:
+        argv, _ = unwrap(argv[0], argv[1:], cwd, {})
+    directory_variables = {"HOME", "CDPATH", "OLDPWD", "PWD"}
+    if argv and argv[0] in {"export", "readonly", "declare", "typeset", "local"}:
+        assignments.extend(argv[1:])
+    if (
+        any(
+            (match := ASSIGNMENT.match(value)) and match.group(1) in directory_variables
+            for value in assignments
+        )
+        or argv and (
+            argv[0] in {"unset", "read", "mapfile", "readarray"}
+            and any(arg in directory_variables for arg in argv[1:])
+            or argv[0] == "printf"
+            and any(name in directory_variables for name in option_values(argv[1:], {"-v"}))
+        )
+    ):
+        raise UnsupportedSyntax("changed directory environment")
+    if argv and argv[0] in {"eval", "source", ".", "pushd", "popd", "trap", "time"}:
+        raise UnsupportedSyntax("untracked working directory")
+    if not argv or argv[0] != "cd":
+        return cwd
+    args, physical = argv[1:], False
+    while args and args[0].startswith("-") and args[0] != "-":
+        option, args = args[0], args[1:]
+        if option == "--":
+            break
+        if not re.fullmatch(r"-[LP]+", option):
+            raise UnsupportedSyntax("unsupported cd option")
+        for flag in option[1:]:
+            if flag in "LP":
+                physical = flag == "P"
+    if not args:
+        args = [os.path.expanduser("~")]
+    if len(args) != 1 or args[0] == "-" or any(char in args[0] for char in "$`*?["):
+        raise UnsupportedSyntax("dynamic working directory")
+    path = os.path.expanduser(args[0])
+    if not os.path.isabs(path):
+        if cwd is None:
+            return None
+        path = os.path.join(cwd, path)
+    path = os.path.realpath(path) if physical else os.path.abspath(path)
+    return path if os.path.isdir(path) else cwd
+
+
 def scan(text, cwd, depth=0, input_text=None, input_external=False):
+    initial_cwd = cwd
     if depth > 32:
         raise ParseError("nested command limit exceeded")
     if UNKNOWN_ARGUMENT in text:
@@ -2320,12 +2435,36 @@ def scan(text, cwd, depth=0, input_text=None, input_external=False):
     bomb = [":", "(", ")", "{", ":", "|", ":", "&", "}"]
     if any(spelling[index:index + len(bomb)] == bomb for index in range(len(spelling))):
         deny("fork bomb は許可していません。")
-    for body in nested:
-        scan(body, cwd, depth + 1, input_text, input_external)
-    unit, piped = [], False
-    for token in tokens + ["\n"]:
+    sequential, command_start = True, True
+    for index, token in enumerate(tokens):
+        if isinstance(token, Word):
+            if not command_start:
+                continue
+            if not token.quoted and (
+                token.value in {"if", "for", "select", "while", "until", "case", "function", "coproc"}
+                or tokens[index + 1:index + 3] == ["(", ")"]
+            ):
+                sequential = False
+                break
+            command_start = not token.quoted and (
+                token.value in {"!", "time", "-p"} or bool(ASSIGNMENT.match(token.value))
+            )
+        elif token in {"&&", "||", "|", "|&", "&", "{", "}"} or token in REDIRECTIONS:
+            sequential = False
+            break
+        elif token in SEPARATORS:
+            command_start = True
+    # 実行文脈を確定できない構文では、従来どおり開始位置で展開を検査する。
+    if not sequential:
+        for body in nested:
+            scan(body, cwd, depth + 1, input_text, input_external)
+    unit, piped, cwd_stack = [], False, []
+    continued = False
+    for token_index, token in enumerate(tokens + ["\n"]):
         if isinstance(token, Word) or token not in SEPARATORS:
             unit.append(token)
+            continue
+        if token == "\n" and not unit and continued:
             continue
         argv, words, stdin, external = [], [], input_text, piped or input_external
         index = 0
@@ -2363,18 +2502,34 @@ def scan(text, cwd, depth=0, input_text=None, input_external=False):
             index += 1
         while argv and argv[0] in {"if", "then", "elif", "else", "while", "until", "do", "!"}:
             argv.pop(0)
+        function_header = (
+            token == "(" and len(argv) == 1
+            and tokens[token_index + 1:token_index + 2] == [")"]
+        ) and all(not word.quoted and not word.parameters and not word.substitutions for word in words)
+        if sequential:
+            for word in words:
+                for body in word.substitutions:
+                    scan(body, cwd, depth + 1, input_text, input_external)
         presence = len(argv) in {3, 4} and argv[:1] in (["test"], ["["], ["[["]) and argv[1] in {"-e", "-f", "-n", "-z"}
         if not presence and any(sensitive_parameter(name) for word in words for name in word.parameters):
             deny("秘密値を持つ環境変数の明示展開は許可していません。")
-        if argv and argv[0] not in {"for", "select", "case", "in", "esac", "fi", "done", "function"}:
+        if argv and not function_header and argv[0] not in {"for", "select", "case", "in", "esac", "fi", "done", "function"}:
             try:
-                inspect_argv(argv, cwd, depth, stdin, external)
+                inspect_argv(argv.copy(), cwd, depth, stdin, external)
+                if not piped and token not in {"|", "|&", "&"}:
+                    cwd = changed_directory(argv, cwd)
             except UnsupportedSyntax:
-                pass
-            if argv[:1] == ["cd"] and len(argv) == 2 and "$" not in argv[1]:
-                cwd = os.path.abspath(os.path.join(cwd, os.path.expanduser(argv[1])))
+                if sequential:
+                    sequential = False
+                    for body in nested:
+                        scan(body, initial_cwd, depth + 1, input_text, input_external)
+        if token == "(":
+            cwd_stack.append(cwd)
+        elif token == ")" and cwd_stack:
+            cwd = cwd_stack.pop()
         unit = []
         piped = token in {"|", "|&"}
+        continued = token in {"&&", "||", "|", "|&"}
 
 
 def main():

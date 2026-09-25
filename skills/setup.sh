@@ -28,7 +28,8 @@ main() {
 
   skip="$(setup_read_flag AGENT_SKILLS_SKIP)" || return
   if ((skip)); then
-    printf 'Agent Skills setup is disabled; skipping\n'
+    printf 'skipped: Agent Skills (AGENT_SKILLS_SKIP=1)\n'
+    [[ "${DOTFILES_BOOTSTRAP:-0}" != 1 ]] || return 3
     return 0
   fi
   strict="$(setup_read_flag AGENT_SKILLS_STRICT)" || return
@@ -48,7 +49,10 @@ main() {
     "$strict" || checkout_status=$?
   case "$checkout_status" in
   0) ;;
-  3) return 0 ;;
+  3)
+    [[ "${DOTFILES_BOOTSTRAP:-0}" != 1 ]] || return 3
+    return 0
+    ;;
   *) return 1 ;;
   esac
 

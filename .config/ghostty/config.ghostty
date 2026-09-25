@@ -1,0 +1,6 @@
+# Cmd+←/→ で単語移動
+keybind = cmd+left=esc:b
+keybind = cmd+right=esc:f
+
+# Cmd+R で履歴検索
+keybind = cmd+r=text:\x12

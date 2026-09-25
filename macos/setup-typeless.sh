@@ -54,7 +54,9 @@ fi
 if [[ -f "$settings_file" ]] &&
   jq -e --slurpfile managed "$managed_settings" \
     '. == (. * $managed[0])' "$settings_file" >/dev/null; then
-  printf 'Typeless settings are already up to date\n'
+  if [[ ${DOTFILES_BOOTSTRAP:-0} != 1 ]]; then
+    printf 'ok: Typeless settings\n'
+  fi
   exit 0
 fi
 
@@ -82,4 +84,7 @@ fi
 
 mv -- "$temporary_settings" "$settings_file"
 trap - EXIT
-printf 'Typeless settings updated\n'
+printf 'changed: updated Typeless settings: %s\n' "$settings_file"
+if [[ ${DOTFILES_BOOTSTRAP:-0} != 1 ]]; then
+  printf 'ok: Typeless settings\n'
+fi

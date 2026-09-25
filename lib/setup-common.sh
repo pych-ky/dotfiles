@@ -84,7 +84,7 @@ setup_handle_access_failure() {
     return 1
   fi
 
-  printf 'warning: private %s repository is not accessible; skipping\n' "$label" >&2
+  printf 'skipped: %s (private repository is inaccessible)\n' "$label"
 }
 
 setup_verify_repository() {

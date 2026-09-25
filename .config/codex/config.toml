@@ -250,3 +250,13 @@ keepRemoteControlAwakeWhilePluggedIn = true  # 電源接続中の Remote Control
 
 [desktop.open-in-target-preferences]
 global = "vscode"  # ファイルを開く既定アプリ
+
+[desktop.appearanceLightChromeTheme]
+accent = "#3a83f7"          # アクセントの基準色
+accentSource = "chatgpt"    # アカウントで選択したアクセント色に追従
+contrast = 45               # コントラスト
+ink = "#1a1c1f"            # 文字色
+opaqueWindows = false      # ウィンドウの透過を許可
+surface = "#ffffff"        # 背景色
+fonts = {}                 # 標準フォント
+semanticColors = { diffAdded = "#00a240", diffRemoved = "#ba2623", skill = "#924ff7" }  # 差分の追加・削除とスキルの色

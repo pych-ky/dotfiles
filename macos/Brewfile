@@ -55,6 +55,7 @@ cask "wezterm"
 # cask "visual-studio-code" # 設定・拡張は VS Code Settings Sync 側で管理
 # cask "claude"
 cask "chatgpt"
+cask "stablyai/orca/orca"
 
 # コミュニケーション / コラボレーション
 # cask "slack"
