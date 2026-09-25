@@ -120,7 +120,8 @@ main() {
 
   skip="$(setup_read_flag CODEX_CUSTOM_PETS_SKIP)" || return
   if ((skip)); then
-    printf 'Codex Custom Pets setup is disabled; skipping\n'
+    printf 'skipped: Codex pets (CODEX_CUSTOM_PETS_SKIP=1)\n'
+    [[ "${DOTFILES_BOOTSTRAP:-0}" != 1 ]] || return 3
     return 0
   fi
   strict="$(setup_read_flag CODEX_CUSTOM_PETS_STRICT)" || return
@@ -152,7 +153,7 @@ main() {
 
   trap 'setup_cleanup_private_checkout' EXIT
   setup_ensure_private_checkout "$repository_dir" "$repository_url" \
-    'Codex Custom Pets' \
+    'Codex pets' \
     'CODEX_CUSTOM_PETS_REPO_DIR' \
     'CODEX_CUSTOM_PETS_REPO_URL' \
     'bin/install-pet' \
@@ -160,7 +161,10 @@ main() {
     "$strict" || checkout_status=$?
   case "$checkout_status" in
   0) ;;
-  3) return 0 ;;
+  3)
+    [[ "${DOTFILES_BOOTSTRAP:-0}" != 1 ]] || return 3
+    return 0
+    ;;
   *) return 1 ;;
   esac
 
@@ -181,7 +185,7 @@ main() {
   process_lock_acquire "$pets_root_physical/.custom-pets-setup.lock" \
     'Codex Custom Pets install' 30 || return
   setup_verify_repository_or_error "$repository_dir" "$repository_url" \
-    'Codex Custom Pets' \
+    'Codex pets' \
     'CODEX_CUSTOM_PETS_REPO_DIR' \
     'CODEX_CUSTOM_PETS_REPO_URL' \
     'bin/install-pet' \

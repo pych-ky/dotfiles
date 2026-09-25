@@ -14,7 +14,11 @@ git clone <このリポジトリ> && cd dotfiles
 
 Homebrew（未導入時は Xcode Command Line Tools も）と不足ツールを導入する。
 Homebrew が認証キャッシュを無効化するため、冒頭の `sudo` 認証後も再認証を求められる場合がある。
-終了状態が 0 でも失敗内容と `skipped steps` を確認し、原因・認証・前提を整えて再実行する。
+ログは工程ごとの結果と変更した項目を表示し、未変更の個別項目は省略する。
+`Configuration` では設定ファイルの配置と Git・Typeless の設定をまとめて適用し、Zsh プラグイン・開発ツールの導入は別工程で行う。
+`ok:` は工程完了、`changed:` は変更、`info:` は補足、`skipped:` は未実施、`warning:`・`error:` は注意・失敗を表す。
+外部ツールの出力はそのツールの表記を使う。
+終了状態が 0 でも `warning:`・`skipped:` を確認し、原因を解消して必要な認証・前提を整えてから再実行する。
 完了後は「[手動セットアップ](#手動セットアップ)」へ進む。
 
 設定の多くはシンボリックリンクで、編集は実環境にも反映される。
@@ -160,12 +164,14 @@ Typeless の設定には macOS・`jq` が必要で、[管理する設定](macos/
 
 ### キーボード
 
-共通設定は [Karabiner](.config/karabiner/karabiner.json)、ターミナルは [WezTerm](.wezterm.lua)、VS Code は Settings Sync で管理する。
+共通設定は [Karabiner](.config/karabiner/karabiner.json)、ターミナルは [WezTerm](.wezterm.lua)・[Ghostty](.config/ghostty/config.ghostty)、VS Code は Settings Sync で管理する。
 
 - 左 Control / Option / Command → Command / Control / Option、Caps Lock → Control
 - 右 Command / Option → かな / 英数
 - `Cmd+Space` → Raycast
-- WezTerm・VS Code 統合ターミナルの `Cmd+C` → 選択中はコピー、未選択時は処理中断
+- WezTerm・Ghostty の `Cmd+A` → 全選択、`Cmd+C` → コピー、`Ctrl+C` → 処理中断
+- WezTerm・Ghostty の `Cmd+←/→` → 単語移動、`Cmd+R` → 履歴検索、`Ctrl+A/E` → 行頭・行末移動
+- VS Code 統合ターミナルの `Cmd+C` → 選択中はコピー、未選択時は処理中断
 
 `Cmd` は OS に送るキーで、Windows の左 Ctrl 位置で操作できる。
 外付けキーボードは Mac モードを使う。

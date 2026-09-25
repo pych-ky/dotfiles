@@ -67,9 +67,10 @@ if [[ -f "$gitconfig_local" ]] &&
   for key in user.name user.email; do
     if current="$(git config --global --get "$key" 2>/dev/null)" &&
       [[ -n "$current" ]]; then
-      git config --global --unset-all "$key" || true
-      printf 'removed duplicated global %s (managed in %s)\n' \
-        "$key" "$gitconfig_local"
+      if git config --global --unset-all "$key"; then
+        printf 'changed: removed duplicate global setting: %s (managed in %s)\n' \
+          "$key" "$gitconfig_local"
+      fi
     fi
   done
 else
@@ -85,7 +86,7 @@ git config --global --replace-all 'credential.https://github.com.useHttpPath' tr
 
 if ! command -v gh >/dev/null 2>&1; then
   printf 'warning: gh is not installed; default GitHub HTTPS authentication will not work\n' >&2
-  printf "         install it, then run \`gh auth login\` (agents need a user request or approval)\n" >&2
+  printf "         install it, then run \`gh auth login\`\n" >&2
 fi
 
 # 組織固有の includeIf・helper 上書き用。未作成なら Git が無視
@@ -126,7 +127,7 @@ if mkdir -p "$hooks_dir"; then
   obsolete_hook="$hooks_dir/_local-hook-exec"
   if [[ -L "$obsolete_hook" ]]; then
     rm -- "$obsolete_hook"
-    printf 'removed obsolete hook link: %s\n' "$obsolete_hook"
+    printf 'changed: removed obsolete hook link: %s\n' "$obsolete_hook"
   fi
 
   git config --global --replace-all core.hooksPath "$hooks_dir"
@@ -137,7 +138,17 @@ fi
 
 # Git LFS のフックは dispatch が呼ぶため、フィルタだけを導入
 if command -v git-lfs >/dev/null 2>&1; then
-  git lfs install --skip-repo
+  if lfs_output="$(git lfs install --skip-repo)"; then
+    if [[ -n "$lfs_output" && "$lfs_output" != 'Git LFS initialized.' ]]; then
+      printf '%s\n' "$lfs_output"
+    fi
+  else
+    lfs_status=$?
+    [[ -z "$lfs_output" ]] || printf '%s\n' "$lfs_output" >&2
+    exit "$lfs_status"
+  fi
 fi
 
-printf 'Git configuration updated\n'
+if [[ ${DOTFILES_BOOTSTRAP:-0} != 1 ]]; then
+  printf 'ok: Git configuration applied\n'
+fi

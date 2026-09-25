@@ -6,6 +6,9 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 failed_steps=()
 skipped_steps=()
+current_step=
+step_failed_start=0
+step_skipped_start=0
 
 setup_common_library="$repo_dir/lib/setup-common.sh"
 if [[ ! -f "$setup_common_library" || -L "$setup_common_library" ]]; then
@@ -16,7 +19,26 @@ fi
 # shellcheck source=lib/setup-common.sh
 source "$setup_common_library"
 
+finish_step() {
+  [[ -n "$current_step" ]] || return 0
+
+  local failed_count=$((${#failed_steps[@]} - step_failed_start))
+  local skipped_count=$((${#skipped_steps[@]} - step_skipped_start))
+  if ((failed_count > 0)); then
+    printf 'error: %s (%d failed, %d skipped)\n' "$current_step" "$failed_count" "$skipped_count" >&2
+  elif ((skipped_count > 0)); then
+    printf 'skipped: %s (%d skipped)\n' "$current_step" "$skipped_count"
+  else
+    printf 'ok: %s\n' "$current_step"
+  fi
+  current_step=
+}
+
 step() {
+  finish_step
+  current_step="$1"
+  step_failed_start=${#failed_steps[@]}
+  step_skipped_start=${#skipped_steps[@]}
   printf '\n==> %s\n' "$1"
 }
 
@@ -31,14 +53,28 @@ record_failure() {
   fi
 
   failed_steps+=("$label (exit $status)")
-  printf 'warning: %s failed (exit %d), continuing\n' "$label" "$status" >&2
+  printf 'error: %s (exit %d); continuing\n' "$label" "$status" >&2
 }
 
 record_skip() {
   local reason="$1"
 
   skipped_steps+=("$reason")
-  printf 'warning: skipped: %s\n' "$reason" >&2
+  printf 'skipped: %s\n' "$reason"
+}
+
+# 任意リポジトリの setup は、bootstrap 中の未実施を終了コード 3 で伝える。
+run_optional_setup() {
+  local label="$1"
+  shift
+  local status=0
+
+  "$@" || status=$?
+  case "$status" in
+  0) ;;
+  3) skipped_steps+=("$label (see reason above)") ;;
+  *) record_failure "$label" "$status" ;;
+  esac
 }
 
 run_and_record() {
@@ -173,11 +209,11 @@ setup_homebrew_and_bundle() {
   else
     status=$?
     record_failure 'Homebrew' "$status"
-    record_skip 'brew bundle (Homebrew が使えないため)'
+    record_skip 'Homebrew packages (Homebrew is unavailable)'
     return 0
   fi
 
-  step 'brew bundle'
+  step 'Homebrew packages'
   # MDM などによる所有者変更で bundle が失敗する場合の案内
   brew_cellar="$("$brew_executable" --prefix)/Cellar"
   if [[ -d "$brew_cellar" && ! -w "$brew_cellar" ]]; then
@@ -188,8 +224,8 @@ setup_homebrew_and_bundle() {
 
   # Homebrew は起動時に sudo timestamp を無効化するため、認証も任せる
   run_and_record \
-    'brew bundle' \
-    "$brew_executable" bundle --no-upgrade --file="$repo_dir/macos/Brewfile"
+    'Homebrew packages' \
+    "$brew_executable" bundle --quiet --no-upgrade --file="$repo_dir/macos/Brewfile"
 }
 
 setup_login_items() {
@@ -198,18 +234,21 @@ setup_login_items() {
 
   # Logi Options+ はサービスで常駐するため、メインアプリの自動起動は不要
   run_and_record \
-    "login item removed: $logi_options_app" \
+    "remove login item: $logi_options_app" \
     osascript - "$logi_options_app" <<'APPLESCRIPT'
 on run argv
   set targetPath to item 1 of argv
+  set removedItem to false
   tell application "System Events"
     repeat with existingItem in every login item
       set existingPath to path of existingItem
       if existingPath is targetPath or existingPath is (targetPath & "/") then
         delete existingItem
+        set removedItem to true
       end if
     end repeat
   end tell
+  if removedItem then return "changed: removed login item: " & targetPath
 end run
 APPLESCRIPT
 
@@ -218,12 +257,12 @@ APPLESCRIPT
     /Applications/Rectangle.app \
     /Applications/Typeless.app; do
     if [[ ! -d "$login_item_app" ]]; then
-      record_skip "login item added: $login_item_app (アプリが見つからないため)"
+      record_skip "add login item: $login_item_app (application is missing)"
       continue
     fi
 
     run_and_record \
-      "login item added: $login_item_app" \
+      "add login item: $login_item_app" \
       osascript - "$login_item_app" <<'APPLESCRIPT'
 on run argv
   set targetPath to item 1 of argv
@@ -233,6 +272,7 @@ on run argv
     if existingPaths contains (targetPath & "/") then return
     make new login item at end with properties {path:targetPath, hidden:false}
   end tell
+  return "changed: added login item: " & targetPath
 end run
 APPLESCRIPT
   done
@@ -243,13 +283,13 @@ setup_mise_tools() {
   local mise_config="${XDG_CONFIG_HOME:-$HOME/.config}/mise/config.toml"
 
   if ! command -v mise >/dev/null 2>&1; then
-    record_skip 'mise install (mise が使えないため)'
+    record_skip 'Development tools (mise is unavailable)'
   elif [[ ! -r "$mise_config" ]]; then
-    printf 'error: mise の設定が読めません: %s\n' "$mise_config" >&2
-    printf '       scripts/link-dotfiles.sh が成功しているか確認してください\n' >&2
-    record_failure 'mise install (設定が無い)' 1
+    printf 'error: mise configuration is not readable: %s\n' "$mise_config" >&2
+    printf '       check that scripts/link-dotfiles.sh completed successfully\n' >&2
+    record_failure 'Development tools (missing mise configuration)' 1
   else
-    run_and_record 'mise install' mise install
+    run_and_record 'Development tools' mise install
   fi
 }
 
@@ -274,6 +314,7 @@ install_zsh_plugin() {
     setup_error "zsh plugin entrypoint was not installed: $target/$entrypoint"
     return 1
   fi
+  printf 'changed: installed Zsh plugin: %s\n' "$name"
 }
 
 setup_zsh_plugins() {
@@ -364,11 +405,11 @@ setup_claude_plugins() {
   local status
 
   if ! executable="$(resolve_user_executable claude)"; then
-    record_skip 'Claude Code plugins (Claude Code が使えないため)'
+    record_skip 'Claude Code plugins (Claude Code is unavailable)'
     return 0
   fi
   if ! command -v jq >/dev/null 2>&1; then
-    record_skip 'Claude Code plugins (jq が使えないため)'
+    record_skip 'Claude Code plugins (jq is unavailable)'
     return 0
   fi
 
@@ -377,7 +418,7 @@ setup_claude_plugins() {
   else
     status=$?
     record_failure 'Claude Code marketplace list' "$status"
-    record_skip 'Claude Code plugins (公式 marketplace を確認できないため)'
+    record_skip 'Claude Code plugins (official marketplace could not be inspected)'
     return 0
   fi
 
@@ -386,7 +427,7 @@ setup_claude_plugins() {
   if ((marketplace_status != 0)); then
     # 中断は即時伝播
     ((marketplace_status == 1)) || return "$marketplace_status"
-    record_skip 'Claude Code plugins (公式 marketplace を登録できないため)'
+    record_skip 'Claude Code plugins (official marketplace could not be registered)'
     return 0
   fi
 
@@ -400,7 +441,7 @@ setup_claude_plugins() {
 
   if json_array_contains "$plugins" context7@claude-plugins-official; then
     run_and_record \
-      'Claude Code plugin removed: context7@claude-plugins-official' \
+      'remove Claude Code plugin: context7@claude-plugins-official' \
       "$executable" plugin uninstall context7@claude-plugins-official --scope user
   fi
 
@@ -420,14 +461,15 @@ setup_claude_plugins() {
 setup_codex_plugins() {
   local executable
   local plugins
+  local install_output
   local status
 
   if ! executable="$(resolve_user_executable codex)"; then
-    record_skip 'Codex plugins (Codex CLI が使えないため)'
+    record_skip 'Codex plugins (Codex CLI is unavailable)'
     return 0
   fi
   if ! command -v jq >/dev/null 2>&1; then
-    record_skip 'Codex plugins (jq が使えないため)'
+    record_skip 'Codex plugins (jq is unavailable)'
     return 0
   fi
 
@@ -452,9 +494,13 @@ setup_codex_plugins() {
     return 0
   fi
 
-  run_and_record \
-    'Codex plugin: linear@openai-curated' \
-    "$executable" plugin add linear@openai-curated
+  if install_output="$("$executable" plugin add --json linear@openai-curated)"; then
+    return 0
+  else
+    status=$?
+    [[ -z "$install_output" ]] || printf '%s\n' "$install_output" >&2
+    record_failure 'Codex plugin: linear@openai-curated' "$status"
+  fi
 }
 
 setup_private_overlay() {
@@ -463,7 +509,7 @@ setup_private_overlay() {
   local status=0
 
   if [[ "${DOTFILES_PRIVATE_SKIP:-0}" == 1 ]]; then
-    record_skip 'dotfiles-private overlay (DOTFILES_PRIVATE_SKIP=1)'
+    record_skip 'Private settings (DOTFILES_PRIVATE_SKIP=1)'
     return 0
   fi
 
@@ -471,20 +517,20 @@ setup_private_overlay() {
   overlay_dir="$(setup_normalize_repository_dir \
     "${DOTFILES_PRIVATE_DIR:-$HOME/ghq/github.com/pych-ky/dotfiles-private}" \
     DOTFILES_PRIVATE_DIR)" || {
-    record_failure 'dotfiles-private checkout' 1
+    record_failure 'Private settings checkout' 1
     return 0
   }
   overlay_url="${DOTFILES_PRIVATE_REPO_URL:-https://github.com/pych-ky/dotfiles-private.git}"
 
   setup_ensure_private_checkout \
-    "$overlay_dir" "$overlay_url" 'dotfiles-private' \
+    "$overlay_dir" "$overlay_url" 'Private settings' \
     DOTFILES_PRIVATE_DIR DOTFILES_PRIVATE_REPO_URL \
     setup.sh 'dotfiles-private setup.sh is missing or not executable' 0 || status=$?
 
   case "$status" in
-  0) run_and_record 'dotfiles-private setup' "$overlay_dir/setup.sh" ;;
-  3) record_skip 'dotfiles-private overlay (リポジトリへアクセスできないため)' ;;
-  *) record_failure 'dotfiles-private checkout' 1 ;;
+  0) run_and_record 'Private settings' "$overlay_dir/setup.sh" ;;
+  3) skipped_steps+=('Private settings (repository is inaccessible)') ;;
+  *) record_failure 'Private settings checkout' 1 ;;
   esac
 }
 
@@ -499,39 +545,34 @@ if [[ "$(uname -s)" != Darwin ]]; then
 fi
 
 setup_validate_home
+export DOTFILES_BOOTSTRAP=1
 
-step 'sudo'
+step 'Administrator access'
 # 認証中の終了でも sudo timestamp を無効化
 trap 'sudo -k 2>/dev/null || true' EXIT
 ensure_sudo
 
-step 'macos/defaults.sh'
-run_and_record 'macos/defaults.sh' "$repo_dir/macos/defaults.sh"
+step 'macOS settings'
+run_and_record 'macOS settings' "$repo_dir/macos/defaults.sh"
 
 step 'Homebrew'
 setup_homebrew_and_bundle
 
-step 'scripts/link-dotfiles.sh'
-run_and_record 'scripts/link-dotfiles.sh' "$repo_dir/scripts/link-dotfiles.sh"
+step 'Configuration'
+run_and_record 'Configuration files' "$repo_dir/scripts/link-dotfiles.sh"
 
 # 以降は管理者権限が不要
 sudo -k 2>/dev/null || true
 trap - EXIT
 
-step 'macos/setup-typeless.sh'
-run_and_record 'macos/setup-typeless.sh' "$repo_dir/macos/setup-typeless.sh"
+run_and_record 'Git settings' "$repo_dir/scripts/setup-git.sh"
+run_and_record 'Typeless settings' "$repo_dir/macos/setup-typeless.sh"
 
-step 'login items'
-setup_login_items
-
-step 'mise install'
-setup_mise_tools
-
-step 'scripts/setup-git.sh'
-run_and_record 'scripts/setup-git.sh' "$repo_dir/scripts/setup-git.sh"
-
-step 'zsh plugins'
+step 'Zsh plugins'
 setup_zsh_plugins
+
+step 'Development tools'
+setup_mise_tools
 
 step 'Claude Code'
 install_user_cli claude 'Claude Code installer' https://claude.ai/install.sh /bin/bash
@@ -542,33 +583,36 @@ install_user_cli codex 'Codex installer' \
   https://chatgpt.com/codex/install.sh /bin/sh CODEX_NON_INTERACTIVE=1
 setup_codex_plugins
 
-step 'Codex Custom Pets'
-run_and_record 'Codex Custom Pets' "$repo_dir/pets/setup.sh"
+step 'Codex pets'
+run_optional_setup 'Codex pets' "$repo_dir/pets/setup.sh"
 
 step 'Agent Skills'
-run_and_record 'Agent Skills' "$repo_dir/skills/setup.sh"
+run_optional_setup 'Agent Skills' "$repo_dir/skills/setup.sh"
 
-step 'dotfiles-private overlay'
+step 'Private settings'
 trap 'setup_cleanup_private_checkout' EXIT
 setup_private_overlay
 
-step 'summary'
+step 'Login items'
+setup_login_items
+
+finish_step
+printf '\n==> Summary\n'
 if ((${#skipped_steps[@]} > 0)); then
-  printf 'skipped steps (not executed):\n' >&2
-  printf '  - %s\n' "${skipped_steps[@]}" >&2
+  printf 'skipped: tasks not executed:\n'
+  printf '  - %s\n' "${skipped_steps[@]}"
 fi
 
 if ((${#failed_steps[@]} > 0)); then
-  printf 'bootstrap completed with failed steps:\n' >&2
+  printf 'error: bootstrap completed with failed tasks:\n' >&2
   printf '  - %s\n' "${failed_steps[@]}" >&2
-  printf 'fix the failures and rerun ./bootstrap.sh\n' >&2
+  printf 'info: fix the failures and rerun ./bootstrap.sh\n' >&2
   exit 1
 fi
 
 if ((${#skipped_steps[@]} > 0)); then
-  printf 'bootstrap finished without failures, but some steps were skipped\n'
-  printf 'satisfy their requirements and rerun ./bootstrap.sh to complete setup\n'
+  printf 'skipped: bootstrap completed with unexecuted tasks\n'
+  printf 'info: rerun ./bootstrap.sh if you want to complete the skipped tasks\n'
 else
-  printf 'all setup steps completed successfully\n'
+  printf 'ok: bootstrap completed\n'
 fi
-printf 'see README.md for remaining manual setup steps\n'
