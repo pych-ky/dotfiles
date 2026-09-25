@@ -1,6 +1,9 @@
 # OS 全体の CLI・GUI を管理。開発ツールは .config/mise/config.toml に集約
 # 任意の GUI はコメントアウトを外し、brew bundle --file=macos/Brewfile で導入
 
+# 外部 tap
+tap "stablyai/orca"
+
 # CLI (formula)
 
 # シェル / ターミナル UX
@@ -11,11 +14,16 @@ brew "zoxide"
 brew "herdr"
 
 # 基本ユーティリティ
+brew "coreutils"
+brew "gnu-sed"
+brew "duti"
 brew "ripgrep"
 brew "tree"
 brew "jq"
 brew "yq"
 brew "shfmt"
+brew "shellcheck"
+brew "actionlint"
 
 # Git / GitHub
 brew "git"
