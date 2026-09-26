@@ -12,17 +12,8 @@ git clone <このリポジトリ> && cd dotfiles
 ./bootstrap.sh
 ```
 
-Homebrew（未導入時は Xcode Command Line Tools も）と不足ツールを導入する。
-Homebrew が認証キャッシュを無効化するため、冒頭の `sudo` 認証後も再認証を求められる場合がある。
-ログは工程ごとの結果と変更した項目を表示し、未変更の個別項目は省略する。
-`Configuration` では設定ファイルの配置と Git・Typeless の設定をまとめて適用し、Zsh プラグイン・開発ツールの導入は別工程で行う。
-`ok:` は工程完了、`changed:` は変更、`info:` は補足、`skipped:` は未実施、`warning:`・`error:` は注意・失敗を表す。
-外部ツールの出力はそのツールの表記を使う。
-終了状態が 0 でも `warning:`・`skipped:` を確認し、原因を解消して必要な認証・前提を整えてから再実行する。
-完了後は「[手動セットアップ](#手動セットアップ)」へ進む。
-
-設定の多くはシンボリックリンクで、編集は実環境にも反映される。
-公開できない情報は「[非公開設定](#非公開設定dotfiles-private)」で管理する。
+警告・未実施項目を解消し、[手動セットアップ](#手動セットアップ)へ進む。
+設定の多くはリンクされ、編集が実環境に反映される。
 
 ## 手動セットアップ
 
@@ -41,52 +32,25 @@ Homebrew が認証キャッシュを無効化するため、冒頭の `sudo` 認
 - Claude Code / Codex の Linear は端末ごとに OAuth 認証
 - ChatGPT の Linear はアカウントごとに Install / Connect し、初回 OAuth 認証を手動で行う
 - Microsoft Edge: ChatGPT の「設定 > コンピューターの使用」から、使用するプロファイルに [ChatGPT 拡張機能](https://microsoftedge.microsoft.com/addons/detail/odlomjlbamekndcpllcnffbgeohgkmjh) を導入し、接続後に `@Edge` が選べることを確認
-  - Edge 本体は Brewfile、共通のブラウザ操作プラグインと `@Edge` の表示は Codex 設定で管理
 
 ### GitHub の認証
 
-通常の Git / `gh` は HTTPS と `gh` の保存済み認証を使う。
+Git / `gh` は HTTPS で端末ごとに認証する。
 
 ```sh
 gh auth login --hostname github.com --git-protocol https
 ```
 
-組織固有 URL に [ghtkn](https://github.com/suzuki-shunsuke/ghtkn) の helper を使う端末は、非公開設定に従って追加認証する。
+組織用の [ghtkn](https://github.com/suzuki-shunsuke/ghtkn) は非公開設定に従う。
 
 ```sh
 ghtkn init   # 対象の GitHub App の Client ID を設定する
 ghtkn auth   # デバイスフローで認証する
 ```
 
-両 CLI とも、URL の手動起動と Enter による自動起動を重ねない。
-`gh auth login` はコードのコピー後に Enter を押す。
-
 ## 非公開設定（dotfiles-private）
 
-**このリポジトリは公開。**
-組織固有設定・非公開の個人情報は `dotfiles-private` で管理する。
-`bootstrap.sh` はアクセス可能な場合だけ取得して `setup.sh` を実行する（`DOTFILES_PRIVATE_SKIP=1` で省略）。
-
-- `~/.gitconfig.local`: `user.name` / `user.email`（自動推測は無効）、組織固有の `includeIf`・認証 helper
-- `~/.zshrc.local` / `~/.bashrc.local`: シェルの個別設定
-- `~/.config/dotfiles/denylist.txt`: 公開リポジトリへの混入防止パターン（未配置時は組織固有文字列を検査しない）
-- `~/.config/dotfiles/work-remotes.txt`: 組織の remote URL の識別条件
-
-認証情報は非公開リポジトリにも置かず、1Password などで移行する。
-GitHub 認証は端末ごとに取り直す。
-`~/.kube`・`~/.docker` などの機密・端末固有データや、AI エージェントのアカウント固有接続は管理対象外。
-
-## AI エージェントの起動と注意事項
-
-平文の認証情報を環境変数に設定せず、新しいターミナルから起動する。
-
-```sh
-claude
-codex
-```
-
-任意コードの隔離はなく、ブラウザのサイト操作・履歴取得・ファイル転送は自動承認される。
-認証・承認の規約、保護範囲と残存リスクは [SECURITY.md](SECURITY.md) を参照。
+[dotfiles-private](https://github.com/pych-ky/dotfiles-private) はアクセス可能な場合だけ自動取得・適用する。
 
 ## 個別セットアップ
 
@@ -97,42 +61,23 @@ codex
 ./scripts/link-dotfiles.sh             # リンク作成
 ```
 
-既存の通常ファイル・ディレクトリは `~/.dotfiles-backup/<timestamp>[-<sequence>]/` に退避し、スクリプトが作成した最新 5 世代を保持する。
-差異を警告されたら、端末の変更をリポジトリか `~/.zshrc.local` などへ統合して再リンクする。
+通常ファイル・ディレクトリは `~/.dotfiles-backup/` に退避し、最新 5 世代を保持する。
+差異を警告されたら、端末の変更をリポジトリか `~/.zshrc.local` などへ統合して再実行する。
 
-- `~/.claude/settings.json`: コピー（既存設定は `jq` で公開側を優先してマージし、同じ ID がない個人のプラグイン・marketplace は保持）
-- `~/.codex/browser/config.toml`: コピー
-- `/etc/codex/config.toml`: リンク（`~/.codex/config.toml` で上書き可能）
-
-Codex の共通設定は `.config/codex/config.toml` で管理し、`~/.codex/config.toml` には端末固有の設定だけを置く。
-Orca はユーザー設定を専用の Codex 設定へ同期するため、共通設定の値を両方に重複して書かない。
-Orca 専用ファイルを dotfiles へのリンクに置き換えると、Orca の書き込みがリポジトリに届くため避ける。
-Claude Code のエフォートは `.claude/settings.json` の `modelSettings` でモデル別に指定する。
-Opus 5.5 以降はユーザー設定のトップレベル `effortLevel` を使わないため、モデル更新時はモデル別設定も確認する。
-
-端末固有設定の旧 `sandbox_mode` / `[sandbox_workspace_write]` は削除する。
-`sandbox_mode` が残ると公開側の `default_permissions` が使われない。
+`~/.codex/config.toml` には端末固有の設定だけを置く。
+Orca は設定を同期するため、共通設定を重複させず、専用ファイルを dotfiles へリンクしない。
+公開側の `default_permissions` を使うため、端末固有設定の旧 `sandbox_mode` / `[sandbox_workspace_write]` は削除する。
 
 #### Codex App の権限
 
-リンク後は Codex を終了し、各端末の承認メニューで「保護付きフルアクセス」を選び、新しいタスクを開始する。
-最後に選んだ権限が `default_permissions` より優先され、既存タスクは承認方式を引き継ぐ。
-組み込みの「フルアクセス」は `approval_policy = "never"` で上書きし、承認が必要な Computer Use の接続も拒否される場合がある。
+リンク後は Codex を終了し、承認メニューで「保護付きフルアクセス」を選んで新規タスクを開始する。
+最後に選んだ権限が設定値より優先され、既存タスクは旧承認方式を引き継ぐ。
+組み込みの「フルアクセス」は承認を無効化し、Computer Use の接続も拒否される場合がある。
 
 ### Git 共通設定
 
-Git 2.37 以上が必要。
-
 ```sh
 ./scripts/setup-git.sh
-```
-
-`~/.gitconfig` 全体は置き換えず、共通項目とグローバルフックを設定する。
-認証は「[GitHub の認証](#github-の認証)」に従い、push URL を含め URL にトークン・パスワードを埋め込まない。
-secretlint が未導入・実行不能でもコミットを止める。
-単独導入は設定のリンク後に行う。
-
-```sh
 mise install aqua:secretlint/secretlint
 ```
 
@@ -143,13 +88,9 @@ brew bundle --no-upgrade --file=macos/Brewfile       # 不足パッケージの�
 brew bundle upgrade --file=macos/Brewfile            # 管理対象パッケージのアップグレード
 ```
 
-`bootstrap.sh` は一括アップグレードしないが、Homebrew 本体・パッケージ情報・不足パッケージの依存関係は更新される場合がある。
-任意の GUI アプリは [Brewfile](macos/Brewfile) のコメントアウトを外して `brew bundle` を再実行するか、別途導入する。
-
 ### シェルのファジー検索
 
-新しいターミナルで `cghq`（Zsh では `Ctrl+G` も可）を使い、ghq 管理のリポジトリを検索して移動する。
-`cghq dotfiles` のように初期検索語を指定できる。
+新規ターミナルで `cghq [検索語]`（Zsh は `Ctrl+G` も可）を使い、ghq リポジトリへ移動する。
 
 ### macOS と Typeless
 
@@ -158,46 +99,15 @@ brew bundle upgrade --file=macos/Brewfile            # 管理対象パッケー�
 ./macos/setup-typeless.sh
 ```
 
-日本語入力・外観・ファンクションキーは再ログイン後に反映される。
-電源管理の変更には事前の `sudo` 認証が必要。
-
-Typeless の設定には macOS・`jq` が必要で、[管理する設定](macos/typeless.json)だけを反映する。
-変更時は Typeless を終了し、旧ショートカットの移行を求められたら一度起動・終了して再実行する。
+macOS 設定は一部が再ログイン後に反映され、電源管理には事前の `sudo` 認証が必要。
+Typeless は終了させてから実行する。
 
 ### キーボード
 
-共通設定は [Karabiner](.config/karabiner/karabiner.json)、ターミナルは [WezTerm](.wezterm.lua)・[Ghostty](.config/ghostty/config.ghostty)・[Orca](.orca/keybindings.json)、VS Code は Settings Sync で管理する。
+端末の処理中断には、印字された左 `Command+C` を使う。
 
-- 左 Control / Option / Command → Command / Control / Option、Caps Lock → Control
-- 右 Command / Option → かな / 英数
-- `Cmd+Space` → Raycast
-- VS Code 統合ターミナルの `Cmd+C` → 選択中はコピー、未選択時は処理中断
-
-上記の `Cmd` は OS に送るキーを表す。
-以下は **キーボードに印字されたキー**で、Ctrl は左 Control、Backspace は後方削除キーを指す。
-WezTerm・Ghostty・Orca の端末では次の操作に揃える。
-
-- `Ctrl+C` / `Ctrl+V` / `Ctrl+A` → コピー / 貼り付け / 端末出力の全選択
-- 左 `Command+C` → 端末内へ Control+C（通常は処理中断）。`Caps Lock+C`・左 `Option+C` も従来どおり使える
-- `Ctrl+Tab` / `Ctrl+Shift+Tab` → 次 / 前のタブ。Orca は端末タブを表示順に移動する
-- `Ctrl+PageDown` / `Ctrl+PageUp` → 次 / 前のタブ
-- `Ctrl+←/→` / `Ctrl+Backspace` → 単語移動 / 直前の単語削除
-- `Ctrl+R` → 端末内へ Control+R（シェルでは履歴検索）
-- `Ctrl+T` / `Ctrl+W` → 新しいタブ / 現在のペインを閉じる
-- `Ctrl+Shift+D` / 左 `Command+Shift+D` → 右 / 下に分割（後者は Windows 配列の Alt の位置）
-
-単語移動・削除や Shift 付きの選択は、端末内のアプリが対応する範囲で動作する。
-`Ctrl+C` は未選択でも中断に切り替えず、`Ctrl+A` は入力行ではなく端末出力を選ぶ。
-Orca の入力欄・エディターでコピー・全選択・取り消しを保つため、Control+C/A/Z への一括変換は行わない。
-Ghostty の `Ctrl+Z` / `Ctrl+Shift+Z` によるタブ・分割の取り消し／やり直しは解除する。
-端末内の入力取り消しはアプリごとに異なり、`Caps Lock+Z` は Control+Z（シェルではジョブの一時停止）になる。
-
-Orca のタブ名変更は `Ctrl+F2`、ブラウザー再読み込みは `Ctrl+R`。
-Orca の設定ファイルは `scripts/link-dotfiles.sh` で通常ファイルとしてコピーする。
-変更後は Orca のキーボード設定で再読み込みするか、Orca を再起動する。
-Ghostty は `Ctrl+Shift+,` で設定を再読み込みする。
-Karabiner と WezTerm は設定変更を自動で読み込む。
-右 Control は従来どおり OS の Control として使う。
+Orca の変更は `scripts/link-dotfiles.sh` でコピー後、キーボード設定で再読み込みするか再起動する。
+Ghostty は `Ctrl+Shift+,`、Karabiner・WezTerm は自動で再読み込みする。
 
 外付けキーボードは Mac モードを使う。
 Windows 配列のみの機器は、Karabiner の機器別 Simple Modifications で `left_command → left_control`、`left_option → left_option` を指定する。
@@ -214,24 +124,16 @@ Windows 配列のみの機器は、Karabiner の機器別 Simple Modifications �
 
 ### 非公開 Codex Custom Pets
 
-Git・jq・macOS 標準の `lockf` が必要。
-
 ```sh
 ./pets/setup.sh
 ```
 
-`${CODEX_HOME:-$HOME/.codex}` に導入し、再実行時は既存ペットをその配下の `pets/.backups` に退避して置き換える。
-導入後は Codex の `Settings → Pets` で `Refresh` を実行する。
+導入先・退避・更新手順は [Pets の README](https://github.com/pych-ky/codex-custom-pets#readme) を参照。
+導入後は Codex の `Settings → Pets → Refresh` を実行する。
 
 #### 更新
 
-以下を実行し、dotfiles に戻って `./pets/setup.sh` を再実行する。
-
-```sh
-cd "${CODEX_CUSTOM_PETS_REPO_DIR:-$HOME/ghq/github.com/pych-ky/codex-custom-pets}"
-git switch main
-git pull --ff-only
-```
+Pets のチェックアウトで `git switch main`・`git pull --ff-only` 後、dotfiles に戻って `./pets/setup.sh` を再実行する。
 
 ### 非公開 Agent Skills
 
@@ -239,21 +141,9 @@ git pull --ff-only
 ./skills/setup.sh
 ```
 
-`~/.agents/skills`・`~/.claude/skills` にリンクし、同名の未管理オブジェクトは上書きしない。
-導入後は新しい Codex セッションで確認する。
-選択・単体導入・クラウドルーティンの設定は [Agent Skills の README](https://github.com/pych-ky/agent-skills#readme) を参照。
+導入後は新規 Codex セッションで確認する。
+配置・選択・単体導入・クラウドルーティンは [Agent Skills の README](https://github.com/pych-ky/agent-skills#readme) を参照。
 
 #### 更新
 
-```sh
-repository_dir="${AGENT_SKILLS_REPO_DIR:-$HOME/ghq/github.com/pych-ky/agent-skills}"
-git -C "$repository_dir" pull --ff-only
-"$repository_dir/setup.sh"
-```
-
-### Pets・Skills の導入設定
-
-既存チェックアウトは自動更新しない。
-初回アクセス失敗時は既定で警告してスキップする。
-`CODEX_CUSTOM_PETS_SKIP=1` / `AGENT_SKILLS_SKIP=1` で導入から除外できる。
-取得先やアクセス失敗をエラーにする設定は [Pets](pets/setup.sh) / [Skills](skills/setup.sh) を参照。
+Agent Skills のチェックアウトで `git pull --ff-only`・`./setup.sh` を実行する。

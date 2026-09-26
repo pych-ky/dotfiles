@@ -1,3 +1,5 @@
+# Git の改行・バイナリ設定
+
 * text=auto eol=lf
 
 *.png binary

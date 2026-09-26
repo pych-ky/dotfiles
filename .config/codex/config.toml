@@ -36,29 +36,29 @@ default_permissions = "保護付きフルアクセス"  # 既定の権限プロ�
 description = "AI エージェントの認証情報と shell 履歴・snapshot を除くフルアクセス"
 
 [permissions."保護付きフルアクセス".filesystem]
-":root" = "write"                                         # ルート全体の読み書きを許可
+":root"                                         = "write"                                         # ルート全体の読み書きを許可
 "~/.codex/plugins/cache/openai-bundled/browser" = "read"  # 信頼済み Browser RPC の改変を防ぐ
 
 # 外部 CLI の設定・認証ストア・秘密鍵・keystore・service-account・環境ファイルは内部利用のため deny 対象外
 
 # エージェントの認証情報・snapshot へのアクセスを禁止
-"~/.codex/auth.json"                          = "deny"
-"~/.codex/shell_snapshots"                    = "deny"
-"~/.codex-account-*/auth.json"                = "deny"
-"~/.codex-account-*/shell_snapshots"          = "deny"
-"~/.codex-account-*/shell_snapshots/**"       = "deny"
-"~/.claude/.credentials.json"                 = "deny"
-"~/.claude/shell-snapshots"                   = "deny"
-"~/.claude.json"                              = "deny"
-"~/.claude.json.backup"                       = "deny"
-"~/.claude/backups"                           = "deny"
+"~/.codex/auth.json"                    = "deny"
+"~/.codex/shell_snapshots"              = "deny"
+"~/.codex-account-*/auth.json"          = "deny"
+"~/.codex-account-*/shell_snapshots"    = "deny"
+"~/.codex-account-*/shell_snapshots/**" = "deny"
+"~/.claude/.credentials.json"           = "deny"
+"~/.claude/shell-snapshots"             = "deny"
+"~/.claude.json"                        = "deny"
+"~/.claude.json.backup"                 = "deny"
+"~/.claude/backups"                     = "deny"
 
 # シェル履歴へのアクセスを禁止
-"~/.zsh_history"                              = "deny"
-"~/.bash_history"                             = "deny"
-"~/.zsh_sessions"                             = "deny"
-"~/.bash_sessions"                            = "deny"
-"~/.local/share/fish/fish_history"            = "deny"
+"~/.zsh_history"                   = "deny"
+"~/.bash_history"                  = "deny"
+"~/.zsh_sessions"                  = "deny"
+"~/.bash_sessions"                 = "deny"
+"~/.local/share/fish/fish_history" = "deny"
 
 
 [permissions."保護付きフルアクセス".network]
@@ -76,31 +76,31 @@ set                     = { GIT_TERMINAL_PROMPT = "0", AWS_PAGER = "" }  # Git �
 # filters はテーブルで指定。exclude / include_only 配列との併用は読み込み時に拒否
 # 名前は大小文字を区別しない
 [shell_environment_policy.filters]
-"*PASSWORD"                       = "exclude"
-"*PASSPHRASE"                     = "exclude"
-"*PASSWD"                         = "exclude"
-"*_API_KEY"                       = "exclude"
-"*_PRIVATE_KEY"                   = "exclude"
-"*_SECRET"                        = "exclude"
-"*_SECRET_KEY"                    = "exclude"
-"*_TOKEN"                         = "exclude"
-"API_KEY"                         = "exclude"
-"PRIVATE_KEY"                     = "exclude"
-"SECRET"                          = "exclude"
-"TOKEN"                           = "exclude"
-"AWS_ACCESS_KEY_ID"               = "exclude"
-"AWS_BEARER_TOKEN_BEDROCK"        = "exclude"
+"*PASSWORD"                         = "exclude"
+"*PASSPHRASE"                       = "exclude"
+"*PASSWD"                           = "exclude"
+"*_API_KEY"                         = "exclude"
+"*_PRIVATE_KEY"                     = "exclude"
+"*_SECRET"                          = "exclude"
+"*_SECRET_KEY"                      = "exclude"
+"*_TOKEN"                           = "exclude"
+"API_KEY"                           = "exclude"
+"PRIVATE_KEY"                       = "exclude"
+"SECRET"                            = "exclude"
+"TOKEN"                             = "exclude"
+"AWS_ACCESS_KEY_ID"                 = "exclude"
+"AWS_BEARER_TOKEN_BEDROCK"          = "exclude"
 "AWS_CONTAINER_AUTHORIZATION_TOKEN" = "exclude"
-"AWS_SECRET_ACCESS_KEY"           = "exclude"
-"AWS_SECURITY_TOKEN"              = "exclude"
-"AWS_SESSION_TOKEN"               = "exclude"
-"COMPOSER_AUTH"                   = "exclude"
-"CREDENTIALS"                     = "exclude"
-"DOCKER_AUTH_CONFIG"              = "exclude"
-"GOOGLE_CREDENTIALS"              = "exclude"
-"HELM_KUBETOKEN"                  = "exclude"
-"PGPASSWORD"                      = "exclude"
-"TF_TOKEN_*"                      = "exclude"
+"AWS_SECRET_ACCESS_KEY"             = "exclude"
+"AWS_SECURITY_TOKEN"                = "exclude"
+"AWS_SESSION_TOKEN"                 = "exclude"
+"COMPOSER_AUTH"                     = "exclude"
+"CREDENTIALS"                       = "exclude"
+"DOCKER_AUTH_CONFIG"                = "exclude"
+"GOOGLE_CREDENTIALS"                = "exclude"
+"HELM_KUBETOKEN"                    = "exclude"
+"PGPASSWORD"                        = "exclude"
+"TF_TOKEN_*"                        = "exclude"
 
 
 ## ターミナル表示
@@ -109,7 +109,7 @@ set                     = { GIT_TERMINAL_PROMPT = "0", AWS_PAGER = "" }  # Git �
 notifications          = true  # デスクトップ通知
 status_line_use_colors = true  # ステータスラインの項目別色分け
 # ステータスラインの表示項目
-status_line = [
+status_line            = [
   "model-with-reasoning",  # モデル・推論強度
   "permissions",           # 有効な権限プロファイル / sandbox mode
   "current-dir",           # 現在のディレクトリ
@@ -149,15 +149,15 @@ statusMessage = "Bash コマンドを検査中"
 
 # 無効化するスキルの SKILL.md を絶対パスで指定
 [[skills.config]]
-path = "/Users/pych-ky/ghq/github.com/pych-ky/agent-skills/skills/propose-agent-rules/SKILL.md"
+path    = "/Users/pych-ky/ghq/github.com/pych-ky/agent-skills/skills/propose-agent-rules/SKILL.md"
 enabled = false
 
 [[skills.config]]
-path = "/Users/pych-ky/ghq/github.com/pych-ky/agent-skills/skills/check-chrome-compatibility/SKILL.md"
+path    = "/Users/pych-ky/ghq/github.com/pych-ky/agent-skills/skills/check-chrome-compatibility/SKILL.md"
 enabled = false
 
 [[skills.config]]
-path = "/Users/pych-ky/ghq/github.com/pych-ky/agent-skills/skills/resolve-coderabbit/SKILL.md"
+path    = "/Users/pych-ky/ghq/github.com/pych-ky/agent-skills/skills/resolve-coderabbit/SKILL.md"
 enabled = false
 
 
@@ -223,13 +223,13 @@ enabled-reasoning-efforts = ["low", "medium", "high", "xhigh", "persistent", "ma
 ambient-suggestions-enabled = false  # 提案表示
 
 "browser-family-enabled:chrome" = true  # Composer の Chrome 参照
-"browser-family-enabled:edge" = true    # Composer の Edge 参照
+"browser-family-enabled:edge"   = true    # Composer の Edge 参照
 
 appshotSoundEnabled = false  # 撮影時の効果音
 
 hotkey-window-projectless-default-enabled = true  # ホットキーでプロジェクトなしウィンドウを開く
 
-followUpQueueMode      = "steer"  # 実行中の追加指示を現在の turn に反映
+followUpQueueMode     = "steer"  # 実行中の追加指示を現在の turn に反映
 composerEnterBehavior = "enter"  # Enter で送信
 
 # Git 操作
@@ -255,11 +255,11 @@ keepRemoteControlAwakeWhilePluggedIn = true  # 電源接続中の Remote Control
 global = "vscode"  # ファイルを開く既定アプリ
 
 [desktop.appearanceLightChromeTheme]
-accent = "#3a83f7"          # アクセントの基準色
-accentSource = "chatgpt"    # アカウントで選択したアクセント色に追従
-contrast = 45               # コントラスト
-ink = "#1a1c1f"            # 文字色
-opaqueWindows = false      # ウィンドウの透過を許可
-surface = "#ffffff"        # 背景色
-fonts = {}                 # 標準フォント
+accent         = "#3a83f7"          # アクセントの基準色
+accentSource   = "chatgpt"    # アカウントで選択したアクセント色に追従
+contrast       = 45               # コントラスト
+ink            = "#1a1c1f"            # 文字色
+opaqueWindows  = false      # ウィンドウの透過を許可
+surface        = "#ffffff"        # 背景色
+fonts          = {}                 # 標準フォント
 semanticColors = { diffAdded = "#00a240", diffRemoved = "#ba2623", skill = "#924ff7" }  # 差分の追加・削除とスキルの色

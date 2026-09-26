@@ -65,6 +65,7 @@ cask "wezterm"
 # cask "claude"
 cask "chatgpt"
 cask "stablyai/orca/orca"
+cask "copilot-cli"
 
 # コミュニケーション / コラボレーション
 # cask "slack"

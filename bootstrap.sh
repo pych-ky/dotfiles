@@ -81,11 +81,7 @@ run_and_record() {
   local label="$1"
   shift
 
-  if "$@"; then
-    return 0
-  else
-    record_failure "$label" "$?"
-  fi
+  "$@" || record_failure "$label" "$?"
 }
 
 ensure_sudo() {
@@ -202,16 +198,12 @@ setup_homebrew() {
 
 setup_homebrew_and_bundle() {
   local brew_cellar
-  local status
 
-  if setup_homebrew; then
-    :
-  else
-    status=$?
-    record_failure 'Homebrew' "$status"
+  setup_homebrew || {
+    record_failure 'Homebrew' "$?"
     record_skip 'Homebrew packages (Homebrew is unavailable)'
     return 0
-  fi
+  }
 
   step 'Homebrew packages'
   # MDM などによる所有者変更で bundle が失敗する場合の案内
@@ -319,15 +311,11 @@ install_zsh_plugin() {
 
 setup_zsh_plugins() {
   local plugins_dir="$HOME/.zsh/plugins"
-  local status
 
-  if mkdir -p "$plugins_dir"; then
-    :
-  else
-    status=$?
-    record_failure 'zsh plugins directory' "$status"
+  mkdir -p "$plugins_dir" || {
+    record_failure 'zsh plugins directory' "$?"
     return 0
-  fi
+  }
 
   run_and_record \
     'zsh-autosuggestions' \
@@ -402,7 +390,6 @@ setup_claude_plugins() {
   local plugins
   local plugin
   local marketplace_status
-  local status
 
   if ! executable="$(resolve_user_executable claude)"; then
     record_skip 'Claude Code plugins (Claude Code is unavailable)'
@@ -413,14 +400,11 @@ setup_claude_plugins() {
     return 0
   fi
 
-  if marketplaces="$(list_claude_marketplaces "$executable")"; then
-    :
-  else
-    status=$?
-    record_failure 'Claude Code marketplace list' "$status"
+  marketplaces="$(list_claude_marketplaces "$executable")" || {
+    record_failure 'Claude Code marketplace list' "$?"
     record_skip 'Claude Code plugins (official marketplace could not be inspected)'
     return 0
-  fi
+  }
 
   marketplace_status=0
   ensure_claude_marketplace "$executable" "$marketplaces" || marketplace_status=$?
@@ -431,13 +415,10 @@ setup_claude_plugins() {
     return 0
   fi
 
-  if plugins="$(list_claude_user_plugins "$executable")"; then
-    :
-  else
-    status=$?
-    record_failure 'Claude Code plugin list' "$status"
+  plugins="$(list_claude_user_plugins "$executable")" || {
+    record_failure 'Claude Code plugin list' "$?"
     return 0
-  fi
+  }
 
   if json_array_contains "$plugins" context7@claude-plugins-official; then
     run_and_record \
@@ -473,7 +454,7 @@ setup_codex_plugins() {
     return 0
   fi
 
-  if plugins="$(
+  plugins="$(
     "$executable" plugin list --json |
       jq -ce '
         if type == "object" and (.installed | type == "array") then
@@ -482,13 +463,10 @@ setup_codex_plugins() {
           error("expected an object with an installed array")
         end
       '
-  )"; then
-    :
-  else
-    status=$?
-    record_failure 'Codex plugin list' "$status"
+  )" || {
+    record_failure 'Codex plugin list' "$?"
     return 0
-  fi
+  }
 
   if json_array_contains "$plugins" linear@openai-curated; then
     return 0

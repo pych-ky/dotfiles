@@ -1,3 +1,5 @@
+# Zsh 共通環境設定
+
 [ -r "$HOME/.shell/functions/aws.sh" ] && . "$HOME/.shell/functions/aws.sh"
 
 [ -r "$HOME/.aws/load-active-profile.sh" ] && . "$HOME/.aws/load-active-profile.sh"
