@@ -92,15 +92,16 @@ brew bundle upgrade --file=macos/Brewfile            # 管理対象パッケー�
 
 新規ターミナルで `cghq [検索語]`（Zsh は `Ctrl+G` も可）を使い、ghq リポジトリへ移動する。
 
-### macOS と Typeless
+### macOS・Typeless・Orca
 
 ```sh
 ./macos/defaults.sh
 ./macos/setup-typeless.sh
+./macos/setup-orca.sh
 ```
 
 macOS 設定は一部が再ログイン後に反映され、電源管理には事前の `sudo` 認証が必要。
-Typeless は終了させてから実行する。
+Typeless・Orca の起動・終了を求める案内が出た場合は、その案内に従って再実行する。
 
 ### キーボード
 
