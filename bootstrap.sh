@@ -224,6 +224,11 @@ setup_login_items() {
   local logi_options_app=/Applications/logioptionsplus.app
   local login_item_app
 
+  open -g -a 'System Events' || {
+    record_failure 'launch System Events' "$?" || return
+    return 0
+  }
+
   # Logi Options+ はサービスで常駐するため、メインアプリの自動起動は不要
   run_and_record \
     "remove login item: $logi_options_app" \
@@ -468,16 +473,16 @@ setup_codex_plugins() {
     return 0
   }
 
-  if json_array_contains "$plugins" linear@openai-curated; then
+  if json_array_contains "$plugins" linear@openai-curated-remote; then
     return 0
   fi
 
-  if install_output="$("$executable" plugin add --json linear@openai-curated)"; then
+  if install_output="$("$executable" plugin add --json linear@openai-curated-remote)"; then
     return 0
   else
     status=$?
     [[ -z "$install_output" ]] || printf '%s\n' "$install_output" >&2
-    record_failure 'Codex plugin: linear@openai-curated' "$status"
+    record_failure 'Codex plugin: linear@openai-curated-remote' "$status"
   fi
 }
 
