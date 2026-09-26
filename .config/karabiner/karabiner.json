@@ -146,6 +146,56 @@
               {
                 "type": "basic",
                 "from": {
+                  "key_code": "home",
+                  "modifiers": {
+                    "optional": ["caps_lock"]
+                  }
+                },
+                "to": [
+                  {
+                    "key_code": "home",
+                    "modifiers": ["control"]
+                  }
+                ],
+                "conditions": [
+                  {
+                    "type": "frontmost_application_if",
+                    "bundle_identifiers": [
+                      "^com\\.github\\.wez\\.wezterm$",
+                      "^com\\.mitchellh\\.ghostty$",
+                      "^com\\.stablyai\\.orca$"
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "basic",
+                "from": {
+                  "key_code": "end",
+                  "modifiers": {
+                    "optional": ["caps_lock"]
+                  }
+                },
+                "to": [
+                  {
+                    "key_code": "end",
+                    "modifiers": ["control"]
+                  }
+                ],
+                "conditions": [
+                  {
+                    "type": "frontmost_application_if",
+                    "bundle_identifiers": [
+                      "^com\\.github\\.wez\\.wezterm$",
+                      "^com\\.mitchellh\\.ghostty$",
+                      "^com\\.stablyai\\.orca$"
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "basic",
+                "from": {
                   "key_code": "left_arrow",
                   "modifiers": {
                     "mandatory": ["command"],
