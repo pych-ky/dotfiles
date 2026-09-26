@@ -11,7 +11,7 @@
     "codex": "",
     "command-code": "",
     "continue": "",
-    "copilot": "",
+    "copilot": "--yolo",
     "crush": "",
     "cursor": "",
     "devin": "",
@@ -45,6 +45,7 @@
   "refreshLocalBaseRefOnWorktreeCreate": true,
   "skipCloseTerminalWithRunningProcessConfirm": true,
   "skipDeleteWorktreeConfirm": true,
+  "sourceControlGroupOrder": "staged-first",
   "tabAutoGenerateTitle": true,
   "voice": {
     "sttModel": "parakeet-tdt-0.6b-v3-int8"

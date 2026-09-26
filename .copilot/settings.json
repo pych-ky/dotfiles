@@ -1,4 +1,6 @@
 {
+  "model": "claude-opus-5.5",
+  "effortLevel": "max",
   "statusLine": {
     "type": "command",
     "command": "$HOME/.copilot/statusline.sh",
@@ -7,6 +9,7 @@
   },
   "footer": {
     "showDirectory": false,
-    "showBranch": false
+    "showBranch": false,
+    "showQuota": true
   }
 }
