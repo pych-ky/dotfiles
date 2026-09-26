@@ -1,6 +1,15 @@
-# Cmd+←/→ で単語移動
-keybind = cmd+left=esc:b
-keybind = cmd+right=esc:f
+# Karabiner が変換した Option+Backspace で直前の単語を削除
+keybind = alt+backspace=text:\x1b\x7f
 
-# Cmd+R で履歴検索
-keybind = cmd+r=text:\x12
+# Ctrl+PageUp/PageDown でタブ移動
+keybind = ctrl+page_up=previous_tab
+keybind = ctrl+page_down=next_tab
+
+# Orca と同じキーで右・下へ分割
+keybind = cmd+d=unbind
+keybind = cmd+shift+d=new_split:right
+keybind = alt+shift+d=new_split:down
+
+# Cmd+Z でタブやウィンドウの操作を取り消さない
+keybind = cmd+z=unbind
+keybind = cmd+shift+z=unbind

@@ -567,6 +567,7 @@ trap - EXIT
 
 run_and_record 'Git settings' "$repo_dir/scripts/setup-git.sh"
 run_and_record 'Typeless settings' "$repo_dir/macos/setup-typeless.sh"
+run_and_record 'Orca settings' "$repo_dir/macos/setup-orca.sh"
 
 step 'Zsh plugins'
 setup_zsh_plugins

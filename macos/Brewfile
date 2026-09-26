@@ -54,6 +54,7 @@ brew "libpq"
 
 # ブラウザ
 # cask "google-chrome"
+cask "microsoft-edge"
 
 # ターミナル
 cask "ghostty"

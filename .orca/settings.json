@@ -1,0 +1,61 @@
+{
+  "agentDefaultArgs": {
+    "aider": "",
+    "amp": "",
+    "ante": "",
+    "antigravity": "",
+    "autohand": "",
+    "claude": "",
+    "claude-agent-teams": "",
+    "cline": "",
+    "codex": "",
+    "command-code": "",
+    "continue": "",
+    "copilot": "",
+    "crush": "",
+    "cursor": "",
+    "devin": "",
+    "droid": "",
+    "gemini": "",
+    "grok": "",
+    "hermes": "",
+    "kimi": "",
+    "kiro": "",
+    "mistral-vibe": "",
+    "muse": "",
+    "openclaude": "",
+    "qwen-code": "",
+    "rovo": "",
+    "trae": ""
+  },
+  "agentDefaultEnv": {
+    "goose": {}
+  },
+  "autoRenameBranchFromWork": false,
+  "compactWorktreeCards": true,
+  "computerAwakeMode": "on",
+  "defaultTuiAgent": "codex",
+  "diffShowWhitespace": true,
+  "experimentalAgentDashboardPopout": true,
+  "experimentalAgentDashboardShowIdle": true,
+  "experimentalNativeChat": true,
+  "experimentalStructuredNativeChat": true,
+  "keepComputerAwakeWhileAgentsRun": true,
+  "nativeChatResumeWorkOnRestart": true,
+  "refreshLocalBaseRefOnWorktreeCreate": true,
+  "skipCloseTerminalWithRunningProcessConfirm": true,
+  "skipDeleteWorktreeConfirm": true,
+  "tabAutoGenerateTitle": true,
+  "voice": {
+    "sttModel": "parakeet-tdt-0.6b-v3-int8"
+  },
+  "worktreeVisibilityDefaults": {
+    "external": "show",
+    "sourcePreferences": {
+      "builtIn": {
+        "claude": "show",
+        "gsd": "show"
+      }
+    }
+  }
+}

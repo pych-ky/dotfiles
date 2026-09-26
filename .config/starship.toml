@@ -20,6 +20,9 @@ disabled = true
 [nodejs]
 disabled = true
 
+[python]
+disabled = true
+
 
 ## インフラ / クラウド
 
