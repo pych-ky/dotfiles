@@ -31,7 +31,7 @@ Usage: ./scripts/link-dotfiles.sh [--dry-run] [-h | --help]
 Create symlinks from this repository into $HOME.
 Claude settings are copied, preserving user plugin and marketplace entries.
 The Codex Browser config is copied as a regular file because Codex rejects symlinks for this path.
-Orca keybindings are copied as a regular file to keep application writes out of the repository.
+Orca keybindings and Copilot CLI settings are copied as regular files to keep application writes out of the repository.
 Existing regular files and directories are moved to ~/.dotfiles-backup/<timestamp>[-<sequence>]/ first.
 
 Options:
@@ -381,6 +381,7 @@ main() {
     ".claude/hooks/pre-bash-guard.py"
     ".claude/hooks/pre-bash-guard.sh"
     ".claude/hooks/statusline.sh"
+    ".copilot/statusline.sh"
     ".aws/load-active-profile.sh"
   )
 
@@ -416,6 +417,10 @@ main() {
 
   if ! copy_regular_file ".orca/keybindings.json"; then
     failed_items+=(".orca/keybindings.json")
+  fi
+
+  if ! copy_regular_file ".copilot/settings.json"; then
+    failed_items+=(".copilot/settings.json")
   fi
 
   if ! link_file ".config/agents/AGENTS.md" ".codex/AGENTS.md"; then

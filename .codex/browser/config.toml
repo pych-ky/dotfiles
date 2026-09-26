@@ -1,5 +1,14 @@
-approval_mode = "never_ask"          # サイト操作の承認
-history_approval_mode = "never_ask"  # 履歴取得の承認
+## Codex Browser 設定
+
+
+## 承認ポリシー
+
+approval_mode          = "never_ask"          # サイト操作の承認
+history_approval_mode  = "never_ask"  # 履歴取得の承認
 download_approval_mode = "never_ask" # ダウンロードの承認
-upload_approval_mode = "never_ask"   # アップロードの承認
+upload_approval_mode   = "never_ask"   # アップロードの承認
+
+
+## CDP アクセス
+
 full_cdp_access_enabled = true       # CDP フルアクセス

@@ -7,25 +7,8 @@ status_separator=' · '
 codex_context_baseline_tokens=12000
 default_claude_context_window=200000
 
-script_dir() {
-  local source="${BASH_SOURCE[0]}"
-  local dir
-  local target
-
-  while [[ -L "$source" ]]; do
-    dir="$(cd -P "$(dirname "$source")" && pwd)"
-    target="$(readlink "$source")"
-    if [[ "$target" == /* ]]; then
-      source="$target"
-    else
-      source="$dir/$target"
-    fi
-  done
-
-  cd -P "$(dirname "$source")" && pwd
-}
-
-repo_dir="$(cd "$(script_dir)/../.." && pwd)"
+script_path="$(readlink -f "${BASH_SOURCE[0]}")"
+repo_dir="$(cd "$(dirname "$script_path")/../.." && pwd)"
 codex_config="${CODEX_STATUSLINE_CODEX_CONFIG:-}"
 if [[ -z "$codex_config" || ! -r "$codex_config" ]]; then
   if [[ -r /etc/codex/config.toml ]]; then

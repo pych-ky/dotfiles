@@ -1,4 +1,6 @@
-# プロンプトの表示項目（disabled = true で非表示）
+## Starship プロンプト設定
+# disabled = true で非表示
+
 
 ## VCS / プロジェクトメタデータ
 

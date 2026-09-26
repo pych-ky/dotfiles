@@ -1,3 +1,5 @@
+-- WezTerm キー設定
+
 local wezterm = require("wezterm")
 
 return {

@@ -1,3 +1,5 @@
+## Ghostty キー設定
+
 # Karabiner が変換した Option+Backspace で直前の単語を削除
 keybind = alt+backspace=text:\x1b\x7f
 
