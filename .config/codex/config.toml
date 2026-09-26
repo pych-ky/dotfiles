@@ -17,6 +17,8 @@ personality = "pragmatic"  # 応答スタイル
 
 web_search = "live"  # Web 検索モード
 
+suppress_unstable_features_warning = true  # 開発中機能の警告を非表示
+
 # 認証情報を外部 CLI の store と分け、~/.codex/auth.json を Claude の Read deny で保護
 cli_auth_credentials_store = "file"
 
@@ -221,6 +223,7 @@ enabled-reasoning-efforts = ["low", "medium", "high", "xhigh", "persistent", "ma
 ambient-suggestions-enabled = false  # 提案表示
 
 "browser-family-enabled:chrome" = true  # Composer の Chrome 参照
+"browser-family-enabled:edge" = true    # Composer の Edge 参照
 
 appshotSoundEnabled = false  # 撮影時の効果音
 

@@ -40,6 +40,8 @@ Homebrew が認証キャッシュを無効化するため、冒頭の `sudo` 認
 - VS Code: Settings Sync にサインインし、「Shell Command: Install 'code' command in PATH」を実行
 - Claude Code / Codex の Linear は端末ごとに OAuth 認証
 - ChatGPT の Linear はアカウントごとに Install / Connect し、初回 OAuth 認証を手動で行う
+- Microsoft Edge: ChatGPT の「設定 > コンピューターの使用」から、使用するプロファイルに [ChatGPT 拡張機能](https://microsoftedge.microsoft.com/addons/detail/odlomjlbamekndcpllcnffbgeohgkmjh) を導入し、接続後に `@Edge` が選べることを確認
+  - Edge 本体は Brewfile、共通のブラウザ操作プラグインと `@Edge` の表示は Codex 設定で管理
 
 ### GitHub の認証
 
@@ -164,16 +166,39 @@ Typeless の設定には macOS・`jq` が必要で、[管理する設定](macos/
 
 ### キーボード
 
-共通設定は [Karabiner](.config/karabiner/karabiner.json)、ターミナルは [WezTerm](.wezterm.lua)・[Ghostty](.config/ghostty/config.ghostty)、VS Code は Settings Sync で管理する。
+共通設定は [Karabiner](.config/karabiner/karabiner.json)、ターミナルは [WezTerm](.wezterm.lua)・[Ghostty](.config/ghostty/config.ghostty)・[Orca](.orca/keybindings.json)、VS Code は Settings Sync で管理する。
 
 - 左 Control / Option / Command → Command / Control / Option、Caps Lock → Control
 - 右 Command / Option → かな / 英数
 - `Cmd+Space` → Raycast
-- WezTerm・Ghostty の `Cmd+A` → 全選択、`Cmd+C` → コピー、`Ctrl+C` → 処理中断
-- WezTerm・Ghostty の `Cmd+←/→` → 単語移動、`Cmd+R` → 履歴検索、`Ctrl+A/E` → 行頭・行末移動
 - VS Code 統合ターミナルの `Cmd+C` → 選択中はコピー、未選択時は処理中断
 
-`Cmd` は OS に送るキーで、Windows の左 Ctrl 位置で操作できる。
+上記の `Cmd` は OS に送るキーを表す。
+以下は **キーボードに印字されたキー**で、Ctrl は左 Control、Backspace は後方削除キーを指す。
+WezTerm・Ghostty・Orca の端末では次の操作に揃える。
+
+- `Ctrl+C` / `Ctrl+V` / `Ctrl+A` → コピー / 貼り付け / 端末出力の全選択
+- 左 `Command+C` → 端末内へ Control+C（通常は処理中断）。`Caps Lock+C`・左 `Option+C` も従来どおり使える
+- `Ctrl+Tab` / `Ctrl+Shift+Tab` → 次 / 前のタブ。Orca は端末タブを表示順に移動する
+- `Ctrl+PageDown` / `Ctrl+PageUp` → 次 / 前のタブ
+- `Ctrl+←/→` / `Ctrl+Backspace` → 単語移動 / 直前の単語削除
+- `Ctrl+R` → 端末内へ Control+R（シェルでは履歴検索）
+- `Ctrl+T` / `Ctrl+W` → 新しいタブ / 現在のペインを閉じる
+- `Ctrl+Shift+D` / 左 `Command+Shift+D` → 右 / 下に分割（後者は Windows 配列の Alt の位置）
+
+単語移動・削除や Shift 付きの選択は、端末内のアプリが対応する範囲で動作する。
+`Ctrl+C` は未選択でも中断に切り替えず、`Ctrl+A` は入力行ではなく端末出力を選ぶ。
+Orca の入力欄・エディターでコピー・全選択・取り消しを保つため、Control+C/A/Z への一括変換は行わない。
+Ghostty の `Ctrl+Z` / `Ctrl+Shift+Z` によるタブ・分割の取り消し／やり直しは解除する。
+端末内の入力取り消しはアプリごとに異なり、`Caps Lock+Z` は Control+Z（シェルではジョブの一時停止）になる。
+
+Orca のタブ名変更は `Ctrl+F2`、ブラウザー再読み込みは `Ctrl+R`。
+Orca の設定ファイルは `scripts/link-dotfiles.sh` で通常ファイルとしてコピーする。
+変更後は Orca のキーボード設定で再読み込みするか、Orca を再起動する。
+Ghostty は `Ctrl+Shift+,` で設定を再読み込みする。
+Karabiner と WezTerm は設定変更を自動で読み込む。
+右 Control は従来どおり OS の Control として使う。
+
 外付けキーボードは Mac モードを使う。
 Windows 配列のみの機器は、Karabiner の機器別 Simple Modifications で `left_command → left_control`、`left_option → left_option` を指定する。
 
@@ -216,7 +241,7 @@ git pull --ff-only
 
 `~/.agents/skills`・`~/.claude/skills` にリンクし、同名の未管理オブジェクトは上書きしない。
 導入後は新しい Codex セッションで確認する。
-選択・単体導入・クラウドルーティン・自動委譲の設定は [Agent Skills の README](https://github.com/pych-ky/agent-skills#readme) を参照。
+選択・単体導入・クラウドルーティンの設定は [Agent Skills の README](https://github.com/pych-ky/agent-skills#readme) を参照。
 
 #### 更新
 

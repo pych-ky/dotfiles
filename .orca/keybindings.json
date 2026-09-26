@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "platforms": {
+    "darwin": {
+      "tab.rename": ["Mod+F2"],
+      "browser.reload": ["Ctrl+R"],
+      "tab.previousRecent": [],
+      "tab.nextTerminal": ["Ctrl+Tab", "Ctrl+PageDown"],
+      "tab.previousTerminal": ["Ctrl+Shift+Tab", "Ctrl+PageUp"],
+      "terminal.splitRight": ["Mod+Shift+D"],
+      "terminal.splitDown": ["Alt+Shift+D"]
+    }
+  }
+}

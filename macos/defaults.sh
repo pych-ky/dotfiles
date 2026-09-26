@@ -130,6 +130,9 @@ defaults write NSGlobalDomain com.apple.mouse.scaling -float 3
 # ダークモード
 defaults write NSGlobalDomain AppleInterfaceStyle -string Dark
 
+# スクロールバーを常時表示
+defaults write NSGlobalDomain AppleShowScrollBars -string Always
+
 # Dock / Mission Control
 
 # Dock の提案・最近使ったアプリを非表示

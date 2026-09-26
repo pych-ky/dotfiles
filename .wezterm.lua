@@ -22,22 +22,37 @@ return {
         )
       end),
     },
-    -- Cmd+←/→ で単語移動
+    -- Karabiner が変換した Option キーで単語移動・削除
     {
       key = "LeftArrow",
-      mods = "CMD",
+      mods = "ALT",
       action = wezterm.action.SendString("\x1bb"),
     },
     {
       key = "RightArrow",
-      mods = "CMD",
+      mods = "ALT",
       action = wezterm.action.SendString("\x1bf"),
     },
-    -- Cmd+R で履歴検索
     {
-      key = "r",
+      key = "Backspace",
+      mods = "ALT",
+      action = wezterm.action.SendString("\x1b\x7f"),
+    },
+    {
+      key = "w",
       mods = "CMD",
-      action = wezterm.action.SendKey({ key = "r", mods = "CTRL" }),
+      action = wezterm.action.CloseCurrentPane({ confirm = true }),
+    },
+    -- Orca と同じキーで右・下へ分割
+    {
+      key = "d",
+      mods = "CMD|SHIFT",
+      action = wezterm.action.SplitHorizontal({ domain = "CurrentPaneDomain" }),
+    },
+    {
+      key = "d",
+      mods = "ALT|SHIFT",
+      action = wezterm.action.SplitVertical({ domain = "CurrentPaneDomain" }),
     },
   },
 }
