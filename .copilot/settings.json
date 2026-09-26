@@ -1,0 +1,12 @@
+{
+  "statusLine": {
+    "type": "command",
+    "command": "$HOME/.copilot/statusline.sh",
+    "padding": 0,
+    "refreshInterval": 10
+  },
+  "footer": {
+    "showDirectory": false,
+    "showBranch": false
+  }
+}

@@ -44,5 +44,9 @@ if command -v fzf >/dev/null 2>&1; then
   bindkey '^G' _cghq_widget
 fi
 
+# Karabiner が端末で Home/End を Ctrl+Home/End に変換するため行頭・行末へ割り当て
+bindkey '^[[1;5H' beginning-of-line
+bindkey '^[[1;5F' end-of-line
+
 # 組織固有設定・ツールの自動追記はローカル設定へ
 [[ -r "$HOME/.zshrc.local" ]] && . "$HOME/.zshrc.local"
