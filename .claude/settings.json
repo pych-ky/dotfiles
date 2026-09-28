@@ -2,12 +2,12 @@
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "cleanupPeriodDays": 20,
   "env": {
-    "AWS_PAGER": "",
     "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
     "GIT_TERMINAL_PROMPT": "0"
   },
   "attribution": {
-    "commit": ""
+    "commit": "",
+    "sessionUrl": false
   },
   "autoMode": {
     "classifyAllShell": true
@@ -99,6 +99,7 @@
       "Read(~/**/.ocm.json)",
       "Read(~/**/.kube/config)",
       "Read(~/**/.codex/auth.json)",
+      "Read(~/**/.codex/.credentials.json)",
       "Read(~/**/.claude/.credentials.json)",
       "Read(~/**/.claude.json)",
       "Read(~/**/.claude.json.backup)",
@@ -133,70 +134,24 @@
       "Read(~/**/.bash_sessions/**)",
       "Read(~/**/Library/Keychains)",
       "Read(~/**/Library/Keychains/**)",
-      "Read(~/.ssh/**)",
       "Read(~/.aws/**)",
-      "Read(~/.codex/auth.json)",
       "Read(~/.codex/shell_snapshots)",
       "Read(~/.codex/shell_snapshots/**)",
       "Read(~/.codex-account-*/auth.json)",
+      "Read(~/.codex-account-*/.credentials.json)",
       "Read(~/.codex-account-*/shell_snapshots)",
       "Read(~/.codex-account-*/shell_snapshots/**)",
-      "Read(~/.claude/.credentials.json)",
       "Read(~/.claude/shell-snapshots)",
       "Read(~/.claude/shell-snapshots/**)",
-      "Read(~/.claude.json)",
-      "Read(~/.claude.json.backup)",
-      "Read(~/.claude/backups/**)",
-      "Read(~/.config/gh/hosts.yml*)",
-      "Read(~/.config/gcloud/**)",
       "Read(~/.kube/**)",
-      "Read(~/.local/share/uv/credentials*)",
-      "Read(~/.local/share/uv/credentials*/**)",
-      "Read(~/.ocm.json)",
-      "Read(~/.config/ocm/ocm.json*)",
-      "Read(~/Library/Application Support/ocm/ocm.json*)",
-      "Read(~/.config/helm/repositories.yaml*)",
-      "Read(~/.config/helm/registry/config.json*)",
-      "Read(~/Library/Preferences/helm/repositories.yaml*)",
-      "Read(~/Library/Preferences/helm/registry/config.json*)",
-      "Read(~/.docker/config.json)",
-      "Read(~/.terraform.d/credentials.tfrc.json)",
-      "Read(~/.terraformrc)",
-      "Read(~/.vault-token)",
-      "Read(~/.azure/**)",
-      "Read(~/.config/containers/auth.json)",
-      "Read(~/.cargo/credentials)",
-      "Read(~/.cargo/credentials.toml)",
-      "Read(~/.netrc)",
-      "Read(~/.git-credentials)",
-      "Read(~/.pgpass)",
-      "Read(~/.pg_service.conf)",
       "Read(~/**/.pg_service.conf)",
       "Read(~/**/pg_service.conf)",
       "Read(~/.npmrc)",
-      "Read(~/.pypirc)",
-      "Read(~/.curlrc)",
-      "Read(~/.wgetrc)",
-      "Read(~/.bundle/config)",
-      "Read(~/.config/composer/auth.json)",
-      "Read(~/.composer/auth.json)",
-      "Read(~/.config/pypoetry/auth.toml)",
-      "Read(~/Library/Application Support/pypoetry/auth.toml)",
-      "Read(~/.config/pip/pip.conf)",
-      "Read(~/.pip/pip.conf)",
-      "Read(~/Library/Application Support/pip/pip.conf)",
       "Read(//Library/Application Support/pip/pip.conf)",
       "Read(//etc/pip.conf)",
       "Read(//private/etc/pip.conf)",
       "Read(~/**/pip.conf)",
-      "Read(~/.zsh_history)",
-      "Read(~/.bash_history)",
-      "Read(~/.zsh_sessions/**)",
-      "Read(~/.bash_sessions/**)",
-      "Read(~/.local/share/fish/fish_history)",
-      "Read(~/Library/Keychains/**)",
       "Read(//Library/Keychains/**)",
-      "Read(~/.gnupg/**)",
       "Read(~/**/key.pem)",
       "Read(~/**/priv.pem)",
       "Read(~/**/private.pem)",
@@ -259,14 +214,13 @@
       "Read(~/**/id_ed25519)",
       "Read(~/**/id_ecdsa)"
     ],
-    "ask": [],
     "defaultMode": "auto"
   },
-  "model": "opus[1m]",
+  "model": "opus",
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|Monitor",
         "hooks": [
           {
             "type": "command",
@@ -276,7 +230,6 @@
       }
     ]
   },
-  "enableWorkflows": true,
   "statusLine": {
     "type": "command",
     "command": "$HOME/.claude/hooks/statusline.sh",
@@ -288,10 +241,6 @@
     "microsoft-docs@claude-plugins-official": true
   },
   "language": "日本語",
-  "sandbox": {
-    "enabled": false
-  },
-  "alwaysThinkingEnabled": true,
   "modelSettings": {
     "claude-fable-5-1": {
       "effortLevel": "xhigh"
@@ -301,7 +250,6 @@
     }
   },
   "showClearContextOnPlanAccept": true,
-  "autoUpdatesChannel": "latest",
   "plansDirectory": ".claude/plans",
   "tui": "fullscreen",
   "autoMemoryEnabled": false,

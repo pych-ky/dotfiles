@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# private Agent Skills を取得し、付属 setup.sh で配置
+# Agent Skills の導入
 
 set -euo pipefail
 
@@ -13,6 +13,7 @@ fi
 # shellcheck source=lib/setup-common.sh
 source "$setup_common_library"
 
+# Agent Skills のリポジトリを取得し、付属の setup.sh を実行
 main() {
   local skip
   local strict

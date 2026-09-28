@@ -1,5 +1,4 @@
-## Starship プロンプト設定
-# disabled = true で非表示
+# Starship プロンプト設定
 
 
 ## VCS / プロジェクトメタデータ
@@ -11,12 +10,12 @@ disabled = true
 disabled = true
 
 
-## 言語ランタイム
-
-[java]
-disabled = true
+## 言語ランタイム / ビルドツール
 
 [gradle]
+disabled = true
+
+[java]
 disabled = true
 
 [nodejs]

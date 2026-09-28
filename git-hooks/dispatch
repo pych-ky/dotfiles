@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Git フックの振り分け
+
 # secretlint → denylist → .git/hooks → Git LFS の順に実行し、失敗を伝播
 # フック名で symlink を張り、$0 で判定
 
@@ -22,6 +24,7 @@ if [[ "$stdin_hooks" == *" $hook_name "* ]] && [[ ! -t 0 ]]; then
   stdin_captured=1
 fi
 
+# 退避した標準入力を渡してコマンドを実行
 run_with_stdin() {
   if ((stdin_captured)); then
     if [[ -n "$stdin_data" ]]; then

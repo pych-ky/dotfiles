@@ -1,69 +1,69 @@
-# ローカル設定・生成物
+# Git の除外設定
 
-## Codex
-.codex/config.toml
-.config/codex/memories/
-.config/codex/tmp/
+## 認証情報・秘密鍵
 
-## Claude Code
-# 追跡対象だけを許可し、端末固有の権限・履歴は除外
-.claude/*
-!.claude/CLAUDE.md
-!.claude/settings.json
-!.claude/hooks/
+### 環境変数ファイル・秘密ディレクトリ
+.env
+.env.*
+!.env.example
+credentials/
+secrets/
 
-## Karabiner-Elements
-.config/karabiner/assets/
-.config/karabiner/automatic_backups/
+### 鍵・証明書
+*.key
+*.p12
+*.pem
+*.pfx
+.gnupg/
+.ssh/
 
-# エディタ・OS メタデータ
-.DS_Store
-.idea/
-.vscode/
-*~
+### AWS CLI
+.aws/active-profile
+.aws/cli/
+.aws/config
+.aws/credentials
+.aws/sso/
 
-# ローカル生成物
+### CLI・サービスの認証情報
+.codex/auth.json
+.config/gcloud/
+.config/gh/hosts.yml
+.docker/config.json
+.kube/config
+.netrc
+.npmrc
+.pgpass
+.pypirc
+
+## Python の生成物
+*.pyc
+__pycache__/
+
+## ローカル生成物
 *.bak
 *.log
 *.tmp
 .tmp/
 work/
 
-# Python の生成物
-__pycache__/
-*.pyc
+## Codex
+.codex/config.toml
+etc/codex/memories/
+etc/codex/tmp/
 
-# 認証情報・秘密鍵
+## Claude Code
+# 追跡対象だけを許可し、端末固有の権限・履歴は除外
+.claude/*
+!.claude/CLAUDE.md
+!.claude/hooks/
+!.claude/settings.json
 
-## 環境変数
-.env
-.env.*
-!.env.example
-secrets/
-credentials/
+## Karabiner-Elements
+.config/karabiner/assets/
+.config/karabiner/automatic_backups/
 
-## AWS CLI
-.aws/credentials
-.aws/config
-.aws/active-profile
-.aws/sso/
-.aws/cli/
-
-## CLI・サービスの認証情報
-.codex/auth.json
-.config/gh/hosts.yml
-.config/gcloud/
-.docker/config.json
-.kube/config
-.netrc
-.pgpass
-.npmrc
-.pypirc
-
-## 鍵・証明書
-.ssh/
-.gnupg/
-*.pem
-*.key
-*.p12
-*.pfx
+## エディタ・OS メタデータ
+*~
+.DS_Store
+.idea/
+.vscode/

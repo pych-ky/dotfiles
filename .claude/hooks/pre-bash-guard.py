@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""標準入力のコマンドを実行せず、既知の秘密取得・危険操作を拒否する。"""
+"""Bash 実行前ガードのコマンド検査
+
+hook 入力のコマンドを実行せず、既知の秘密取得・危険操作を拒否する。
+"""
 
 import ast
 import json
@@ -11,24 +14,26 @@ from urllib.parse import unquote, urlsplit
 
 
 class Denied(Exception):
-    pass
+    """既知の危険操作として deny を返す。"""
 
 
 class ParseError(Exception):
-    pass
+    """安全に解析できない入力として終了コード 2 で停止する。"""
 
 
 class UnsupportedSyntax(Exception):
-    pass
+    """未対応の構文として拒否せず、通常の権限判定へ委ねる。"""
 
 
 def deny(reason):
+    """理由を付けて拒否し、検査を打ち切る。"""
     raise Denied(reason)
 
 
 SECRET_OUTPUT_REASON = "資格情報や秘密値を直接出力・取得する操作は許可していません。"
 EXEC_OVERRIDE_REASON = "保護機構や認証処理を迂回する実行設定は許可していません。"
 DESTRUCTIVE_REASON = "強制的な変更破棄、検証の迂回、ディスクの破壊は許可していません。"
+# secret_name で秘密値とみなさない既知の変数名。
 SAFE_ENV_NAMES = {
     "PATH", "HOME", "PWD", "OLDPWD", "USER", "LOGNAME", "SHELL", "TERM",
     "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR", "TMP", "TEMP", "EDITOR",
@@ -39,6 +44,7 @@ SAFE_ENV_NAMES = {
     "CODEX_HOME", "VIRTUAL_ENV", "CONDA_DEFAULT_ENV", "PYTHONPATH", "NODE_ENV",
 }
 
+# サブコマンドの抽出時に値ごと読み飛ばすオプション。
 CLI_VALUE_OPTIONS = {
     "security": {"-p", "-a", "-c", "-C", "-D", "-d", "-j", "-l", "-s", "-t", "-f", "-o", "-P"},
     "gh": {"-R", "--repo", "--hostname", "--config", "--host"},
@@ -54,13 +60,25 @@ CLI_VALUE_OPTIONS = {
     "terragrunt": {"--working-dir", "--config", "--terragrunt-working-dir", "--terragrunt-config", "--log-level", "--tf-path", "--terragrunt-tfpath"},
     "kubectl": {"-n", "--namespace", "-o", "--output", "--context", "--kubeconfig", "--cluster", "--user", "-l", "--selector", "--server", "-s", "--token", "--as", "--as-group", "--cache-dir", "--certificate-authority", "--client-certificate", "--client-key", "--field-selector", "--password", "--request-timeout", "--username", "-v"},
     "docker": {"-H", "--host", "--context", "--config", "--log-level", "--tlscacert", "--tlscert", "--tlskey", "-f", "--format", "--filter"},
+    "npm": {"--location", "-L", "--cache", "--editor", "--workspace", "-w", "--call", "-c", "--message", "-m", "--otp", "--tag"},
+    "pnpm": {"--reporter", "--filter", "-F", "--dir"},
 }
 CLI_VALUE_OPTIONS["oc"] = CLI_VALUE_OPTIONS["kubectl"]
 CLI_VALUE_OPTIONS["podman"] = CLI_VALUE_OPTIONS["docker"]
 CLI_VALUE_OPTIONS["nerdctl"] = CLI_VALUE_OPTIONS["docker"]
+# nopt が - で始まる次の語を値にせず、オプションとして読み直す String 型のオプション。
+CLI_STRING_OPTIONS = {
+    "npm": {"--editor", "--call", "-c", "--message", "-m", "--tag"},
+    "pnpm": {"--reporter", "--dir", "-C"},
+}
 COMPOSE_VALUE_OPTIONS = {
     "--ansi", "--env-file", "-f", "--file", "--parallel", "--profile",
     "--progress", "--project-directory", "-p", "--project-name",
+}
+# npm・pnpm で config・config get を表す短縮形と別名。
+PACKAGE_CONFIG_ALIASES = {
+    "npm": {"c": "config", "con": "config", "conf": "config", "confi": "config", "g": "config get", "ge": "config get", "get": "config get"},
+    "pnpm": {"c": "config", "get": "config get"},
 }
 
 SECRET_SUBCOMMANDS = {
@@ -148,15 +166,18 @@ AWS_SECRET_OPERATIONS = {
     "workspaces-thin-client": {"create-environment", "get-environment", "list-environments", "update-environment"},
     "history": {"list", "show"},
 }
+# 指定自体を拒否する、実行処理・認証処理を差し替える git 設定。
 GIT_EXEC_KEYS = {
     "core.hookspath", "core.askpass", "credential.helper",
     "uploadpack.packobjectshook",
 }
+# 値をシェルコマンドとして検査する git 設定。
 GIT_COMMAND_KEYS = {
     "core.pager", "core.editor", "core.sshcommand", "core.gitproxy",
     "core.fsmonitor", "sequence.editor", "diff.external", "gpg.program",
     "gpg.openpgp.program",
 }
+# --format のテンプレートで参照を許す、秘密値を含まないフィールド。
 CONTAINER_SAFE_FIELDS = {
     "id", "ids", "name", "names", "image", "imageid", "status", "state",
     "running", "paused", "restarting", "dead", "exitcode", "pid", "ports",
@@ -194,6 +215,7 @@ def option_values(args, names):
 
 
 def has_option(args, names, short="", value_options=(), negated=()):
+    """names か短いフラグ short が有効か、後の否定形による打ち消しも含めて判定する。"""
     found = False
     args = iter(args)
     for argument in args:
@@ -220,6 +242,7 @@ def has_option(args, names, short="", value_options=(), negated=()):
 
 
 def cli_words(command, args, extra_values=()):
+    """オプションとその値を除き、サブコマンドと位置引数の語を返す。"""
     values = CLI_VALUE_OPTIONS.get(command, set()) | set(extra_values)
     words = []
     index = 0
@@ -232,7 +255,8 @@ def cli_words(command, args, extra_values=()):
         if command in {"docker", "podman", "nerdctl"} and words == ["compose"]:
             current_values = values | COMPOSE_VALUE_OPTIONS
         if argument in current_values:
-            index += 2
+            optional = argument in CLI_STRING_OPTIONS.get(command, ()) and index + 1 < len(args) and re.match(r"-{1,2}[^-]", args[index + 1])
+            index += 1 if optional else 2
             continue
         if not argument.startswith("-") or argument == "-":
             words.append(argument)
@@ -241,10 +265,12 @@ def cli_words(command, args, extra_values=()):
 
 
 def matches_subcommand(words, forms):
+    """語の並びが空白区切りのいずれかのサブコマンドで始まるか判定する。"""
     return any(words[:len(parts)] == parts for parts in map(str.split, forms))
 
 
 def secret_name(name):
+    """変数名・設定キーが token・password などの秘密を表す語を含むか判定する。"""
     normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name).upper()
     normalized = re.sub(r"[^A-Z0-9]+", "_", normalized)
     if normalized in SAFE_ENV_NAMES:
@@ -258,6 +284,7 @@ def secret_name(name):
 
 
 def git_exec_key(key):
+    """実行処理・認証処理・取得先を差し替える git 設定キーか判定する。"""
     key = key.casefold()
     return key in GIT_EXEC_KEYS or key == "include.path" or key.startswith("includeif.") or any(
         key.startswith(prefix) and key.endswith(suffix)
@@ -266,6 +293,7 @@ def git_exec_key(key):
 
 
 def git_command_context(args, cwd):
+    """git のグローバルオプションの終端位置と、-C 適用後の基準ディレクトリを返す。"""
     global_options = CLI_VALUE_OPTIONS["git"]
     index = 0
     while index < len(args) and args[index].startswith("-"):
@@ -284,6 +312,7 @@ def git_command_context(args, cwd):
 
 
 def git_alias_directory(args, cwd):
+    """git の shell alias を実行するディレクトリを返す。"""
     index, cwd = git_command_context(args, cwd)
     work_trees = option_values(args[:index], {"--work-tree"})
     if "--bare" in args[:index]:
@@ -309,6 +338,7 @@ def git_alias_directory(args, cwd):
 
 
 def inspect_git(args, words, cwd):
+    """git の実行設定の差し替え・秘密値の出力・破壊的な操作を検査する。"""
     for setting in option_values(args, {"--config-env"}):
         if git_exec_key(setting.split("=", 1)[0]):
             deny(EXEC_OVERRIDE_REASON)
@@ -362,6 +392,7 @@ def inspect_git(args, words, cwd):
     if not words:
         return
     command = words[0]
+    # commit の -n は --no-verify、push・clean の -n は --dry-run。
     if command in {"push", "clean", "commit"}:
         value_options = CLI_VALUE_OPTIONS["git"] | {
             "commit": {"-m", "--message", "-F", "--file", "--author", "--date", "--reedit-message", "--reuse-message", "--fixup", "--squash", "--trailer", "-t", "--template", "--cleanup", "--pathspec-from-file", "-U", "--unified", "--inter-hunk-context"},
@@ -387,6 +418,8 @@ def inspect_git(args, words, cwd):
 
 
 def inspect_security(args, words):
+    """macOS security によるキーチェーンの秘密値の出力を検査する。"""
+    # 対話モードは任意のサブコマンドを標準入力から受け取れる。
     if has_option(args, set(), "i"):
         deny(SECRET_OUTPUT_REASON)
     if has_option(args, {"--help", "-h"}) or words[:1] == ["help"]:
@@ -405,6 +438,7 @@ def inspect_security(args, words):
 
 
 def inspect_aws(args, words):
+    """aws の認証情報・秘密値を返す操作を検査する。"""
     if has_option(args, {"--version"}):
         return
     # 値を help と誤認しないよう、既知のグローバル指定だけを除く。
@@ -426,6 +460,7 @@ def inspect_aws(args, words):
     if len(words) < 2:
         return
     service, operation = words[:2]
+    # 独自コマンドは標準 API 専用の --generate-cli-skeleton 例外から外す。
     custom = {("configure", "export-credentials"), ("cloudfront", "sign"), ("codecommit", "credential-helper"), ("ecr", "get-login-password"), ("ecr-public", "get-login-password"), ("eks", "get-token"), ("rds", "generate-db-auth-token"), ("s3", "presign")}
     if (service, operation) not in custom and service not in {"history", "dsql"} and has_option(args, {"--generate-cli-skeleton"}):
         return
@@ -441,11 +476,13 @@ def inspect_aws(args, words):
         deny(SECRET_OUTPUT_REASON)
     if matches_subcommand(words, {"codecommit credential-helper get"}):
         deny(SECRET_OUTPUT_REASON)
+    # login の --dry-run は認証トークンを伏せずに表示する。
     if service == "codeartifact" and operation == "login" and has_option(args, {"--dry-run"}):
         deny(SECRET_OUTPUT_REASON)
 
 
 def inspect_gh(args, words, cwd):
+    """gh のトークン出力・トークンを返す API・子コマンドを検査する。"""
     if has_option(args, {"--help", "-h"}) or words[:1] == ["help"]:
         return
     if matches_subcommand(words, {"auth token", "auth git-credential"}):
@@ -468,6 +505,7 @@ def inspect_gh(args, words, cwd):
 
 
 def inspect_terraform(args, words, cwd):
+    """terraform・terragrunt の state・output の出力と、差し替えるコマンドを検査する。"""
     for value in option_values(args, {"--tf-path", "--terragrunt-tfpath", "--shell", "--terragrunt-iam-assume-role-command"}):
         scan(value, cwd)
     if has_option(args, {"--help", "-help", "-h"}):
@@ -483,6 +521,7 @@ def inspect_terraform(args, words, cwd):
 
 
 def inspect_kubernetes(command, args, words):
+    """kubectl・oc の Secret・トークン・kubeconfig の出力を検査する。"""
     if has_option(args, {"--help", "-h"}):
         return
     if matches_subcommand(words, {"create token", "serviceaccounts new-token", "serviceaccounts create-kubeconfig"}):
@@ -502,6 +541,7 @@ def inspect_kubernetes(command, args, words):
 
 
 def safe_container_format(value):
+    """--format のテンプレートが安全なフィールドだけを参照するか判定する。"""
     references = re.findall(r"\{\{([^{}]*)\}\}", value)
     if not references:
         return False
@@ -517,6 +557,7 @@ def safe_container_format(value):
 
 
 def inspect_container(args, words):
+    """コンテナ CLI の設定・環境変数を含む出力と特権実行を検査する。"""
     if has_option(args, {"--help"}):
         return
     formats = option_values(args, {"--format", "-f"})
@@ -534,6 +575,7 @@ def inspect_container(args, words):
         if formats and not all(value.casefold() in {"table", "pretty"} or safe_container_format(value) for value in formats):
             deny(SECRET_OUTPUT_REASON)
     if matches_subcommand(words, {"top", "container top", "compose top"}):
+        # top は ps のオプションを受け取り、既定の列はコマンドの引数を含む。
         if not option_values(args, {"-o"}):
             deny(SECRET_OUTPUT_REASON)
         inspect_process("ps", args)
@@ -542,6 +584,7 @@ def inspect_container(args, words):
 
 
 def inspect_environment(command, args, words):
+    """環境変数・シェル変数の一括出力と秘密値の表示を検査する。"""
     if command == "printenv":
         if has_option(args, {"--help", "--version"}):
             return
@@ -557,6 +600,7 @@ def inspect_environment(command, args, words):
 
 
 def inspect_process(command, args):
+    """プロセスの引数・環境変数を表示する操作を検査する。"""
     if command == "ps":
         if has_option(args, {"--help"}) or args == ["-L"]:
             return
@@ -586,6 +630,7 @@ def inspect_process(command, args):
 
 
 def inspect_packages(command, args, words):
+    """pip・npm・pnpm の認証情報を含む設定の表示を検査する。"""
     if has_option(args, {"--help", "--version", "-h"}):
         return
     if command in {"pip", "pip3"}:
@@ -594,13 +639,22 @@ def inspect_packages(command, args, words):
         if words[:2] == ["config", "get"] and any(word.rsplit(".", 1)[-1].casefold() in {"index-url", "extra-index-url", "proxy"} for word in words[2:]):
             deny(SECRET_OUTPUT_REASON)
     if command in {"npm", "pnpm"}:
-        if command == "npm" and (matches_subcommand(words, {"config list", "config ls"}) or words in (["config", "get"], ["config"])):
+        # pnpm 11 の pm と with <version|current> は、続く語を pnpm のコマンドとして実行する。
+        if command == "pnpm" and words[:1] == ["pm"]:
+            words = words[1:]
+        if command == "pnpm" and words[:1] == ["with"]:
+            words = words[2:]
+        if words and words[0] in PACKAGE_CONFIG_ALIASES[command]:
+            words = PACKAGE_CONFIG_ALIASES[command][words[0]].split() + words[1:]
+        # config edit はエディタの指定次第で .npmrc の本文を伏せずに出力する。
+        if command == "npm" and (matches_subcommand(words, {"config list", "config ls", "config edit"}) or words in (["config", "get"], ["config"])):
             deny(SECRET_OUTPUT_REASON)
         if words[:2] == ["config", "get"] and any(secret_name(word) or "_auth" in word.casefold() for word in words[2:]):
             deny(SECRET_OUTPUT_REASON)
 
 
 def inspect_cli(command, args, cwd):
+    """コマンドごとの秘密値の出力・実行設定の差し替え・破壊的な操作を検査する。"""
     command = os.path.basename(command).casefold()
     words = cli_words(command, args)
     if command.startswith(("docker-credential-", "git-credential-")):
@@ -673,9 +727,10 @@ def inspect_cli(command, args, cwd):
     if re.fullmatch(r"pip(?:[._-]?\d+(?:[._-]\d+)*)?", command):
         inspect_packages("pip", args, cli_words(command, args, {"--python", "--proxy", "--timeout", "--retries", "--cert", "--client-cert", "--cache-dir", "--log"}))
     elif command in {"npm", "pnpm"}:
-        inspect_packages(command, args, cli_words(command, args, {"--prefix", "--userconfig", "--globalconfig", "--registry", "--workspace", "-w", "--dir", "-C"}))
+        inspect_packages(command, args, cli_words(command, args, {"--prefix", "--userconfig", "--globalconfig", "--registry", "--loglevel", "-C"}))
 
 
+# ホームからの相対パスで表した認証情報の保管先。
 CREDENTIAL_LOCATIONS = (
     ".aws/credentials", ".aws/config", ".aws/login", ".aws/sso", ".aws/cli",
     ".ssh", ".gnupg", ".docker/config.json", ".config/gh/hosts.yml",
@@ -683,7 +738,7 @@ CREDENTIAL_LOCATIONS = (
     ".ocm.json", ".config/ocm/ocm.json", "Library/Application Support/ocm/ocm.json",
     ".config/helm/repositories.yaml", ".config/helm/registry/config.json",
     "Library/Preferences/helm/repositories.yaml", "Library/Preferences/helm/registry/config.json",
-    ".kube/config", ".codex/auth.json", ".codex/shell_snapshots",
+    ".kube/config", ".codex/auth.json", ".codex/.credentials.json", ".codex/shell_snapshots",
     ".claude/.credentials.json", ".claude/shell-snapshots", ".claude/backups",
     ".claude.json", ".claude.json.backup", ".terraform.d/credentials.tfrc.json",
     ".terraformrc", ".vault-token", ".azure", ".cargo/credentials.toml",
@@ -693,6 +748,7 @@ CREDENTIAL_LOCATIONS = (
     ".pip/pip.conf", "Library/Application Support/pip/pip.conf",
     ".zsh_sessions", ".bash_sessions", "Library/Keychains",
 )
+# 親ディレクトリによらず、パスに含まれれば認証情報とみなす断片。
 CREDENTIAL_FRAGMENTS = tuple(path.casefold() for path in CREDENTIAL_LOCATIONS) + (
     "gh/hosts.yml", "gcloud/application_default_credentials.json", "gcloud/credentials.db",
     "gcloud/access_tokens.db", "ocm/ocm.json", "helm/repositories.yaml",
@@ -703,6 +759,7 @@ CREDENTIAL_NAMES = {
     ".npmrc", ".pypirc", ".zsh_history", ".bash_history", "fish_history", "pip.conf",
 }
 CREDENTIAL_SUFFIXES = (".p12", ".pfx", ".p8", ".ppk", ".key", ".keystore", ".jks", ".kdbx")
+# 値が認証情報の保管先を指す環境変数。
 CREDENTIAL_PATH_VARIABLES = {
     "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE", "KUBECONFIG", "GH_CONFIG_DIR",
     "GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_CREDENTIALS", "CLOUDSDK_CONFIG",
@@ -733,6 +790,7 @@ def path_spellings(value, cwd):
 
 
 def credential_path(value, cwd):
+    """パスや変数参照が既知の認証情報ファイル・保管先を指すか判定する。"""
     if not value or value == "-":
         return False
     variables = re.findall(r"\$(?:\{([A-Za-z_][A-Za-z_0-9]*)[^}]*\}|([A-Za-z_][A-Za-z_0-9]*))", value)
@@ -754,6 +812,7 @@ def credential_path(value, cwd):
         public_key = name.endswith((".pub", ".crt", ".cer")) or bool(re.search(r"(?:^|[-_.])public(?:[-_.]|$)", name))
         if not public_key and name.endswith((".pem", ".der")) and re.search(r"(?:^|[-_.])(?:key|priv|private|privkey|privatekey)(?:[-_.]|$)", name):
             return True
+        # アカウント別の保存先も通常の Codex と同じ保護対象にする。
         normalized = re.sub(r"(?<=/)\.codex-account-[^/]+(?=/)", ".codex", path)
         for fragment in CREDENTIAL_FRAGMENTS:
             if fragment == ".ssh" and public_key:
@@ -764,7 +823,7 @@ def credential_path(value, cwd):
 
 
 def path_exposes_credentials(value, cwd):
-    """コピー・マウントは既知の保管先の親も保護する。"""
+    """パスが認証情報か、認証情報の保管先を含む親ディレクトリを指すか判定する。"""
     if credential_path(value, cwd):
         return True
     if re.search(r"(?:^|/)\.codex-account-[^/]+/?$", value, re.IGNORECASE):
@@ -820,6 +879,7 @@ def path_arguments(args, value_options=()):
     return operands, values
 
 
+# git の内容を表示するサブコマンドで値を取るオプション。
 GIT_CONTENT_OPTIONS = {
     "--output", "-o", "--pathspec-from-file",
     "-G", "-S", "--word-diff-regex", "--grep", "--author", "--committer",
@@ -830,7 +890,7 @@ GIT_CONTENT_OPTIONS = {
 
 
 def git_metadata_only(operation, args):
-    """統計はパッチに追加、no-patch は先行パッチ指定を解除する。"""
+    """パッチを出さずメタデータだけを表示するか判定する。"""
     metadata, patch, names_only = operation in {"log", "reflog"}, False, False
     index = 0
     while index < len(args) and args[index] != "--":
@@ -845,6 +905,7 @@ def git_metadata_only(operation, args):
             index += not separator
         elif option in {"--name-only", "--name-status", "--quiet"}:
             names_only = True
+        # 統計はパッチに追加され、no-patch は先行するパッチ指定を解除する。
         elif option in {"--stat", "--numstat", "--shortstat", "--summary", "--raw", "--dirstat", "--dirstat-by-file", "--compact-summary"}:
             metadata = True
         elif option == "--no-patch":
@@ -865,18 +926,21 @@ def git_metadata_only(operation, args):
 
 
 def check_path(value, cwd, recursive=False):
+    """認証情報を指すパスを拒否する。recursive では保管先の親ディレクトリも拒否する。"""
     predicate = path_exposes_credentials if recursive else credential_path
     if predicate(value, cwd):
         deny("認証情報ファイルの直接読み取り・持ち出しは許可していません。")
 
 
 def check_path_values(values, options, cwd):
+    """指定オプションの値をパスとして検査する。"""
     for option in options:
         for value in values.get(option, []):
             check_path(value, cwd)
 
 
 def inspect_grep_paths(args, cwd):
+    """grep・rg のファイル指定を検査し、検索対象の位置引数と基準ディレクトリを返す。"""
     operands, values = path_arguments(args, {
         "-e", "--regexp", "-f", "--file", "-g", "--glob", "--iglob", "-t", "--type",
         "-T", "--type-not", "-A", "-B", "-C", "-m", "--max-count", "--context",
@@ -890,9 +954,11 @@ def inspect_grep_paths(args, cwd):
 
 
 def inspect_filter_paths(command, args, cwd):
+    """sed・awk・jq などのファイル指定を検査し、入力ファイルの位置引数と基準ディレクトリを返す。"""
     program_options = {"-e", "--expression", "-f", "--file"}
     if command in {"awk", "gawk", "mawk", "nawk"}:
         program_options |= {"-F", "-v"}
+    # BSD sed の -i '' は空の拡張子で、スクリプトではない。
     if command in {"sed", "gsed"}:
         args = [argument for index, argument in enumerate(args) if not (index and args[index - 1] == "-i" and argument == "")]
     if command in {"jq", "yq"}:
@@ -921,6 +987,7 @@ def inspect_filter_paths(command, args, cwd):
 
 
 def inspect_reader_paths(command, args, cwd):
+    """ファイルを読むコマンドのオプション値を検査し、入力ファイルの位置引数と基準ディレクトリを返す。"""
     reader_options = {
         "head": {"-n", "--lines", "-c", "--bytes"},
         "tail": {"-n", "--lines", "-c", "--bytes", "-s", "--sleep-interval"},
@@ -946,12 +1013,14 @@ def inspect_reader_paths(command, args, cwd):
         check_path_values(values, {"-f", "--files-from", "-m", "--magic-file"}, cwd)
     if command == "diff":
         check_path_values(values, {"-X", "--exclude-from"}, cwd)
+    # 2 つ目の位置引数は出力先。
     if command in {"uniq", "xxd"}:
         operands = operands[:1]
     return operands, cwd
 
 
 def inspect_copy_paths(command, args, cwd):
+    """コピー元が認証情報かその保管先の親ディレクトリか検査する。"""
     copy_options = {
         "cp": {"-t", "--target-directory", "-S", "--suffix"},
         "scp": {"-i", "-F", "-o", "-P", "-S", "-J", "-l", "-c", "-D"},
@@ -967,13 +1036,14 @@ def inspect_copy_paths(command, args, cwd):
 
 
 def inspect_dd_paths(args, cwd):
+    """dd の入力ファイルを検査する。"""
     for argument in args:
         if argument.startswith("if="):
             check_path(argument[3:], cwd)
 
 
 def inspect_git_paths(args, cwd):
-    """-C 適用後の基準ディレクトリも返す。"""
+    """git のファイル指定を検査し、内容を表示する操作では位置引数と -C 適用後の基準ディレクトリを返す。"""
     index, cwd = git_command_context(args, cwd)
     if index >= len(args):
         return
@@ -1016,7 +1086,9 @@ def inspect_git_paths(args, cwd):
 
 
 def inspect_openssl_paths(args, cwd):
+    """openssl の入力ファイルを検査する。"""
     input_options = {"-in", "-inkey", "-key", "-cert", "-CAfile", "-CApath", "-config", "-extfile", "-signkey", "-untrusted", "-chain", "-certfile"}
+    # 接続時の鍵・証明書は認証に使い、内容を出力しない。
     if args[:1] in (["s_client"], ["s_server"]):
         input_options -= {"-key", "-cert", "-CAfile", "-CApath"}
     _operands, values = path_arguments(args, input_options | {"-out", "-keyout", "-writerand"})
@@ -1024,7 +1096,9 @@ def inspect_openssl_paths(args, cwd):
 
 
 def inspect_tar_paths(args, cwd):
+    """tar の作成元・読み込むアーカイブ・入力リストを検査する。"""
     normalized = list(args)
+    # 先頭の - を省いた旧式の指定も短いオプションとして読む。
     if normalized and not normalized[0].startswith("-"):
         normalized[0] = "-" + normalized[0]
     operands, values = path_arguments(normalized, {"-f", "--file", "-C", "--directory", "-T", "--files-from", "-X", "--exclude-from", "--exclude", "--transform"})
@@ -1073,6 +1147,7 @@ def gh_file_options(args, direct_options, indirect_options, ignored_options):
 
 
 def inspect_transfer_paths(command, args, cwd):
+    """curl・wget・gh が送信・読み込むファイルを検査する。"""
     direct_options = {
         "curl": {"-T", "--upload-file", "-K", "--config"},
         "wget": {"-i", "--input-file", "--config", "--body-file", "--post-file"},
@@ -1116,11 +1191,13 @@ def inspect_transfer_paths(command, args, cwd):
         elif pair in {("release", "create"), ("release", "new"), ("release", "upload"), ("gist", "edit")} or operands[:3] == ["repo", "deploy-key", "add"]:
             start = 3
         if start is not None:
+            # release のアセットは file#label で表示名を付けられる。
             for value in operands[start:]:
                 check_path(value.split("#", 1)[0] if pair[0] == "release" else value, cwd)
 
 
 def inspect_container_paths(args, cwd):
+    """コンテナへ渡すファイル・マウント・build context・socket を検査する。"""
     operands, values = path_arguments(args, {"-v", "--volume", "--mount", "--secret", "--env-file", "-f", "--file", "--build-context", "--config", "-H", "--host", "--name", "-e", "--env", "--build-arg", "-t", "--tag"})
     if not any(operation in operands for operation in {"build", "run", "create", "cp", "compose"}):
         return
@@ -1140,6 +1217,7 @@ def inspect_container_paths(args, cwd):
         source = value.split(":", 1)[0]
         if source.endswith(".sock"):
             deny("ホストの socket をコンテナへ渡す操作は許可していません。")
+        # パスで始まらない値は named volume。
         if source.startswith(("/", ".", "~", "$")):
             check_path(source, cwd, recursive=True)
     for value in values.get("--mount", []):
@@ -1159,6 +1237,7 @@ def inspect_container_paths(args, cwd):
 
 
 def inspect_paths(command, args, cwd):
+    """コマンドが読み取り・送信するファイルが認証情報か検査する。"""
     if command in {"echo", "printf", "test", "[", "[[", "ls", "stat", "touch", "mkdir", "chmod", "chown", "chgrp", "rm", "rmdir", "mv", "ln"}:
         return
     if command in {"grep", "egrep", "fgrep", "rg"}:
@@ -1200,6 +1279,7 @@ REDIRECTIONS = {"<", ">", ">>", "<>", ">|", "<<", "<<-", "<<<", "<&", ">&", "&>"
 OPERATORS = sorted(SEPARATORS | REDIRECTIONS, key=len, reverse=True)
 ASSIGNMENT = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)(?:\[[^]]*\])?\+?=(.*)$", re.S)
 PARAMETER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# 代入自体を拒否する、起動処理・認証処理・git 設定を差し替える変数。
 EXECUTION_VARIABLES = {
     "BASH_ENV", "ENV", "ZDOTDIR", "SHELLOPTS", "SUDO_ASKPASS",
     "GIT_ASKPASS", "GIT_EXEC_PATH",
@@ -1208,6 +1288,7 @@ EXECUTION_VARIABLES = {
     "DOCKER_CLI_PLUGIN_EXTRA_DIRS",
 }
 EXECUTION_PREFIXES = ("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")
+# 値をシェルコマンドとして検査する変数。
 COMMAND_VARIABLES = {
     "SUDO_EDITOR", "GIT_SSH", "GIT_SSH_COMMAND", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR",
     "GIT_PAGER", "GH_PAGER", "GH_EDITOR", "GH_BROWSER", "PAGER", "EDITOR", "VISUAL",
@@ -1215,11 +1296,13 @@ COMMAND_VARIABLES = {
     "npm_config_call", "npm_config_script_shell",
 }
 PROXIES = {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "FTP_PROXY", "PIP_PROXY"}
+# 代入は許すが展開を拒否する、認証エージェント・接続先の変数。
 REFERENCE_VARIABLES = {"SSH_AUTH_SOCK", "SSH_AGENT_PID", "GPG_AGENT_INFO", "DOCKER_HOST"}
 
 
 @dataclass
 class Word:
+    """シェルの 1 語と、展開する変数名・引用の有無・コマンド置換の本文。"""
     value: str
     parameters: set = field(default_factory=set)
     quoted: bool = False
@@ -1227,6 +1310,7 @@ class Word:
 
 
 def ansi_c_quote(text, index):
+    """$'...' の本文を解釈し、値と閉じ引用符の次の位置を返す。"""
     value = bytearray()
     escapes = dict(zip("abefnrtvE", "\a\b\x1b\f\n\r\t\v\x1b"))
     while index < len(text):
@@ -1432,13 +1516,13 @@ def group_end(text, start, opening, closing, heredocs=False):
             if pending and not backtick:
                 _, delimiter, strip_tabs = pending.pop(0)
                 body, index = heredoc_body(text, index + 1, delimiter, strip_tabs)
-                # 余分な閉じ括弧で展開を終端する shell があり、解釈を確定できない。
+                # 余分な閉じ括弧で展開を終端するシェルがあり、解釈を確定できない。
                 level = 0
                 for item in body:
                     level += (item == opening) - (item == closing)
                     if level < 0:
                         raise ParseError("unbalanced heredoc body")
-                # 区切り語で始まり閉じ括弧が続く行も、shell により終端の解釈が異なる。
+                # 区切り語で始まり閉じ括弧が続く行も、シェルにより終端の解釈が異なる。
                 if any(line.startswith(delimiter) and closing in line for line in body.split("\n")):
                     raise ParseError("ambiguous heredoc terminator")
                 continue
@@ -1454,6 +1538,7 @@ def shell_tokens(text, literal=False):
     index = 0
 
     def flush():
+        """組み立て中の語を確定し、heredoc の区切り語なら本文の読み取りを予約する。"""
         nonlocal value, parameters, substitutions, quoted, started
         if started:
             word = Word("".join(value), parameters, quoted, substitutions)
@@ -1590,6 +1675,7 @@ def shell_tokens(text, literal=False):
 
 
 def inspect_assignment(value, cwd):
+    """変数代入による実行設定の差し替えと秘密値の平文指定を検査する。"""
     match = ASSIGNMENT.match(value)
     if not match:
         return
@@ -1610,12 +1696,14 @@ def inspect_assignment(value, cwd):
 
 
 def sensitive_parameter(name):
+    """展開を拒否する秘密値・認証エージェント・接続先・proxy の変数か判定する。"""
     return name not in CREDENTIAL_PATH_VARIABLES and (
         secret_name(name)
         or name in REFERENCE_VARIABLES or name.upper() in PROXIES
     )
 
 
+# 子コマンドを起動するラッパーの、値を取るオプション。
 WRAPPER_VALUES = {
     "sudo": {"-u", "--user", "-g", "--group", "-p", "--prompt", "-C", "--close-from", "-h", "--host", "-D", "--chdir"},
     "env": {"-u", "--unset", "-C", "--chdir"},
@@ -1628,6 +1716,7 @@ WRAPPER_VALUES = {
     "coproc": set(), "!": set(),
     "command": set(), "builtin": set(), "nohup": set(),
 }
+# 同じラッパーの、値を取らないフラグ。
 WRAPPER_FLAGS = {
     "sudo": {"-n", "-E", "-H", "-b", "-k", "-K", "-v", "-l", "--non-interactive", "--preserve-env", "--validate", "--list"},
     "env": {"-i", "--ignore-environment", "-0", "--null"},
@@ -1638,10 +1727,12 @@ WRAPPER_FLAGS = {
     "arch": {"-arm64", "-arm64e", "-x86_64", "-x86_64h", "-i386", "-32", "-64", "-c"},
     "caffeinate": {"-d", "-i", "-s", "-m", "-u"}, "coproc": set(), "!": set(),
 }
+# 実行時まで値が決まらない引数の目印。シェルの引数に現れない NUL を使う。
 UNKNOWN_ARGUMENT = "\0"
 
 
 def unwrap(command, args, cwd, inherited_assignments):
+    """ラッパーのオプションを解き、子コマンドの引数列と基準ディレクトリを返す。"""
     args = list(args)
     assignments, replacements, index = [], [], 0
     while index < len(args):
@@ -1711,11 +1802,13 @@ def unwrap(command, args, cwd, inherited_assignments):
         elif arg not in WRAPPER_FLAGS[command]:
             raise UnsupportedSyntax("unsupported wrapper option")
         index += 1
+    # timeout は最初の位置引数が時間指定。
     if command == "timeout" and index < len(args):
         index += 1
     child = args[index:]
     if command == "xargs":
         child = child or ["echo"]
+        # 標準入力から渡る引数は値を確定できない。
         if not replacements:
             child.append(UNKNOWN_ARGUMENT)
         for option, value in replacements:
@@ -1732,8 +1825,11 @@ def unwrap(command, args, cwd, inherited_assignments):
 
 
 INTERPRETERS = {"python", "python3", "node", "ruby", "perl", "php", "awk", "gawk"}
+# インラインコードを受け取る短いフラグ。
 CODE_OPTIONS = {"python": "c", "python3": "c", "node": "ep", "ruby": "e", "perl": "eE", "php": "r", "awk": "", "gawk": ""}
+# ファイルを読む関数・メソッド名。
 CODE_READERS = {"open", "read_text", "read_bytes", "readFile", "readFileSync", "file_get_contents", "readfile"}
+# AppleScript のシェル起動の検出から除く文字列リテラル。
 STRING_LITERAL = re.compile(r'''"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*' ''', re.S | re.X)
 
 
@@ -1810,6 +1906,7 @@ def qualified_name(node, aliases):
 
 
 def inspect_python_process(language, name, node, cwd, depth):
+    """Python の eval・subprocess・os 経由で静的に決まる子コマンドを検査する。"""
     process_args = node.args[1:] if name.startswith("os.spawn") else node.args
     argument = process_args[0] if process_args else next((item.value for item in node.keywords if item.arg == "args"), None)
     if name in {"eval", "exec", "builtins.eval", "builtins.exec"}:
@@ -1843,6 +1940,7 @@ def inspect_python_process(language, name, node, cwd, depth):
 
 
 def inspect_python_code(language, code, cwd, depth):
+    """Python コードの秘密環境変数・認証情報ファイルの読み取りと子プロセスを検査する。"""
     try:
         tree = ast.parse(code)
     except (SyntaxError, ValueError) as error:
@@ -1892,6 +1990,7 @@ def inspect_python_code(language, code, cwd, depth):
 
 
 def masked_call_options(language, options, strings, cwd):
+    """呼び出しオプションから shell 指定の有無と子プロセスの基準ディレクトリを返す。"""
     shell, child_cwd = False, cwd
     for key, setting in re.findall(r"([A-Za-z_0-9]+)\s*:\s*([A-Za-z_0-9]+)", options or ""):
         key_literal = re.fullmatch(r"__string_(\d+)__", key)
@@ -1957,6 +2056,7 @@ def inspect_masked_calls(language, executable, strings, cwd, depth):
 
 
 def inspect_masked_code(language, code, cwd, depth):
+    """Python 以外のコードの子プロセス・認証情報ファイル・環境変数の読み取りを検査する。"""
     executable, strings = mask_code(language, code, cwd, depth)
     inspect_masked_calls(language, executable, strings, cwd, depth)
     for match in re.finditer(r"\b(?:open|readFile|readFileSync|file_get_contents|readfile|read|file|filebase64)\s*\(?\s*(?:pathexpand\s*\(\s*)?__string_(\d+)__", executable):
@@ -2003,7 +2103,7 @@ def interpreter_input(command, args):
         },
         "perl": {"-I", "-M"}, "php": {"-d", "-c"},
     }
-    # 同じ引数の残りを値にするフラグ
+    # 同じ引数の残りを値にする。
     attached_flags = {"perl": "CDFimx", "ruby": "CEFix"}
     # 値を 1 文字だけ取る。
     single_flags = {"ruby": "K"}
@@ -2105,6 +2205,7 @@ def interpreter_input(command, args):
 
 
 def script_uses_stdin(path):
+    """スクリプトのパスが標準入力を指すか判定する。"""
     if UNKNOWN_ARGUMENT in path:
         raise UnsupportedSyntax("dynamic script path")
     if path in {"/dev/stdin", "/dev/fd/0", "/proc/self/fd/0"}:
@@ -2142,6 +2243,7 @@ def env_split_args(args):
 
 
 def inspect_wrapper(command, args, assignments, cwd, depth, stdin, external):
+    """ラッパーが起動する子コマンドと、env による環境変数の一括出力を検査する。"""
     child, child_cwd = unwrap(command, args, cwd, assignments)
     if command == "env" and not child and not has_option(args, {"--help", "--version"}):
         deny("環境変数の一括出力は許可していません。")
@@ -2170,6 +2272,7 @@ def terraform_args(command, args, assignments):
 
 
 def inspect_recursive_removal(args, cwd):
+    """再帰削除の対象がルート・ホーム全体か検査する。"""
     for target in args:
         if target.startswith("-") or UNKNOWN_ARGUMENT in target:
             continue
@@ -2185,6 +2288,7 @@ def inspect_recursive_removal(args, cwd):
 
 
 def inspect_container_exec(command, args, cwd, depth, stdin, external):
+    """コンテナ内で実行する子コマンドと、コンテナへ渡す資格情報を検査する。"""
     if "--" in args and any(word in args[:args.index("--")] for word in {"exec", "rsh", "run"}):
         inspect_argv(args[args.index("--") + 1:], cwd, depth + 1, stdin, external)
     elif "exec" in args or "rsh" in args:
@@ -2195,6 +2299,7 @@ def inspect_container_exec(command, args, cwd, depth, stdin, external):
     if command in {"docker", "podman", "nerdctl"}:
         for value in option_values(args, {"-e", "--env", "--build-arg"}):
             name = value.partition("=")[0]
+            # 値を省いた -e NAME はホストの値を引き継ぐ。
             if sensitive_parameter(name) or name in CREDENTIAL_PATH_VARIABLES and "=" not in value:
                 deny("資格情報をコンテナの環境へ渡すことは許可していません。")
         if has_option(args, {"--ssh"}):
@@ -2230,12 +2335,14 @@ def inspect_shell(args, cwd, depth, stdin, external):
 
 
 def inspect_eval(command, args, cwd, depth, stdin, external):
+    """eval の引数と trap の処理をシェルコードとして検査する。"""
     values = args[1:] if args[:1] == ["--"] else args
     if values and values[0] not in {"-", "", "-l", "-p"}:
         scan(" ".join(values) if command == "eval" else values[0], cwd, depth + 1, stdin, external)
 
 
 def inspect_source(args, cwd, depth, stdin, external):
+    """source するファイルと、標準入力から読むコードを検査する。"""
     if args[:1] == ["--"]:
         args = args[1:]
     if args and credential_path(args[0], cwd):
@@ -2248,6 +2355,7 @@ def inspect_source(args, cwd, depth, stdin, external):
 
 
 def inspect_osascript(args, stdin):
+    """AppleScript からのシェル起動を検査する。"""
     for code in option_values(args, {"-e"}) + ([stdin] if stdin is not None else []):
         executable = STRING_LITERAL.sub('""', code)
         if re.search(r"\bdo\s+shell\s+script\b", executable, re.I):
@@ -2255,6 +2363,7 @@ def inspect_osascript(args, stdin):
 
 
 def inspect_find(args, cwd, depth):
+    """find の -exec 系で実行する子コマンドを検査する。"""
     for index, arg in enumerate(args):
         if arg in {"-exec", "-execdir", "-ok", "-okdir"}:
             end = index + 1
@@ -2266,23 +2375,28 @@ def inspect_find(args, cwd, depth):
 
 
 def inspect_submodule_foreach(args, cwd, depth):
+    """git submodule foreach で実行するコマンドを検査する。"""
     index = args.index("foreach")
     if "submodule" in args[:index] and index + 1 < len(args):
         scan(args[index + 1], cwd, depth + 1)
 
 
 def inspect_runner(command, args, cwd, depth):
+    """npx・npm exec・mise・flock などが起動するコマンドを検査する。"""
     for code in option_values(args, {"-c", "--command", "--call"}):
         scan(code, cwd, depth + 1)
     if "--" in args:
         inspect_argv(args[args.index("--") + 1:], cwd, depth + 1)
     elif command in {"npx", "npm", "pnpm", "mise"}:
-        start = next((index + 1 for index, arg in enumerate(args) if arg in {"exec", "x"}), 0 if command == "npx" else len(args))
+        # npx の exe はパッケージ名なので、exe を exec の短縮形とみなすのは npm だけにする。
+        runners = {"exec", "exe", "x"} if command == "npm" else {"exec", "x"}
+        start = next((index + 1 for index, arg in enumerate(args) if arg in runners), 0 if command == "npx" else len(args))
         if start < len(args) and not args[start].startswith("-"):
             inspect_argv(args[start:], cwd, depth + 1)
 
 
 def inspect_interpreter_operands(language, operands, cwd):
+    """インタプリタが入力として読む位置引数を検査する。"""
     for operand in operands:
         # awk の var=value はファイル名ではない。
         if language in {"awk", "gawk"} and re.match(r"[A-Za-z_][A-Za-z_0-9]*=", operand):
@@ -2291,6 +2405,7 @@ def inspect_interpreter_operands(language, operands, cwd):
 
 
 def inspect_interpreter(language, args, cwd, depth, stdin, external):
+    """インタプリタのインラインコード・標準入力のコード・読み込むファイルを検査する。"""
     code, module, script, operands, reads = interpreter_input(language, args)
     if module is not None:
         if UNKNOWN_ARGUMENT in module[0]:
@@ -2320,6 +2435,7 @@ def inspect_interpreter(language, args, cwd, depth, stdin, external):
 
 
 def inspect_argv(argv, cwd, depth, stdin=None, external=False):
+    """単純コマンドを検査する。stdin は静的な標準入力、external は検査できない標準入力の有無。"""
     if depth > 32:
         raise ParseError("nested command limit exceeded")
     assignments = pop_assignments(argv, cwd)
@@ -2329,6 +2445,9 @@ def inspect_argv(argv, cwd, depth, stdin=None, external=False):
     args = argv[1:]
     if "$" in command or "`" in command or UNKNOWN_ARGUMENT in command:
         raise UnsupportedSyntax("dynamic command name")
+    # pn は pnpm 11 が入れる pnpm へのリンク。
+    if command == "pn":
+        command = "pnpm"
     if command in {"export", "readonly", "declare", "typeset", "local", "env", "sudo"}:
         for arg in args:
             inspect_assignment(arg, cwd)
@@ -2376,6 +2495,7 @@ def inspect_argv(argv, cwd, depth, stdin=None, external=False):
 
 
 def changed_directory(argv, cwd):
+    """cd 後の基準ディレクトリを返す。追跡できない変更は UnsupportedSyntax とする。"""
     assignments = []
     while argv and ASSIGNMENT.match(argv[0]):
         assignments.append(argv.pop(0))
@@ -2425,6 +2545,7 @@ def changed_directory(argv, cwd):
 
 
 def scan(text, cwd, depth=0, input_text=None, input_external=False):
+    """シェルコードをコマンド単位に分け、基準ディレクトリを追跡しながら検査する。"""
     initial_cwd = cwd
     if depth > 32:
         raise ParseError("nested command limit exceeded")
@@ -2454,7 +2575,7 @@ def scan(text, cwd, depth=0, input_text=None, input_external=False):
             break
         elif token in SEPARATORS:
             command_start = True
-    # 実行文脈を確定できない構文では、従来どおり開始位置で展開を検査する。
+    # 実行文脈を確定できない構文では、開始位置で展開を検査する。
     if not sequential:
         for body in nested:
             scan(body, cwd, depth + 1, input_text, input_external)
@@ -2464,6 +2585,7 @@ def scan(text, cwd, depth=0, input_text=None, input_external=False):
         if isinstance(token, Word) or token not in SEPARATORS:
             unit.append(token)
             continue
+        # && や | の直後の改行は、同じコマンド列の続き。
         if token == "\n" and not unit and continued:
             continue
         argv, words, stdin, external = [], [], input_text, piped or input_external
@@ -2510,6 +2632,7 @@ def scan(text, cwd, depth=0, input_text=None, input_external=False):
             for word in words:
                 for body in word.substitutions:
                     scan(body, cwd, depth + 1, input_text, input_external)
+        # 存在・空だけを確かめる test は値を出力しない。
         presence = len(argv) in {3, 4} and argv[:1] in (["test"], ["["], ["[["]) and argv[1] in {"-e", "-f", "-n", "-z"}
         if not presence and any(sensitive_parameter(name) for word in words for name in word.parameters):
             deny("秘密値を持つ環境変数の明示展開は許可していません。")
@@ -2533,18 +2656,28 @@ def scan(text, cwd, depth=0, input_text=None, input_external=False):
 
 
 def main():
+    """hook 入力の Bash・Monitor コマンドを検査し、拒否時は deny の判定を出力する。"""
     try:
         event = json.load(sys.stdin)
         if not isinstance(event, dict) or not isinstance(event.get("tool_name"), str):
             raise ParseError("invalid hook input")
-        if event["tool_name"] != "Bash":
+        if event["tool_name"] not in {"Bash", "Monitor"}:
             return 0
         tool_input = event.get("tool_input")
-        if not isinstance(tool_input, dict) or not isinstance(tool_input.get("command"), str):
-            raise ParseError("command must be a string")
+        if not isinstance(tool_input, dict):
+            raise ParseError("tool_input must be an object")
         cwd = event.get("cwd", os.getcwd())
         if not isinstance(cwd, str) or not os.path.isabs(cwd):
             raise ParseError("cwd must be an absolute path")
+        # WebSocket を監視する Monitor はコマンドを実行しない。
+        if event["tool_name"] == "Monitor" and "ws" in tool_input:
+            ws = tool_input["ws"]
+            if not isinstance(ws, dict) or not isinstance(ws.get("url"), str):
+                raise ParseError("ws.url must be a string")
+            if "command" not in tool_input:
+                return 0
+        if not isinstance(tool_input.get("command"), str):
+            raise ParseError("command must be a string")
         scan(tool_input["command"], cwd)
     except Denied as error:
         json.dump({"hookSpecificOutput": {

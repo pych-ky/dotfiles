@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 全端末共通の Git 設定を適用
+# Git 共通設定の反映
 
 set -euo pipefail
 
@@ -98,6 +98,7 @@ fi
 # dispatch が dirname $0 から deny-private-strings を参照するため同じ場所に配置
 hooks_dir="$HOME/.local/share/dotfiles/git-hooks"
 
+# 実行可能なフックを共通フックディレクトリへリンク
 # Git が壊れたリンクを無視するため、core.hooksPath 設定前に実行権を検証
 link_hook() {
   local source="$1"

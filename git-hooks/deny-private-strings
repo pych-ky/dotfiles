@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 非公開 denylist に一致するコミット・push を阻止
+# 非公開文字列の検査フック
 
 set -uo pipefail
 
@@ -7,14 +7,14 @@ mode="${1:-}"
 remote_name="${2:-}"
 remote_url="${3:-}"
 if [[ "$mode" != pre-commit && "$mode" != pre-push ]]; then
-  printf 'usage: %s (pre-commit|pre-push)\n' "$(basename "$0")" >&2
+  printf '使い方: %s (pre-commit|pre-push)\n' "$(basename "$0")" >&2
   exit 2
 fi
 
 config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/dotfiles"
 # 非公開側で配置。1 行 1 固定文字列、大文字小文字を区別しない
 denylist_file="$config_dir/denylist.txt"
-# 全 remote URL と push の実送信先が業務用パターンに一致する場合だけ省略
+# 業務用 remote のパターン。全 remote と push 先が一致するリポジトリでは検査を省略
 work_remotes_file="$config_dir/work-remotes.txt"
 
 [[ -r "$denylist_file" ]] || exit 0
@@ -25,6 +25,7 @@ strip_pattern_file() {
     grep -v -e '^#' -e '^$' || true
 }
 
+# denylist の有効なパターンを出力
 # 非公開パターンはディスクに残さずプロセス置換で渡す
 patterns() {
   strip_pattern_file "$denylist_file"
@@ -34,6 +35,7 @@ if [[ -z "$(patterns)" ]]; then
   exit 0
 fi
 
+# シンボリックリンクをたどった実体の絶対パスを返す
 resolve_path() {
   local path="$1"
   local target dir
@@ -67,6 +69,7 @@ if [[ -n "$current_repo" && -n "$denylist_repo" ]]; then
   [[ "$current_repo" == "$denylist_repo" ]] && exit 0
 fi
 
+# 全 remote と push 先が業務用パターンに一致するか判定
 is_work_repository() {
   local url total=0 matched=0
 
@@ -97,6 +100,7 @@ fi
 
 found=0
 
+# 一致した行を見出し付きで表示し、検出を記録
 report() {
   local heading="$1"
   local line
@@ -112,6 +116,7 @@ report() {
   found=1
 }
 
+# ステージ済みのパス名と内容を denylist で検査
 scan_pre_commit() {
   local -a paths=()
   local path hit
@@ -137,6 +142,7 @@ scan_pre_commit() {
   return 0
 }
 
+# push するコミットを denylist で検査
 scan_pre_push() {
   local _local_ref local_sha _remote_ref remote_sha
   local -a range remote_tips

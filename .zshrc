@@ -11,8 +11,8 @@ typeset -U path PATH
 path=(
   "$HOME/.local/bin"
   ${HOMEBREW_PREFIX:-/usr/local}/opt/git/bin(N-/)
-  ${HOMEBREW_PREFIX:-/usr/local}/opt/libpq/bin(N-/) # keg-only の libpq (psql など)
-  $HOME/.rd/bin(N-/)                                # Rancher Desktop の CLI
+  ${HOMEBREW_PREFIX:-/usr/local}/opt/libpq/bin(N-/)  # keg-only の libpq (psql など)
+  $HOME/.rd/bin(N-/)                                 # Rancher Desktop の CLI
   $path
 )
 
@@ -36,6 +36,7 @@ unset f
 
 if command -v fzf >/dev/null 2>&1; then
   . <(fzf --zsh)
+  # cghq を実行してプロンプトを再描画する ZLE ウィジェット
   _cghq_widget() {
     cghq
     zle reset-prompt
@@ -47,6 +48,8 @@ fi
 # Karabiner が端末で Home/End を Ctrl+Home/End に変換するため行頭・行末へ割り当て
 bindkey '^[[1;5H' beginning-of-line
 bindkey '^[[1;5F' end-of-line
+# Karabiner が Orca で Cmd+Delete を Option+Delete に変換するため次の単語削除へ割り当て
+bindkey '^[[3;3~' kill-word
 
 # 組織固有設定・ツールの自動追記はローカル設定へ
 [[ -r "$HOME/.zshrc.local" ]] && . "$HOME/.zshrc.local"

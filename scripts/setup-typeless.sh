@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# Typeless の既存設定に共通設定を反映
+# Typeless 共通設定の反映
 
 set -euo pipefail
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_dir="$(cd "$script_dir/.." && pwd)"
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 setup_common_library="$repo_dir/lib/setup-common.sh"
 if [[ ! -f "$setup_common_library" || -L "$setup_common_library" ]]; then
@@ -16,12 +15,12 @@ fi
 source "$setup_common_library"
 
 if ((EUID == 0)); then
-  printf 'error: do not run macos/setup-typeless.sh with sudo or as root\n' >&2
+  printf 'error: do not run scripts/setup-typeless.sh with sudo or as root\n' >&2
   exit 1
 fi
 
 if [[ "$(uname -s)" != Darwin ]]; then
-  printf 'error: macos/setup-typeless.sh supports macOS only\n' >&2
+  printf 'error: scripts/setup-typeless.sh supports macOS only\n' >&2
   exit 1
 fi
 
@@ -32,7 +31,7 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
-managed_settings="$script_dir/typeless.json"
+managed_settings="$repo_dir/macos/typeless.json"
 settings_file="$HOME/Library/Application Support/Typeless/app-settings.json"
 
 if [[ -L "$settings_file" || (-e "$settings_file" && ! -f "$settings_file") ]]; then
@@ -46,11 +45,11 @@ if [[ -f "$settings_file" ]] &&
     (.__COMPATIBLE_FEATURE_SHORTCUT_BINDINGS_MIGRATED_FLAG | IN(null, false, 0, "")) and
     (.keyboardShortcut | IN(null, false, 0, "") | not)
   ' "$settings_file" >/dev/null; then
-  printf 'error: launch and quit Typeless to migrate legacy shortcuts, then run macos/setup-typeless.sh again\n' >&2
+  printf 'error: launch and quit Typeless to migrate legacy shortcuts, then run scripts/setup-typeless.sh again\n' >&2
   exit 1
 fi
 
-# 一致すれば起動中でも終了不要
+# 一致すれば起動中でも書き換えずに終了
 if [[ -f "$settings_file" ]] &&
   jq -e --slurpfile managed "$managed_settings" \
     '. == (. * $managed[0])' "$settings_file" >/dev/null; then
@@ -61,7 +60,7 @@ if [[ -f "$settings_file" ]] &&
 fi
 
 if pgrep -xq Typeless; then
-  printf 'error: quit Typeless, then run macos/setup-typeless.sh again\n' >&2
+  printf 'error: quit Typeless, then run scripts/setup-typeless.sh again\n' >&2
   exit 1
 fi
 

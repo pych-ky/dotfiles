@@ -1,9 +1,12 @@
+# AWS プロファイル切り替え
+
 # AWS SSO プロファイルを永続化し、一時認証情報の解決は AWS SDK に任せる
 # Claude Code の shell snapshot に含めるため __aws_* 名を使う
 
 [ -n "${__AWS_FUNCTIONS_LOADED:-}" ] && return
 __AWS_FUNCTIONS_LOADED=1
 
+# 認証情報の解決に使われる環境変数名を列挙
 __aws_credential_provider_variables() {
   printf '%s\n' \
     AWS_PROFILE \
@@ -22,6 +25,7 @@ __aws_credential_provider_variables() {
     AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE
 }
 
+# 認証情報の環境変数が1つでも設定されているか判定
 __aws_has_credential_provider() {
   local variable
 
@@ -33,6 +37,7 @@ __aws_has_credential_provider() {
   return 1
 }
 
+# 認証情報の環境変数をすべて解除
 __aws_clear_credentials() {
   local clear_status=0
   local variable
@@ -44,11 +49,13 @@ __aws_clear_credentials() {
   return "$clear_status"
 }
 
+# 認証情報の環境変数を外したサブシェルでコマンドを実行
 __aws_run_without_credentials() (
   __aws_clear_credentials || exit
   "$@"
 )
 
+# プロファイルの認証情報で STS に接続できるか確認
 __aws_verify_profile_credentials() (
   local profile="$1"
 
@@ -56,8 +63,9 @@ __aws_verify_profile_credentials() (
   AWS_PROFILE="$profile" AWS_PAGER='' aws sts get-caller-identity
 )
 
+# SSO 用に設定されたプロファイルか確認
 __aws_require_sso_profile() {
-  local profile="${1:?usage: __aws_require_sso_profile <profile>}"
+  local profile="${1:?使い方: __aws_require_sso_profile <profile>}"
   local sso_session
   local sso_start_url
 
@@ -74,7 +82,7 @@ __aws_require_sso_profile() {
 
 # 次回のシェル起動用にプロファイル名を保存
 __aws_persist_active_profile() {
-  local profile="${1:?usage: __aws_persist_active_profile <profile>}"
+  local profile="${1:?使い方: __aws_persist_active_profile <profile>}"
   local file="$HOME/.aws/active-profile"
   local directory="${file%/*}"
   local temporary
@@ -90,8 +98,9 @@ __aws_persist_active_profile() {
   fi
 }
 
+# SSO ログインしてプロファイルを切り替え、次回のシェル起動用に保存
 aws-use() {
-  local profile="${1:?usage: aws-use <profile>}"
+  local profile="${1:?使い方: aws-use <profile>}"
 
   if ! command -v aws >/dev/null 2>&1; then
     printf 'aws: aws CLI not found\n' >&2
@@ -107,6 +116,7 @@ aws-use() {
   export AWS_PROFILE="$profile"
 }
 
+# 認証情報の環境変数と保存済みのプロファイル名を消去
 aws-clear() {
   local clear_status=0
 

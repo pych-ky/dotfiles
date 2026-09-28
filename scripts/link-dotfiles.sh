@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# dotfiles を $HOME 配下へリンク・コピーし、既存の実体は退避
+# dotfiles のリンク
 
 set -euo pipefail
 
@@ -7,12 +7,12 @@ repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 backup_root=
 backup_dir=
 backup_target=
-backup_compare_target= # dry-run では退避元、通常は退避先
+backup_compare_target=  # dry-run では退避元、通常は退避先
 dry_run=0
 backup_created=0
 backup_keep=5
-backup_diffs=()    # リポジトリ版と異なる退避元
-managed_targets=() # ツールの自動追記がある退避元
+backup_diffs=()         # リポジトリ版と異なる退避元
+managed_targets=()      # ツールの自動追記がある退避元
 MANAGED_BLOCK_MARKER='MANAGED BY RANCHER DESKTOP'
 
 setup_common_library="$repo_dir/lib/setup-common.sh"
@@ -24,22 +24,25 @@ fi
 # shellcheck source=lib/setup-common.sh
 source "$setup_common_library"
 
+# 使い方を表示
 usage() {
   cat <<'EOF'
-Usage: ./scripts/link-dotfiles.sh [--dry-run] [-h | --help]
+使い方: ./scripts/link-dotfiles.sh [--dry-run] [-h | --help]
 
-Create symlinks from this repository into $HOME.
-Claude settings are copied, preserving user plugin and marketplace entries.
-The Codex Browser config is copied as a regular file because Codex rejects symlinks for this path.
-Orca keybindings and Copilot CLI settings are copied as regular files to keep application writes out of the repository.
-Existing regular files and directories are moved to ~/.dotfiles-backup/<timestamp>[-<sequence>]/ first.
+このリポジトリのファイルを $HOME 配下へシンボリックリンクする。
+Claude の設定はコピーし、個人のプラグイン・マーケットプレイス登録と Orca・herdr のフックを保持する。
+Codex Browser の設定は、Codex がこのパスのシンボリックリンクを拒否するため通常ファイルとしてコピーする。
+Orca のキー設定と Copilot CLI の設定は、アプリの書き込みをリポジトリから分離するため通常ファイルとしてコピーする。
+etc/codex/config.toml は sudo で /etc/codex/config.toml へリンクし、既存のファイルや別のリンクがあればエラーにする。
+$HOME 配下の既存の通常ファイル・ディレクトリは、先に ~/.dotfiles-backup/<timestamp>[-<sequence>]/ へ退避する。
 
-Options:
-  --dry-run   Show actions without changing files.
-  -h, --help  Show this help and exit.
+オプション:
+  --dry-run   ファイルを変更せず、実行内容だけを表示する。
+  -h, --help  このヘルプを表示して終了する。
 EOF
 }
 
+# root 以外のユーザーと正しい HOME で実行されているか検証
 validate_environment() {
   if ((EUID == 0)); then
     printf 'error: do not run scripts/link-dotfiles.sh with sudo or as root\n' >&2
@@ -49,6 +52,7 @@ validate_environment() {
   setup_validate_home
 }
 
+# コマンドを実行し、dry-run では実行内容だけを表示
 run() {
   if ((dry_run)); then
     printf 'info: would run:'
@@ -59,6 +63,7 @@ run() {
   fi
 }
 
+# 作成したリンクを表示
 report_link() {
   ((dry_run)) && return 0
   printf 'changed: linked %s -> %s\n' "$1" "$2"
@@ -97,7 +102,7 @@ copy_regular_file() {
   fi
 }
 
-# Claude の公開設定を優先し、個人のプラグイン登録を保持
+# 公開設定を優先し、個人のプラグイン登録と Orca・herdr のフックを保持
 install_claude_settings() {
   local source_relative='.claude/settings.json'
   local source="$repo_dir/$source_relative"
@@ -111,15 +116,30 @@ install_claude_settings() {
   fi
 
   if ! command -v jq >/dev/null 2>&1; then
-    printf 'error: jq is required to preserve Claude plugin settings; install jq and rerun\n' >&2
+    printf 'error: jq is required to preserve Claude user plugins and Orca/herdr hooks; install jq and rerun\n' >&2
     return 1
   fi
   merged_settings="$(
     jq -s '
+      # Orca・herdr が登録したフックだけから成るグループか判定
+      def managed_hook_group:
+        (.hooks | type) == "array" and (.hooks | length) > 0 and
+        all(.hooks[]; type == "object" and (.command | type) == "string" and
+          (.command | test("/\\.orca/agent-hooks/claude-hook\\.(sh|cmd)(?![\\w.])") or
+            test("/\\.claude/hooks/herdr-agent-state\\.sh(?![\\w.])")));
+
       .[0] as $base | .[1] as $current |
       reduce ["enabledPlugins", "extraKnownMarketplaces"][] as $key ($base;
         if $current | has($key) then
           .[$key] = (($current[$key] // {}) + ($base[$key] // {}))
+        else
+          .
+        end
+      ) |
+      reduce ($current.hooks | objects | to_entries[]) as $event (.;
+        ([$event.value | arrays[] | objects | select(managed_hook_group)] - (.hooks[$event.key] // [])) as $groups |
+        if ($groups | length) > 0 then
+          .hooks[$event.key] = ((.hooks[$event.key] // []) + $groups)
         else
           .
         end
@@ -136,14 +156,15 @@ install_claude_settings() {
   backup_existing_target "$target" || return
 
   if ((dry_run)); then
-    printf 'info: would update Claude settings: %s (user plugin settings preserved)\n' "$target"
+    printf 'info: would update Claude settings: %s (user plugins and Orca/herdr hooks preserved)\n' "$target"
   else
     printf '%s\n' "$merged_settings" >"$target" || return
     chmod 600 "$target" || return
-    printf 'changed: updated Claude settings: %s (user plugin settings preserved)\n' "$target"
+    printf 'changed: updated Claude settings: %s (user plugins and Orca/herdr hooks preserved)\n' "$target"
   fi
 }
 
+# 対象パスに対応する退避先のパスを返す
 backup_path() {
   printf '%s/%s' "$backup_dir" "${1#"$HOME"/}"
 }
@@ -206,6 +227,7 @@ backup_existing_target() {
   fi
 }
 
+# 保持世代数を超えた古い退避ディレクトリを削除
 prune_backups() {
   local candidate
   local name
@@ -235,6 +257,7 @@ prune_backups() {
     done
 }
 
+# 対象が指定先を指すシンボリックリンクか判定
 is_correct_symlink() {
   [[ -L "$1" && "$(readlink "$1")" == "$2" ]]
 }
@@ -253,6 +276,7 @@ remove_obsolete_symlink() {
   fi
 }
 
+# 既存の実体を退避してリポジトリのファイルへリンク
 link_file() {
   local source_relative="$1"
   local target_relative="${2:-$1}"
@@ -291,6 +315,7 @@ link_file() {
   report_link "$target" "$source"
 }
 
+# 優先度の高い旧 managed_config.toml があれば警告
 warn_legacy_codex_managed_config() {
   local target="/etc/codex/managed_config.toml"
 
@@ -300,8 +325,9 @@ warn_legacy_codex_managed_config() {
   printf '         remove it if you want Codex App local config to override dotfiles defaults\n' >&2
 }
 
+# Codex の基本設定を /etc/codex/config.toml へリンク
 link_codex_system_config() {
-  local source="$repo_dir/.config/codex/config.toml"
+  local source="$repo_dir/etc/codex/config.toml"
   local target="/etc/codex/config.toml"
 
   if [[ ! -e "$source" ]]; then
@@ -328,6 +354,7 @@ link_codex_system_config() {
   report_link "$target" "$source"
 }
 
+# dotfiles のリンク・コピーと退避を行い、結果を表示
 main() {
   while (($#)); do
     case "$1" in
@@ -358,40 +385,41 @@ main() {
   fi
 
   local files=(
-    # shell
+    # シェル
+    ".aws/load-active-profile.sh"
     ".bash_profile"
     ".bashrc"
+    ".shell/functions/aws.sh"
+    ".shell/functions/ghq.sh"
+    ".shell/functions/git-worktree.sh"
     ".zshenv"
     ".zshrc"
-    ".shell/functions/aws.sh"
-    ".shell/functions/git-worktree.sh"
-    ".shell/functions/ghq.sh"
-    # terminal
-    ".wezterm.lua"
+    # ターミナル
     ".config/ghostty/config.ghostty"
     ".config/starship.toml"
-    ".config/git/ignore"
+    ".wezterm.lua"
+    # ツール
     ".config/gh/config.yml"
+    ".config/git/ignore"
     # Karabiner の変更検知のためディレクトリごとリンク
     ".config/karabiner"
     ".config/mise/config.toml"
     # AI エージェント
-    ".config/agents/AGENTS.md"
     ".claude/CLAUDE.md"
     ".claude/hooks/pre-bash-guard.py"
     ".claude/hooks/pre-bash-guard.sh"
     ".claude/hooks/statusline.sh"
+    ".config/agents/AGENTS.md"
     ".copilot/statusline.sh"
-    ".aws/load-active-profile.sh"
   )
 
   local file
   local failed_items=()
 
   for file in \
-    .zsh/functions/git-worktree.zsh \
     .claude/hooks/inject-guidelines-context.sh \
-    .claude/keybindings.json; do
+    .claude/keybindings.json \
+    .zsh/functions/git-worktree.zsh; do
     if ! remove_obsolete_symlink "$file"; then
       failed_items+=("$file (obsolete symlink)")
     fi

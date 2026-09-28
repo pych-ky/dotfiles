@@ -1,5 +1,6 @@
 # エディタ設定
 
+# 上位ディレクトリの設定を継承しない
 root = true
 
 [*]
@@ -10,6 +11,7 @@ trim_trailing_whitespace = true
 indent_style             = space
 indent_size              = 2
 
+# Markdown の改行用の行末空白を保持
 [*.{md,md.template}]
 trim_trailing_whitespace = false
 

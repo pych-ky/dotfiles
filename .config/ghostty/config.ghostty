@@ -1,17 +1,20 @@
-## Ghostty キー設定
+# Ghostty キー設定
 
 # Karabiner が変換した Option+Backspace で直前の単語を削除
 keybind = alt+backspace=text:\x1b\x7f
 
-# Ctrl+PageUp/PageDown でタブ移動
+# アプリ内のセッション先頭・末尾へのジャンプを送り、スクロールバックの先頭・末尾へ移動
+keybind = home=csi:1;5H
+keybind = chain=scroll_to_top
+keybind = end=csi:1;5F
+keybind = chain=scroll_to_bottom
+keybind = cmd+home=csi:1;5H
+keybind = chain=scroll_to_top
+keybind = cmd+end=csi:1;5F
+keybind = chain=scroll_to_bottom
+
 keybind = ctrl+page_up=previous_tab
 keybind = ctrl+page_down=next_tab
 
-# Orca と同じキーで右・下へ分割
-keybind = cmd+d=unbind
-keybind = cmd+shift+d=new_split:right
+# 標準の分割キーを残し、下分割の共通キーを追加
 keybind = alt+shift+d=new_split:down
-
-# Cmd+Z でタブやウィンドウの操作を取り消さない
-keybind = cmd+z=unbind
-keybind = cmd+shift+z=unbind

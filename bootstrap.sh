@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 新しい Mac を一括セットアップ
+# 新しい Mac の一括セットアップ
 
 set -euo pipefail
 
@@ -19,6 +19,7 @@ fi
 # shellcheck source=lib/setup-common.sh
 source "$setup_common_library"
 
+# 実行中ステップの結果を失敗・スキップ件数付きで表示
 finish_step() {
   [[ -n "$current_step" ]] || return 0
 
@@ -34,6 +35,7 @@ finish_step() {
   current_step=
 }
 
+# 前のステップを締めて新しいステップを開始
 step() {
   finish_step
   current_step="$1"
@@ -56,6 +58,7 @@ record_failure() {
   printf 'error: %s (exit %d); continuing\n' "$label" "$status" >&2
 }
 
+# スキップした作業を集計用に記録して表示
 record_skip() {
   local reason="$1"
 
@@ -63,7 +66,7 @@ record_skip() {
   printf 'skipped: %s\n' "$reason"
 }
 
-# 任意リポジトリの setup は、bootstrap 中の未実施を終了コード 3 で伝える。
+# 任意の setup を実行し、未実施を示す終了コード 3 はスキップとして記録
 run_optional_setup() {
   local label="$1"
   shift
@@ -77,6 +80,7 @@ run_optional_setup() {
   esac
 }
 
+# コマンドを実行し、失敗を記録して続行
 run_and_record() {
   local label="$1"
   shift
@@ -84,6 +88,7 @@ run_and_record() {
   "$@" || record_failure "$label" "$?"
 }
 
+# sudo の認証を確認し、未認証なら端末で入力を求める
 ensure_sudo() {
   if sudo -n -v 2>/dev/null; then
     return 0
@@ -98,6 +103,7 @@ ensure_sudo() {
   sudo -v
 }
 
+# ダウンロードしたインストーラーを指定のインタプリタで実行
 run_downloaded_installer() {
   local url="$1"
   local interpreter="$2"
@@ -117,6 +123,7 @@ run_downloaded_installer() {
   fi
 }
 
+# PATH か ~/.local/bin からコマンドの実行ファイルを返す
 resolve_user_executable() {
   local name="$1"
   local candidate
@@ -134,6 +141,7 @@ resolve_user_executable() {
   return 1
 }
 
+# 未導入の CLI を公式インストーラーで導入
 install_user_cli() {
   local name="$1"
   local label="$2"
@@ -150,6 +158,7 @@ install_user_cli() {
     run_downloaded_installer "$url" "$interpreter" "$environment_assignment"
 }
 
+# PATH か既定のインストール先から brew の実行ファイルを返す
 resolve_homebrew_executable() {
   local candidate
 
@@ -168,6 +177,7 @@ resolve_homebrew_executable() {
   return 1
 }
 
+# Homebrew を導入し、現在のシェルに環境を読み込む
 setup_homebrew() {
   local homebrew_installer
   local homebrew_shellenv
@@ -196,6 +206,7 @@ setup_homebrew() {
   eval "$homebrew_shellenv"
 }
 
+# Homebrew を用意して Brewfile のパッケージを導入
 setup_homebrew_and_bundle() {
   local brew_cellar
 
@@ -220,6 +231,7 @@ setup_homebrew_and_bundle() {
     "$brew_executable" bundle --quiet --no-upgrade --file="$repo_dir/macos/Brewfile"
 }
 
+# ログイン項目を追加・削除して起動するアプリを揃える
 setup_login_items() {
   local logi_options_app=/Applications/logioptionsplus.app
   local login_item_app
@@ -275,6 +287,7 @@ APPLESCRIPT
   done
 }
 
+# mise で開発ツールを導入
 setup_mise_tools() {
   # mise install は設定なしでも成功するため、リンク失敗を先に検出
   local mise_config="${XDG_CONFIG_HOME:-$HOME/.config}/mise/config.toml"
@@ -290,6 +303,7 @@ setup_mise_tools() {
   fi
 }
 
+# 未導入の Zsh プラグインを clone して導入
 install_zsh_plugin() {
   local plugins_dir="$1"
   local name="$2"
@@ -314,6 +328,7 @@ install_zsh_plugin() {
   printf 'changed: installed Zsh plugin: %s\n' "$name"
 }
 
+# 使用する Zsh プラグインをすべて導入
 setup_zsh_plugins() {
   local plugins_dir="$HOME/.zsh/plugins"
 
@@ -338,10 +353,12 @@ setup_zsh_plugins() {
     fast-syntax-highlighting.plugin.zsh
 }
 
+# JSON 配列が指定値を含むか判定
 json_array_contains() {
   jq -e --arg value "$2" 'index($value) != null' <<<"$1" >/dev/null
 }
 
+# Claude Code に登録済みの marketplace 名を JSON 配列で返す
 list_claude_marketplaces() {
   "$1" plugin marketplace list --json |
     jq -ce '
@@ -350,6 +367,7 @@ list_claude_marketplaces() {
     '
 }
 
+# Claude Code のユーザースコープのプラグイン ID を JSON 配列で返す
 list_claude_user_plugins() {
   "$1" plugin list --json |
     jq -ce '
@@ -389,6 +407,7 @@ ensure_claude_marketplace() {
   return 1
 }
 
+# Claude Code のプラグインを公式 marketplace から導入・削除
 setup_claude_plugins() {
   local executable
   local marketplaces
@@ -444,6 +463,7 @@ setup_claude_plugins() {
   done
 }
 
+# Codex に Linear プラグインを導入
 setup_codex_plugins() {
   local executable
   local plugins
@@ -486,6 +506,7 @@ setup_codex_plugins() {
   fi
 }
 
+# 非公開リポジトリを取得し、その setup.sh を実行
 setup_private_overlay() {
   local overlay_dir
   local overlay_url
@@ -536,7 +557,7 @@ trap 'sudo -k 2>/dev/null || true' EXIT
 ensure_sudo
 
 step 'macOS settings'
-run_and_record 'macOS settings' "$repo_dir/macos/defaults.sh"
+run_and_record 'macOS settings' "$repo_dir/scripts/setup-macos.sh"
 
 step 'Homebrew'
 setup_homebrew_and_bundle
@@ -549,8 +570,8 @@ sudo -k 2>/dev/null || true
 trap - EXIT
 
 run_and_record 'Git settings' "$repo_dir/scripts/setup-git.sh"
-run_and_record 'Typeless settings' "$repo_dir/macos/setup-typeless.sh"
-run_and_record 'Orca settings' "$repo_dir/macos/setup-orca.sh"
+run_and_record 'Typeless settings' "$repo_dir/scripts/setup-typeless.sh"
+run_and_record 'Orca settings' "$repo_dir/scripts/setup-orca.sh"
 
 step 'Zsh plugins'
 setup_zsh_plugins
@@ -568,10 +589,10 @@ install_user_cli codex 'Codex installer' \
 setup_codex_plugins
 
 step 'Codex pets'
-run_optional_setup 'Codex pets' "$repo_dir/pets/setup.sh"
+run_optional_setup 'Codex pets' "$repo_dir/scripts/setup-pets.sh"
 
 step 'Agent Skills'
-run_optional_setup 'Agent Skills' "$repo_dir/skills/setup.sh"
+run_optional_setup 'Agent Skills' "$repo_dir/scripts/setup-skills.sh"
 
 step 'Private settings'
 trap 'setup_cleanup_private_checkout' EXIT
