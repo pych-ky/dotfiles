@@ -1,6 +1,15 @@
 {
   "model": "claude-opus-5.5",
   "effortLevel": "max",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "type": "command",
+        "matcher": "Bash",
+        "bash": "output=\"$(\"$HOME/.claude/hooks/pre-bash-guard.sh\")\" || exit 2; [ -z \"$output\" ] || { printf '%s\\n' \"$output\"; exit 2; }"
+      }
+    ]
+  },
   "statusLine": {
     "type": "command",
     "command": "$HOME/.copilot/statusline.sh",
@@ -10,6 +19,7 @@
   "footer": {
     "showDirectory": false,
     "showBranch": false,
-    "showQuota": true
+    "showQuota": true,
+    "showYolo": true
   }
 }

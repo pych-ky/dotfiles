@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Claude Code のステータスラインを Codex TUI に合わせる
+# Claude Code ステータスライン
+
+# 表示を Codex TUI に合わせる
 
 set -euo pipefail
 
@@ -14,11 +16,12 @@ if [[ -z "$codex_config" || ! -r "$codex_config" ]]; then
   if [[ -r /etc/codex/config.toml ]]; then
     codex_config="/etc/codex/config.toml"
   else
-    codex_config="$repo_dir/.config/codex/config.toml"
+    codex_config="$repo_dir/etc/codex/config.toml"
   fi
 fi
 claude_settings="${CODEX_STATUSLINE_CLAUDE_SETTINGS:-$repo_dir/.claude/settings.json}"
 
+# コマンドが利用可能か判定
 has_command() {
   command -v "$1" >/dev/null 2>&1
 }
@@ -36,6 +39,7 @@ input_used_tokens=''
 input_five_hour_limit=''
 input_weekly_limit=''
 
+# 入力 JSON から表示に使う値を input_* 変数へ読み込む
 read_input_json() {
   local payload="$1"
 
@@ -98,6 +102,7 @@ read_input_json() {
 settings_model=''
 settings_effort=''
 
+# Claude 設定からモデルと effort を settings_* 変数へ読み込む
 read_claude_settings() {
   local file="$1"
 
@@ -119,6 +124,7 @@ read_claude_settings() {
   ) || true
 }
 
+# TOML ファイルから指定キーのスカラー値を返す
 toml_scalar() {
   local file="$1"
   local key="$2"
@@ -139,6 +145,7 @@ toml_scalar() {
   ' "$file" 2>/dev/null || true
 }
 
+# Codex 設定の status_line に並ぶ項目名を1行ずつ返す
 read_status_items() {
   local file="$1"
 
@@ -150,6 +157,7 @@ read_status_items() {
     tr -d '"' || true
 }
 
+# ホーム配下を ~ に置き換えたディレクトリ表示を返す
 format_directory_display() {
   local dir="${1:-$PWD}"
 
@@ -162,6 +170,7 @@ format_directory_display() {
   fi
 }
 
+# 指定ディレクトリの現在の Git ブランチ名を返す
 current_git_branch() {
   local dir="$1"
 
@@ -169,6 +178,7 @@ current_git_branch() {
   git -C "$dir" branch --show-current 2>/dev/null | sed -n '1p' || true
 }
 
+# 百分率を 100 を上限に整数へ切り上げて返す
 ceil_percent() {
   local value="$1"
 
@@ -190,6 +200,7 @@ ceil_percent() {
   '
 }
 
+# transcript の最後の使用トークン数を返す
 last_transcript_usage_total() {
   local transcript_path="$1"
 
@@ -246,6 +257,7 @@ token_usage_percent() {
     '
 }
 
+# effort を推論レベルの表示名に変換
 # 未指定時は Codex と同じ default 表示
 reasoning_label() {
   local value="$1"
@@ -257,6 +269,7 @@ reasoning_label() {
   fi
 }
 
+# レート制限の使用率ラベルを返す
 rate_limit_label() {
   local label="$1"
   local used_percentage="$2"
@@ -273,6 +286,7 @@ rate_limit_label() {
 status_line_use_colors="$(toml_scalar "$codex_config" status_line_use_colors)"
 [[ -n "$status_line_use_colors" ]] || status_line_use_colors=true
 
+# 項目に応じた色を付けたテキストを返す
 styled() {
   local item="$1"
   local text="$2"
@@ -300,6 +314,7 @@ styled() {
   printf '\033[%sm%s\033[0m' "$code" "$text"
 }
 
+# 区切りを挟んで status_line に項目を追加
 append_segment() {
   local item="$1"
   local text="$2"
@@ -316,6 +331,7 @@ append_segment() {
   status_line+="$(styled "$item" "$text")"
 }
 
+# 入力と設定からステータスラインを組み立てて出力
 main() {
   local input
   input="$(cat)"
@@ -386,14 +402,14 @@ main() {
     context-used | context-usage)
       append_segment "$item" "Context ${context_used}% used"
       ;;
-    fast-mode)
-      append_segment "$item" "$fast_mode"
-      ;;
     five-hour-limit)
       append_segment "$item" "$(rate_limit_label "5h limit" "$input_five_hour_limit")"
       ;;
     weekly-limit)
       append_segment "$item" "$(rate_limit_label "Weekly limit" "$input_weekly_limit")"
+      ;;
+    fast-mode)
+      append_segment "$item" "$fast_mode"
       ;;
     *) ;;
     esac

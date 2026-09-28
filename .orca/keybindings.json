@@ -7,8 +7,7 @@
       "tab.previousRecent": [],
       "tab.nextTerminal": ["Ctrl+Tab", "Ctrl+PageDown"],
       "tab.previousTerminal": ["Ctrl+Shift+Tab", "Ctrl+PageUp"],
-      "terminal.splitRight": ["Mod+Shift+D"],
-      "terminal.splitDown": ["Alt+Shift+D"]
+      "terminal.splitDown": ["Mod+Shift+D", "Alt+Shift+D"]
     }
   }
 }

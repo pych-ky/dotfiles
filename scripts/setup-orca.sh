@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# 選択中のプロファイルへ Orca の共通設定だけを反映
+# Orca 共通設定の反映
 
 set -euo pipefail
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_dir="$(cd "$script_dir/.." && pwd)"
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 setup_common_library="$repo_dir/lib/setup-common.sh"
 if [[ ! -f "$setup_common_library" || -L "$setup_common_library" ]]; then
@@ -15,12 +14,12 @@ fi
 source "$setup_common_library"
 
 if ((EUID == 0)); then
-  printf 'error: do not run macos/setup-orca.sh with sudo or as root\n' >&2
+  printf 'error: do not run scripts/setup-orca.sh with sudo or as root\n' >&2
   exit 1
 fi
 
 if [[ "$(uname -s)" != Darwin ]]; then
-  printf 'error: macos/setup-orca.sh supports macOS only\n' >&2
+  printf 'error: scripts/setup-orca.sh supports macOS only\n' >&2
   exit 1
 fi
 
@@ -38,10 +37,10 @@ fi
 
 data_dir="$HOME/Library/Application Support/orca"
 profile_index="$data_dir/orca-profile-index.json"
-managed_settings="$repo_dir/.orca/settings.json"
+managed_settings="$repo_dir/macos/orca.json"
 
 if [[ ! -f "$profile_index" ]]; then
-  printf 'skipped: launch and quit Orca once, then run macos/setup-orca.sh\n'
+  printf 'skipped: launch and quit Orca once, then run scripts/setup-orca.sh\n'
   exit 0
 fi
 
@@ -71,7 +70,7 @@ process_status=0
 pgrep -xq Orca || process_status=$?
 case "$process_status" in
 0)
-  printf 'error: quit Orca, then run macos/setup-orca.sh again\n' >&2
+  printf 'error: quit Orca, then run scripts/setup-orca.sh again\n' >&2
   exit 1
   ;;
 1) ;;

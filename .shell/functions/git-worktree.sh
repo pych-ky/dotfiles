@@ -1,5 +1,6 @@
-# fzf で選んだ複数ブランチを .worktrees/<leaf> に展開（Bash / Zsh 共通）
+# Git worktree 展開
 
+# main・master を除くローカルと origin のブランチ名を重複なく列挙
 _wto_branches() {
   local repository_root="$1"
 
@@ -12,6 +13,7 @@ _wto_branches() {
     awk '!seen[$0]++'
 }
 
+# 文字列の SHA-1 の先頭6桁を返す
 _wto_hash6() {
   if command -v shasum >/dev/null 2>&1; then
     printf '%s' "$1" | shasum -a 1
@@ -20,6 +22,7 @@ _wto_hash6() {
   fi | awk '{print substr($1, 1, 6)}'
 }
 
+# 指定パスの worktree が指定ブランチを展開済みか判定
 _wto_path_has_branch() {
   local repository_root="$1"
   local worktree_path="$2"
@@ -38,6 +41,7 @@ _wto_path_has_branch() {
   '
 }
 
+# fzf で選んだ複数ブランチを .worktrees 配下に展開
 wto() {
   local repository_root
   repository_root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1

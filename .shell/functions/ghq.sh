@@ -1,3 +1,5 @@
+# ghq リポジトリ移動
+
 # ghq 管理のリポジトリを fzf で選択して移動
 cghq() {
   local repository_dir

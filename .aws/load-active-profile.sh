@@ -1,4 +1,4 @@
-# aws-use で保存した AWS プロファイルを復元
+# AWS プロファイルの復元
 
 _aws_active_profile_file="${HOME}/.aws/active-profile"
 

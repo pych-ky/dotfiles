@@ -27,26 +27,8 @@ git clone <このリポジトリ> && cd dotfiles
   - 「アプリのバックグラウンドでのアクティビティ」: Karabiner・Logi Options+・Logitech Inc をオン
   - 拡張機能 > Driver Extensions: Karabiner DriverKit VirtualHIDDevice をオン
 - Rancher Desktop: リンク先への自動追記を防ぐため、Preferences > Application > Environment > Configure PATH を Manual にする
-- [Maccy](https://github.com/p0deje/Maccy#usage)（`Cmd+Shift+C` で履歴）: 自動貼り付けには「Paste automatically」とアクセシビリティを許可
-- VS Code: Settings Sync にサインインし、「Shell Command: Install 'code' command in PATH」を実行
-- Claude Code / Codex の Linear は端末ごとに OAuth 認証
-- ChatGPT の Linear はアカウントごとに Install / Connect し、初回 OAuth 認証を手動で行う
+- [Maccy](https://github.com/p0deje/Maccy#usage): 自動貼り付けには「Paste automatically」とアクセシビリティを許可
 - Microsoft Edge: ChatGPT の「設定 > コンピューターの使用」から、使用するプロファイルに [ChatGPT 拡張機能](https://microsoftedge.microsoft.com/addons/detail/odlomjlbamekndcpllcnffbgeohgkmjh) を導入し、接続後に `@Edge` が選べることを確認
-
-### GitHub の認証
-
-Git / `gh` は HTTPS で端末ごとに認証する。
-
-```sh
-gh auth login --hostname github.com --git-protocol https
-```
-
-組織用の [ghtkn](https://github.com/suzuki-shunsuke/ghtkn) は非公開設定に従う。
-
-```sh
-ghtkn init   # 対象の GitHub App の Client ID を設定する
-ghtkn auth   # デバイスフローで認証する
-```
 
 ## 非公開設定（dotfiles-private）
 
@@ -66,7 +48,6 @@ ghtkn auth   # デバイスフローで認証する
 
 `~/.codex/config.toml` には端末固有の設定だけを置く。
 Orca は設定を同期するため、共通設定を重複させず、専用ファイルを dotfiles へリンクしない。
-公開側の `default_permissions` を使うため、端末固有設定の旧 `sandbox_mode` / `[sandbox_workspace_write]` は削除する。
 
 #### Codex App の権限
 
@@ -78,7 +59,6 @@ Orca は設定を同期するため、共通設定を重複させず、専用フ
 
 ```sh
 ./scripts/setup-git.sh
-mise install aqua:secretlint/secretlint
 ```
 
 ### Homebrew パッケージ
@@ -95,13 +75,12 @@ brew bundle upgrade --file=macos/Brewfile            # 管理対象パッケー�
 ### macOS・Typeless・Orca
 
 ```sh
-./macos/defaults.sh
-./macos/setup-typeless.sh
-./macos/setup-orca.sh
+./scripts/setup-macos.sh
+./scripts/setup-typeless.sh
+./scripts/setup-orca.sh
 ```
 
 macOS 設定は一部が再ログイン後に反映され、電源管理には事前の `sudo` 認証が必要。
-Typeless・Orca の起動・終了を求める案内が出た場合は、その案内に従って再実行する。
 
 ### キーボード
 
@@ -126,7 +105,7 @@ Windows 配列のみの機器は、Karabiner の機器別 Simple Modifications �
 ### 非公開 Codex Custom Pets
 
 ```sh
-./pets/setup.sh
+./scripts/setup-pets.sh
 ```
 
 導入先・退避・更新手順は [Pets の README](https://github.com/pych-ky/codex-custom-pets#readme) を参照。
@@ -134,12 +113,12 @@ Windows 配列のみの機器は、Karabiner の機器別 Simple Modifications �
 
 #### 更新
 
-Pets のチェックアウトで `git switch main`・`git pull --ff-only` 後、dotfiles に戻って `./pets/setup.sh` を再実行する。
+Pets のチェックアウトで `git switch main`・`git pull --ff-only` 後、dotfiles に戻って `./scripts/setup-pets.sh` を再実行する。
 
 ### 非公開 Agent Skills
 
 ```sh
-./skills/setup.sh
+./scripts/setup-skills.sh
 ```
 
 導入後は新規 Codex セッションで確認する。

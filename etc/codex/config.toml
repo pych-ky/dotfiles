@@ -1,0 +1,223 @@
+# Codex ベース設定
+
+# /etc/codex/config.toml に配置
+# 起動時に ~/.codex/config.toml (Git 管理外) とマージし、同じキーはローカルを優先
+
+
+## コア設定
+
+model        = "gpt-6-astra"
+review_model = "gpt-6-astra"
+service_tier = "default"  # 標準速度
+
+model_reasoning_effort  = "ultra"
+model_reasoning_summary = "auto"
+hide_agent_reasoning    = true  # codex exec の出力でだけ推論を隠す
+
+personality = "pragmatic"
+
+web_search = "live"
+
+suppress_unstable_features_warning = true
+
+# 認証情報を外部 CLI の store と分け、~/.codex/auth.json を Claude の Read deny で保護
+cli_auth_credentials_store = "file"
+
+
+## 承認ポリシー / パーミッション
+
+# App の「フルアクセス」は approval_policy を never に上書きする
+approval_policy     = "on-request"
+approvals_reviewer  = "user"
+default_permissions = "保護付きフルアクセス"
+
+# 旧 sandbox_mode / [sandbox_workspace_write] とは併用しない
+[permissions."保護付きフルアクセス"]
+description = "AI エージェントの認証情報と shell 履歴・snapshot を除くフルアクセス"
+
+[permissions."保護付きフルアクセス".filesystem]
+":root"                                         = "write"
+"~/.codex/plugins/cache/openai-bundled/browser" = "read"  # 信頼済み Browser RPC の改変を防ぐ
+
+# 外部 CLI の設定・認証ストア・秘密鍵・keystore・service-account・環境ファイルは内部利用のため deny 対象外
+
+# エージェントの認証情報・snapshot へのアクセスを禁止
+"~/.claude.json"                        = "deny"
+"~/.claude.json.backup"                 = "deny"
+"~/.claude/.credentials.json"           = "deny"
+"~/.claude/backups"                     = "deny"
+"~/.claude/shell-snapshots"             = "deny"
+"~/.codex-account-*/.credentials.json"  = "deny"
+"~/.codex-account-*/auth.json"          = "deny"
+"~/.codex-account-*/shell_snapshots"    = "deny"
+"~/.codex-account-*/shell_snapshots/**" = "deny"
+"~/.codex/.credentials.json"            = "deny"
+"~/.codex/auth.json"                    = "deny"
+"~/.codex/shell_snapshots"              = "deny"
+
+# シェル履歴へのアクセスを禁止
+"~/.bash_history"                  = "deny"
+"~/.bash_sessions"                 = "deny"
+"~/.local/share/fish/fish_history" = "deny"
+"~/.zsh_history"                   = "deny"
+"~/.zsh_sessions"                  = "deny"
+
+[permissions."保護付きフルアクセス".network]
+enabled = true
+
+
+## シェル環境
+
+[shell_environment_policy]
+inherit                 = "all"
+ignore_default_excludes = true                                           # 既定除外 (*KEY*・*SECRET*・*TOKEN*) を使わず TOKEN_FILE 等の非秘密パスを残す
+set                     = { GIT_TERMINAL_PROMPT = "0", AWS_PAGER = "" }  # Git 認証待ち・AWS 外部 pager を抑止
+
+# 秘密値名に一致する環境変数を除外
+# filters はテーブルで指定。exclude / include_only 配列との併用は読み込み時に拒否
+# 名前は大小文字を区別しない
+[shell_environment_policy.filters]
+"*PASSPHRASE"              = "exclude"
+"*PASSWD"                  = "exclude"
+"*PASSWORD"                = "exclude"
+"*_API_KEY"                = "exclude"
+"*_PRIVATE_KEY"            = "exclude"
+"*_SECRET"                 = "exclude"
+"*_SECRET_KEY"             = "exclude"
+"*_TOKEN"                  = "exclude"
+"API_KEY"                  = "exclude"
+"AWS_ACCESS_KEY_ID"        = "exclude"
+"AWS_BEARER_TOKEN_BEDROCK" = "exclude"
+"AWS_SECRET_ACCESS_KEY"    = "exclude"
+"COMPOSER_AUTH"            = "exclude"
+"CREDENTIALS"              = "exclude"
+"DOCKER_AUTH_CONFIG"       = "exclude"
+"GOOGLE_CREDENTIALS"       = "exclude"
+"HELM_KUBETOKEN"           = "exclude"
+"PRIVATE_KEY"              = "exclude"
+"SECRET"                   = "exclude"
+"TF_TOKEN_*"               = "exclude"
+"TOKEN"                    = "exclude"
+
+
+## 機能フラグ
+
+[features]
+hooks              = true   # 共通 PreToolUse ガードを有効化
+memories           = true
+prevent_idle_sleep = true
+shell_snapshot     = false  # shell 状態・環境変数の平文保存を防ぐ
+
+
+## 実行前ガード
+
+[[hooks.PreToolUse]]
+matcher = "^Bash$"
+
+[[hooks.PreToolUse.hooks]]
+type          = "command"
+command       = "\"$HOME/.claude/hooks/pre-bash-guard.sh\" || exit 2"
+timeout       = 30
+statusMessage = "Bash コマンドを検査中"
+
+
+## プラグイン
+
+[plugins."browser@openai-bundled"]
+enabled = true
+
+[plugins."chrome@openai-bundled"]
+enabled = true
+
+[plugins."codex-app-tools@openai-bundled"]
+enabled = true
+
+[plugins."computer-history@openai-bundled"]
+enabled = true
+
+[plugins."computer-use@openai-bundled"]
+enabled = true
+
+[plugins."documents@openai-primary-runtime"]
+enabled = true
+
+[plugins."github@openai-curated-remote"]
+enabled = true
+
+[plugins."linear@openai-curated-remote"]
+enabled = true
+
+[plugins."pdf@openai-primary-runtime"]
+enabled = true
+
+[plugins."presentations@openai-primary-runtime"]
+enabled = true
+
+[plugins."spreadsheets@openai-primary-runtime"]
+enabled = true
+
+[plugins."template-creator@openai-primary-runtime"]
+enabled = true
+
+[plugins."unified-computer-use@openai-bundled"]
+enabled = true
+
+[plugins."visualize@openai-bundled"]
+enabled = true
+
+
+## ターミナル表示
+
+[tui]
+status_line = [
+  "model-with-reasoning",
+  "permissions",  # 有効な権限プロファイル / sandbox mode
+  "current-dir",
+  "git-branch",
+  "context-used",
+  "five-hour-limit",
+  "weekly-limit",
+  "fast-mode",
+]
+
+
+## Codex App
+
+[desktop]
+enabled-reasoning-efforts = ["low", "medium", "high", "xhigh", "persistent", "max", "ultra"]
+
+ambient-suggestions-enabled = false
+
+appshotSoundEnabled = false
+
+hotkey-window-projectless-default-enabled = true  # ポップアウトウィンドウの新規タスクを既定でプロジェクトなしにする
+
+followUpQueueMode = "steer"  # 実行中の追加指示を現在の turn に反映
+
+### Git 操作
+git-branch-prefix             = ""
+git-pull-request-merge-method = "squash"
+
+### 電源管理
+preventSleepWhileRunning             = true
+keepRemoteControlAwakeWhilePluggedIn = true
+
+### 表示
+git-show-sidebar-pr-icons = true
+mac-menu-bar-enabled      = false
+show-context-window-usage = true
+
+### ライトテーマ
+[desktop.appearanceLightChromeTheme]
+accent         = "#3a83f7"
+accentSource   = "chatgpt"  # アカウントで選択したアクセント色に追従
+contrast       = 45
+fonts          = {}         # 標準フォント
+ink            = "#1a1c1f"  # 文字色
+opaqueWindows  = false      # ウィンドウの透過を許可
+semanticColors = { diffAdded = "#00a240", diffRemoved = "#ba2623", skill = "#924ff7" }
+surface        = "#ffffff"  # 背景色
+
+### ファイルを開くアプリ
+[desktop.open-in-target-preferences]
+global = "vscode"

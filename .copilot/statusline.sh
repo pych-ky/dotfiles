@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Copilot CLI のステータスラインを Codex TUI に合わせる
+# Copilot CLI ステータスライン
+
+# 表示を Codex TUI に合わせる
 
 set -euo pipefail
 

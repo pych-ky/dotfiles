@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# private Codex Custom Pets を取得し、付属インストーラで導入
+# Codex Custom Pets の導入
 
 set -euo pipefail
 
@@ -13,6 +13,7 @@ fi
 # shellcheck source=lib/setup-common.sh
 source "$setup_common_library"
 
+# / 以外で . や .. を含まない絶対パスか判定
 path_is_safe_absolute() {
   [[ "$1" == /* && "$1" != / ]] || return 1
   case "$1" in
@@ -46,10 +47,12 @@ resolve_physical_path() {
   printf '%s%s\n' "$candidate" "$suffix"
 }
 
+# 2つのパスが同一か親子関係にあるか判定
 paths_overlap() {
   [[ "$1" == "$2" || "$1" == "$2"/* || "$2" == "$1"/* ]]
 }
 
+# リポジトリと CODEX_HOME/pets が重ならないか検証
 verify_install_paths() {
   local repository_physical
   local codex_root_physical
@@ -101,6 +104,7 @@ install_repository_pets() {
   ((found)) || setup_error 'Codex Custom Pets repository does not contain installable pets'
 }
 
+# Codex Custom Pets のリポジトリを取得し、ペットを導入
 main() {
   local skip
   local strict

@@ -1,12 +1,13 @@
-## mise ツールバージョン設定
+# mise ツールバージョン設定
+
 # macos/Brewfile と重複させない
 # ~/.config/mise/config.toml に配置し、リポジトリの mise 設定で上書き可能
 
 
 [tools]
+"aqua:gruntwork-io/terragrunt" = "latest"
 "aqua:secretlint/secretlint"   = "13.0.5"
 "aqua:suzuki-shunsuke/ghtkn"   = "latest"
-"aqua:gruntwork-io/terragrunt" = "latest"
 "aqua:suzuki-shunsuke/tfcmt"   = "latest"
 aws-cli                        = { version = "latest", symlink_bins = "true" }
 deno                           = "latest"

@@ -1,22 +1,16 @@
 #!/usr/bin/env bash
+# セットアップスクリプトの共通関数
 
 SETUP_TEMPORARY_CLONE_DIR=
+PROCESS_LOCK_HELD=0
 
-setup_process_lock_library="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/process-lock.sh"
-if [[ ! -f "$setup_process_lock_library" || -L "$setup_process_lock_library" ]]; then
-  printf 'error: process lock library is missing or unsafe: %s\n' \
-    "$setup_process_lock_library" >&2
-  return 1
-fi
-# shellcheck source=lib/process-lock.sh
-source "$setup_process_lock_library"
-unset setup_process_lock_library
-
+# エラーメッセージを標準エラーに出して失敗を返す
 setup_error() {
   printf 'error: %s\n' "$1" >&2
   return 1
 }
 
+# 認証プロンプトを出さない設定で git を実行
 setup_run_noninteractive_git() {
   GIT_TERMINAL_PROMPT=0 \
     GCM_INTERACTIVE=Never \
@@ -26,6 +20,7 @@ setup_run_noninteractive_git() {
     git "$@"
 }
 
+# HOME が / 以外の既存の絶対パスか検証
 setup_validate_home() {
   local home_dir="${HOME:-}"
   local physical_home
@@ -75,6 +70,7 @@ setup_normalize_repository_dir() {
   printf '%s\n' "$repository_dir"
 }
 
+# アクセス不可を strict ならエラー、それ以外はスキップとして表示
 setup_handle_access_failure() {
   local strict="$1"
   local label="$2"
@@ -87,6 +83,7 @@ setup_handle_access_failure() {
   printf 'skipped: %s (private repository is inaccessible)\n' "$label"
 }
 
+# checkout の root・origin・実行ファイルを検証し、不一致の理由を出力
 setup_verify_repository() {
   local repository_dir="$1"
   local expected_url="$2"
@@ -133,6 +130,7 @@ setup_verify_repository() {
   fi
 }
 
+# setup_verify_repository の失敗理由をエラーとして表示
 setup_verify_repository_or_error() {
   local repository_error
 
@@ -140,6 +138,83 @@ setup_verify_repository_or_error() {
     setup_error "$repository_error"
     return 1
   fi
+}
+
+# ファイルのデバイス番号と inode を返す
+process_lock_file_identity() {
+  stat -L -f '%d:%i' "$1" 2>/dev/null
+}
+
+# ロックの記述子を閉じてエラーを表示
+process_lock_fail() {
+  exec 9>&-
+  printf 'error: %s\n' "$1" >&2
+  return 1
+}
+
+# lockf で排他し、ロック取得前後のすり替えを検出
+process_lock_acquire() {
+  local lock_path="$1"
+  local label="$2"
+  local timeout_seconds="${3:-30}"
+  local path_identity
+  local descriptor_identity
+
+  ((PROCESS_LOCK_HELD == 0)) || return 1
+  if [[ ! -d "$(dirname "$lock_path")" ]]; then
+    printf 'error: %s lock parent does not exist: %s\n' "$label" "$(dirname "$lock_path")" >&2
+    return 1
+  fi
+  if [[ -L "$lock_path" || (-e "$lock_path" && ! -f "$lock_path") ]]; then
+    printf 'error: %s lock is a legacy or invalid lock entry: %s\n' "$label" "$lock_path" >&2
+    printf '       remove it manually, then retry\n' >&2
+    return 1
+  fi
+  if [[ ! -x /usr/bin/lockf ]]; then
+    printf 'error: /usr/bin/lockf is required for %s lock\n' "$label" >&2
+    return 1
+  fi
+
+  # bash 3.2 は記述子の変数指定に非対応
+  if ! exec 9>>"$lock_path"; then
+    printf 'error: failed to open %s lock: %s\n' "$label" "$lock_path" >&2
+    return 1
+  fi
+  if [[ ! -f "$lock_path" || -L "$lock_path" ]]; then
+    process_lock_fail "unsafe $label lock path: $lock_path"
+    return 1
+  fi
+  if ! path_identity="$(process_lock_file_identity "$lock_path")"; then
+    process_lock_fail "failed to inspect $label lock: $lock_path"
+    return 1
+  fi
+  if ! descriptor_identity="$(stat -f '%d:%i' <&9 2>/dev/null)"; then
+    process_lock_fail "failed to inspect $label lock: $lock_path"
+    return 1
+  fi
+  if [[ "$path_identity" != "$descriptor_identity" ]]; then
+    process_lock_fail "$label lock changed while opening: $lock_path"
+    return 1
+  fi
+
+  if ! /usr/bin/lockf -s -t "$timeout_seconds" 9; then
+    process_lock_fail "timed out waiting for $label lock: $lock_path"
+    return 1
+  fi
+  if [[ ! -f "$lock_path" || -L "$lock_path" ]] ||
+    [[ "$(process_lock_file_identity "$lock_path" || true)" != "$path_identity" ]]; then
+    process_lock_fail "$label lock changed while waiting: $lock_path"
+    return 1
+  fi
+
+  PROCESS_LOCK_HELD=1
+}
+
+# 保持中のロックを解放
+process_lock_release() {
+  ((PROCESS_LOCK_HELD)) || return 0
+  exec 9>&-
+  PROCESS_LOCK_HELD=0
 }
 
 # private checkout を用意。アクセス不可でスキップ時は 3 を返す

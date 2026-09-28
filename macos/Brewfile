@@ -1,97 +1,102 @@
+# Homebrew パッケージ
+
 # OS 全体の CLI・GUI を管理。開発ツールは .config/mise/config.toml に集約
 # 任意の GUI はコメントアウトを外し、brew bundle --file=macos/Brewfile で導入
 
-# 外部 tap
+## 外部 tap
 tap "stablyai/orca"
 
-# CLI (formula)
+## CLI
 
-# シェル / ターミナル UX
+### シェル / ターミナル UX
 brew "bash"
-brew "starship"
 brew "fzf"
+brew "starship"
 brew "zoxide"
-brew "herdr"
 
-# 基本ユーティリティ
+### 基本ユーティリティ
 brew "coreutils"
-brew "gnu-sed"
 brew "duti"
+brew "gnu-sed"
+brew "jq"
 brew "ripgrep"
 brew "tree"
-brew "jq"
 brew "yq"
-brew "shfmt"
-brew "shellcheck"
-brew "actionlint"
 
-# Git / GitHub
+### Git / GitHub
+brew "gh"
+brew "ghq"
+brew "gibo"
 brew "git"
 brew "git-lfs"
 brew "lazygit"
-brew "gibo"
-brew "gh"
-brew "ghq"
-# secretlint は mise の公式バイナリを使用
 
-# ランタイム / パッケージツール
+### ランタイム / パッケージツール
 brew "mise"
 brew "uv"
 
-# クラウド / IaC / ポリシー / Kubernetes
-# aws / terraform / terragrunt / tflint は mise、kubectl / helm は Rancher Desktop (~/.rd/bin)
+### Lint / フォーマッタ
+# secretlint は mise の公式バイナリを使用
+brew "actionlint"
+brew "shellcheck"
+brew "shfmt"
+
+### AI ツール
+cask "copilot-cli"
+brew "herdr"
+
+### クラウド / IaC / ポリシー / Kubernetes
+# aws / terraform / terragrunt / tflint は mise
 brew "azure-cli"
+cask "gcloud-cli"
 brew "opa"
 brew "openshift-cli"
 brew "rosa-cli"
+cask "session-manager-plugin"
 brew "trivy"
 
-# DB
+### DB
 # keg-only の psql 等は .zshrc で PATH に追加
 brew "libpq"
 
-# GUI アプリ (cask)
+## GUI アプリ
 
-# ブラウザ
+### ブラウザ
 # cask "google-chrome"
 cask "microsoft-edge"
 
-# ターミナル
+### ターミナル
 cask "ghostty"
 cask "wezterm"
 
-# 開発エディタ / AI ツール
-# cask "visual-studio-code" # 設定・拡張は VS Code Settings Sync 側で管理
-# cask "claude"
+### 開発エディタ / AI ツール
 cask "chatgpt"
+# cask "claude"
 cask "stablyai/orca/orca"
-cask "copilot-cli"
+# cask "visual-studio-code"  # 設定・拡張は VS Code Settings Sync 側で管理
 
-# コミュニケーション / コラボレーション
-# cask "slack"
+### コミュニケーション / コラボレーション
 cask "notion"
+# cask "slack"
 
-# 入力 / ウィンドウ管理
+### 入力 / ウィンドウ管理
 cask "karabiner-elements"
-cask "typeless"
+cask "logi-options+"
 cask "rectangle"
+cask "typeless"
 
-# ユーティリティ
+### ユーティリティ
 cask "appcleaner"
 cask "licecap"
-cask "logi-options+"
 cask "maccy"
 cask "notunes"
 cask "raycast"
 
-# セキュリティ / パスワード管理
+### セキュリティ / パスワード管理
 # cask "1password"
 
-# コンテナ / 仮想化 (docker / kubectl / helm の CLI は ~/.rd/bin 同梱)
-cask "rancher"
+### コンテナ / 仮想化
 # Rancher Desktop と競合するため併用しない
 # cask "docker-desktop"
-
-# クラウド CLI (cask 配布)
-cask "gcloud-cli"
-cask "session-manager-plugin"
+# docker / kubectl / helm の CLI は Rancher Desktop の ~/.rd/bin に同梱
+cask "rancher"
