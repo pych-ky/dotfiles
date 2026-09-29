@@ -3,7 +3,8 @@
   "cleanupPeriodDays": 20,
   "env": {
     "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
-    "GIT_TERMINAL_PROMPT": "0"
+    "GIT_TERMINAL_PROMPT": "0",
+    "PLAYWRIGHT_MCP_CDP_ENDPOINT": "msedge"
   },
   "attribution": {
     "commit": "",
@@ -238,7 +239,8 @@
   },
   "enabledPlugins": {
     "linear@claude-plugins-official": true,
-    "microsoft-docs@claude-plugins-official": true
+    "microsoft-docs@claude-plugins-official": true,
+    "playwright@claude-plugins-official": true
   },
   "language": "日本語",
   "modelSettings": {

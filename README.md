@@ -23,12 +23,17 @@ git clone <このリポジトリ> && cd dotfiles
   - 必要なアプリにフルディスクアクセス・アクセシビリティ・入力監視を許可
   - ログイン項目の登録には、オートメーションで System Events を許可
 - システム設定 > 一般 > ログイン項目と拡張機能
-  - 「ログイン時に開く」: Maccy・Rectangle・Stats・Typeless の登録と Logi Options+ の未登録を確認
+  - 「ログイン時に開く」: Maccy・Rectangle・Stats・Typeless の登録を確認
   - 「アプリのバックグラウンドでのアクティビティ」: Karabiner・Logi Options+・Logitech Inc をオン
   - 拡張機能 > Driver Extensions: Karabiner DriverKit VirtualHIDDevice をオン
+- メニューバーの日本語入力メニュー > ユーザ辞書を編集
+  - `しかく` → `■` / `ほし` → `★` / `やじるし` → `→` / `かっこ` → `「」` を登録
 - Rancher Desktop: リンク先への自動追記を防ぐため、Preferences > Application > Environment > Configure PATH を Manual にする
 - [Maccy](https://github.com/p0deje/Maccy#usage): 自動貼り付けには「Paste automatically」とアクセシビリティを許可
 - Microsoft Edge: ChatGPT の「設定 > コンピューターの使用」から、使用するプロファイルに [ChatGPT 拡張機能](https://microsoftedge.microsoft.com/addons/detail/odlomjlbamekndcpllcnffbgeohgkmjh) を導入し、接続後に `@Edge` が選べることを確認
+- Claude Code の Playwright MCP
+  - Edge の `edge://inspect/#remote-debugging` で「Allow remote debugging for this browser instance」を有効にする（[接続方式](https://playwright.dev/mcp/configuration/browser-extension)）
+  - 設定後は Claude Code を新規起動し、接続時の許可ダイアログを確認
 
 ## 非公開設定（dotfiles-private）
 
@@ -81,6 +86,14 @@ brew bundle upgrade --file=macos/Brewfile            # 管理対象パッケー�
 ```
 
 macOS 設定は一部が再ログイン後に反映され、電源管理には事前の `sudo` 認証が必要。
+
+### メニューバー
+
+```sh
+./scripts/setup-menubar.sh
+```
+
+アプリのメニューバーへの表示許可は「システム設定 > メニューバー」で設定する。
 
 ### キーボード
 
