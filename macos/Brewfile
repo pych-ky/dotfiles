@@ -91,6 +91,7 @@ cask "licecap"
 cask "maccy"
 cask "notunes"
 cask "raycast"
+cask "stats"
 
 ### セキュリティ / パスワード管理
 # cask "1password"

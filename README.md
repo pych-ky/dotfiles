@@ -23,7 +23,7 @@ git clone <このリポジトリ> && cd dotfiles
   - 必要なアプリにフルディスクアクセス・アクセシビリティ・入力監視を許可
   - ログイン項目の登録には、オートメーションで System Events を許可
 - システム設定 > 一般 > ログイン項目と拡張機能
-  - 「ログイン時に開く」: Maccy・Rectangle・Typeless の登録と Logi Options+ の未登録を確認
+  - 「ログイン時に開く」: Maccy・Rectangle・Stats・Typeless の登録と Logi Options+ の未登録を確認
   - 「アプリのバックグラウンドでのアクティビティ」: Karabiner・Logi Options+・Logitech Inc をオン
   - 拡張機能 > Driver Extensions: Karabiner DriverKit VirtualHIDDevice をオン
 - Rancher Desktop: リンク先への自動追記を防ぐため、Preferences > Application > Environment > Configure PATH を Manual にする
