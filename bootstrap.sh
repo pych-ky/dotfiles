@@ -452,7 +452,8 @@ setup_claude_plugins() {
 
   for plugin in \
     linear@claude-plugins-official \
-    microsoft-docs@claude-plugins-official; do
+    microsoft-docs@claude-plugins-official \
+    playwright@claude-plugins-official; do
     if json_array_contains "$plugins" "$plugin"; then
       continue
     fi
@@ -572,6 +573,7 @@ trap - EXIT
 run_and_record 'Git settings' "$repo_dir/scripts/setup-git.sh"
 run_and_record 'Typeless settings' "$repo_dir/scripts/setup-typeless.sh"
 run_and_record 'Orca settings' "$repo_dir/scripts/setup-orca.sh"
+run_and_record 'Menu bar settings' "$repo_dir/scripts/setup-menubar.sh"
 
 step 'Zsh plugins'
 setup_zsh_plugins

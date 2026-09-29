@@ -23,7 +23,7 @@
 	<key>launchOnLogin</key>
 	<true/>
 	<key>hideMenubarIcon</key>
-	<false/>
+	<true/>
 	<key>reflowTodo</key>
 	<dict>
 		<key>keyCode</key>
