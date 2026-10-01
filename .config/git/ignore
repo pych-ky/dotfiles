@@ -3,3 +3,5 @@ mise.local.toml
 **/.claude/.cc-writes/
 
 **/.claude/settings.local.json
+
+.playwright-mcp/

@@ -571,6 +571,11 @@ sudo -k 2>/dev/null || true
 trap - EXIT
 
 run_and_record 'Git settings' "$repo_dir/scripts/setup-git.sh"
+if [[ /etc/codex/config.toml -ef "$repo_dir/etc/codex/config.toml" ]]; then
+  run_optional_setup 'Codex permissions' "$repo_dir/scripts/setup-codex.sh"
+else
+  record_skip 'Codex permissions (base configuration is not installed)'
+fi
 run_and_record 'Typeless settings' "$repo_dir/scripts/setup-typeless.sh"
 run_and_record 'Orca settings' "$repo_dir/scripts/setup-orca.sh"
 run_and_record 'Menu bar settings' "$repo_dir/scripts/setup-menubar.sh"
