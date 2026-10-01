@@ -30,9 +30,8 @@ usage() {
 使い方: ./scripts/link-dotfiles.sh [--dry-run] [-h | --help]
 
 このリポジトリのファイルを $HOME 配下へシンボリックリンクする。
-Claude の設定はコピーし、個人のプラグイン・マーケットプレイス登録と Orca・herdr のフックを保持する。
 Codex Browser の設定は、Codex がこのパスのシンボリックリンクを拒否するため通常ファイルとしてコピーする。
-Orca のキー設定と Copilot CLI の設定は、アプリの書き込みをリポジトリから分離するため通常ファイルとしてコピーする。
+Orca のキー設定は、アプリの保存時にシンボリックリンクが通常ファイルへ置き換わるためコピーする。
 etc/codex/config.toml は sudo で /etc/codex/config.toml へリンクし、既存のファイルや別のリンクがあればエラーにする。
 $HOME 配下の既存の通常ファイル・ディレクトリは、先に ~/.dotfiles-backup/<timestamp>[-<sequence>]/ へ退避する。
 
@@ -69,7 +68,7 @@ report_link() {
   printf 'changed: linked %s -> %s\n' "$1" "$2"
 }
 
-# ツールの書き込みをリポジトリから分離するためコピー
+# リンクを使えない設定を通常ファイルとしてコピー
 copy_regular_file() {
   local source_relative="$1"
   local target_relative="${2:-$1}"
@@ -99,68 +98,6 @@ copy_regular_file() {
   run cp -p "$source" "$target" || return
   if ((!dry_run)); then
     printf 'changed: copied %s <- %s\n' "$target" "$source"
-  fi
-}
-
-# 公開設定を優先し、個人のプラグイン登録と Orca・herdr のフックを保持
-install_claude_settings() {
-  local source_relative='.claude/settings.json'
-  local source="$repo_dir/$source_relative"
-  local target="$HOME/$source_relative"
-  local merged_settings
-
-  if [[ ! -f "$source" || -L "$source" || ! -f "$target" ]] ||
-    cmp -s "$source" "$target"; then
-    copy_regular_file "$source_relative"
-    return
-  fi
-
-  if ! command -v jq >/dev/null 2>&1; then
-    printf 'error: jq is required to preserve Claude user plugins and Orca/herdr hooks; install jq and rerun\n' >&2
-    return 1
-  fi
-  merged_settings="$(
-    jq -s '
-      # Orca・herdr が登録したフックだけから成るグループか判定
-      def managed_hook_group:
-        (.hooks | type) == "array" and (.hooks | length) > 0 and
-        all(.hooks[]; type == "object" and (.command | type) == "string" and
-          (.command | test("/\\.orca/agent-hooks/claude-hook\\.(sh|cmd)(?![\\w.])") or
-            test("/\\.claude/hooks/herdr-agent-state\\.sh(?![\\w.])")));
-
-      .[0] as $base | .[1] as $current |
-      reduce ["enabledPlugins", "extraKnownMarketplaces"][] as $key ($base;
-        if $current | has($key) then
-          .[$key] = (($current[$key] // {}) + ($base[$key] // {}))
-        else
-          .
-        end
-      ) |
-      reduce ($current.hooks | objects | to_entries[]) as $event (.;
-        ([$event.value | arrays[] | objects | select(managed_hook_group)] - (.hooks[$event.key] // [])) as $groups |
-        if ($groups | length) > 0 then
-          .hooks[$event.key] = ((.hooks[$event.key] // []) + $groups)
-        else
-          .
-        end
-      )
-    ' "$source" "$target"
-  )" || return
-  if [[ ! -L "$target" ]] &&
-    cmp -s "$target" <(printf '%s\n' "$merged_settings"); then
-    return 0
-  fi
-
-  run mkdir -p "$(dirname "$target")" || return
-  # マージ済みなのでリポジトリ版との差異は記録しない
-  backup_existing_target "$target" || return
-
-  if ((dry_run)); then
-    printf 'info: would update Claude settings: %s (user plugins and Orca/herdr hooks preserved)\n' "$target"
-  else
-    printf '%s\n' "$merged_settings" >"$target" || return
-    chmod 600 "$target" || return
-    printf 'changed: updated Claude settings: %s (user plugins and Orca/herdr hooks preserved)\n' "$target"
   fi
 }
 
@@ -409,7 +346,9 @@ main() {
     ".claude/hooks/pre-bash-guard.py"
     ".claude/hooks/pre-bash-guard.sh"
     ".claude/hooks/statusline.sh"
+    ".claude/settings.json"
     ".config/agents/AGENTS.md"
+    ".copilot/settings.json"
     ".copilot/statusline.sh"
   )
 
@@ -435,20 +374,12 @@ main() {
     fi
   done
 
-  if ! install_claude_settings; then
-    failed_items+=(".claude/settings.json")
-  fi
-
   if ! copy_regular_file ".codex/browser/config.toml"; then
     failed_items+=(".codex/browser/config.toml")
   fi
 
   if ! copy_regular_file ".orca/keybindings.json"; then
     failed_items+=(".orca/keybindings.json")
-  fi
-
-  if ! copy_regular_file ".copilot/settings.json"; then
-    failed_items+=(".copilot/settings.json")
   fi
 
   if ! link_file ".config/agents/AGENTS.md" ".codex/AGENTS.md"; then
