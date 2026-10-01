@@ -12,8 +12,87 @@ git clone <このリポジトリ> && cd dotfiles
 ./bootstrap.sh
 ```
 
-警告・未実施項目を解消し、[手動セットアップ](#手動セットアップ)へ進む。
 設定の多くはリンクされ、編集が実環境に反映される。
+macOS 設定の一部は再ログイン後に反映される。
+
+警告・未実施項目を解消し、[手動セットアップ](#手動セットアップ)へ進む。
+
+## 個別セットアップ
+
+### Homebrew パッケージ
+
+```sh
+brew bundle --no-upgrade --file=macos/Brewfile       # 不足パッケージのインストール
+brew bundle upgrade --file=macos/Brewfile            # 管理対象パッケージのアップグレード
+```
+
+### シンボリックリンク
+
+```sh
+./scripts/link-dotfiles.sh --dry-run   # 事前確認のみ
+./scripts/link-dotfiles.sh             # リンク作成
+```
+
+通常ファイル・ディレクトリは `~/.dotfiles-backup/` に退避し、最新 5 世代を保持する。
+差異を警告されたら、端末の変更をリポジトリか `~/.zshrc.local` などへ統合して再実行する。
+
+Orca は設定を同期するため、共通設定を重複させず、専用ファイルを dotfiles へリンクしない。
+Orca のキーバインド変更は `scripts/link-dotfiles.sh` でコピー後、キーボード設定で再読み込みするか再起動する。
+
+### Git 共通設定
+
+```sh
+./scripts/setup-git.sh
+```
+
+### macOS・Typeless・Orca
+
+```sh
+./scripts/setup-macos.sh
+./scripts/setup-typeless.sh
+./scripts/setup-orca.sh
+```
+
+電源管理の設定には事前の `sudo` 認証が必要。
+
+### メニューバー
+
+```sh
+./scripts/setup-menubar.sh
+```
+
+アプリのメニューバーへの表示許可は「システム設定 > メニューバー」で設定する。
+
+### Codex App の権限
+
+`~/.codex/config.toml` には端末固有の設定だけを置く。
+
+個別に反映する場合は、ChatGPT/Codex を終了して次を実行する。
+
+```sh
+./scripts/setup-codex.sh --dry-run
+./scripts/setup-codex.sh
+```
+
+再起動後は拡張機能のサイドパネルも開き直し、新規タスクを開始する。
+既存タスクは旧承認方式を引き継ぐ。
+組み込みの「フルアクセス」を選び直すと承認方式が `never` に戻る。
+
+### 非公開 Codex Custom Pets
+
+```sh
+./scripts/setup-pets.sh
+```
+
+導入先・退避・更新手順は [Pets の README](https://github.com/pych-ky/codex-custom-pets#readme) を参照。
+
+### 非公開 Agent Skills
+
+```sh
+./scripts/setup-skills.sh
+```
+
+導入・更新手順は [Agent Skills の README](https://github.com/pych-ky/agent-skills#readme) を参照。
 
 ## 手動セットアップ
 
@@ -29,81 +108,12 @@ git clone <このリポジトリ> && cd dotfiles
 - メニューバーの日本語入力メニュー > ユーザ辞書を編集
   - `しかく` → `■` / `ほし` → `★` / `やじるし` → `→` / `かっこ` → `「」` を登録
 - Rancher Desktop: リンク先への自動追記を防ぐため、Preferences > Application > Environment > Configure PATH を Manual にする
-- [Maccy](https://github.com/p0deje/Maccy#usage): 自動貼り付けには「Paste automatically」とアクセシビリティを許可
-- Microsoft Edge: ChatGPT の「設定 > コンピューターの使用」から、使用するプロファイルに [ChatGPT 拡張機能](https://microsoftedge.microsoft.com/addons/detail/odlomjlbamekndcpllcnffbgeohgkmjh) を導入し、接続後に `@Edge` が選べることを確認
 - Claude Code の Playwright MCP
   - Edge の `edge://inspect/#remote-debugging` で「Allow remote debugging for this browser instance」を有効にする（[接続方式](https://playwright.dev/mcp/configuration/browser-extension)）
-  - 設定後は Claude Code を新規起動し、接続時の許可ダイアログを確認
-
-## 非公開設定（dotfiles-private）
-
-[dotfiles-private](https://github.com/pych-ky/dotfiles-private) はアクセス可能な場合だけ自動取得・適用する。
-
-## 個別セットアップ
-
-### シンボリックリンク
-
-```sh
-./scripts/link-dotfiles.sh --dry-run   # 事前確認のみ
-./scripts/link-dotfiles.sh             # リンク作成
-```
-
-通常ファイル・ディレクトリは `~/.dotfiles-backup/` に退避し、最新 5 世代を保持する。
-差異を警告されたら、端末の変更をリポジトリか `~/.zshrc.local` などへ統合して再実行する。
-
-`~/.codex/config.toml` には端末固有の設定だけを置く。
-Orca は設定を同期するため、共通設定を重複させず、専用ファイルを dotfiles へリンクしない。
-
-#### Codex App の権限
-
-リンク後は Codex を終了し、承認メニューで「保護付きフルアクセス」を選んで新規タスクを開始する。
-最後に選んだ権限が設定値より優先され、既存タスクは旧承認方式を引き継ぐ。
-組み込みの「フルアクセス」は承認を無効化し、Computer Use の接続も拒否される場合がある。
-
-### Git 共通設定
-
-```sh
-./scripts/setup-git.sh
-```
-
-### Homebrew パッケージ
-
-```sh
-brew bundle --no-upgrade --file=macos/Brewfile       # 不足パッケージのインストール
-brew bundle upgrade --file=macos/Brewfile            # 管理対象パッケージのアップグレード
-```
-
-### シェルのファジー検索
-
-新規ターミナルで `cghq [検索語]`（Zsh は `Ctrl+G` も可）を使い、ghq リポジトリへ移動する。
-
-### macOS・Typeless・Orca
-
-```sh
-./scripts/setup-macos.sh
-./scripts/setup-typeless.sh
-./scripts/setup-orca.sh
-```
-
-macOS 設定は一部が再ログイン後に反映され、電源管理には事前の `sudo` 認証が必要。
-
-### メニューバー
-
-```sh
-./scripts/setup-menubar.sh
-```
-
-アプリのメニューバーへの表示許可は「システム設定 > メニューバー」で設定する。
 
 ### キーボード
 
-端末の処理中断には、印字された左 `Command+C` を使う。
-
-Orca の変更は `scripts/link-dotfiles.sh` でコピー後、キーボード設定で再読み込みするか再起動する。
-Ghostty は `Ctrl+Shift+,`、Karabiner・WezTerm は自動で再読み込みする。
-
 外付けキーボードは Mac モードを使う。
-Windows 配列のみの機器は、Karabiner の機器別 Simple Modifications で `left_command → left_control`、`left_option → left_option` を指定する。
 
 #### Keychron K8 Pro 本体の移行
 
@@ -114,29 +124,3 @@ Windows 配列のみの機器は、Karabiner の機器別 Simple Modifications �
 4. 左 Ctrl 位置でのコピー、かな・英数、F13、Fn 音量操作を確認する
 
 復元時は旧レイアウトを読み込み、Karabiner の Keychron 機器設定に左 Control / Option / Command を各々同じキーへ変換する 3 件を追加する。
-
-### 非公開 Codex Custom Pets
-
-```sh
-./scripts/setup-pets.sh
-```
-
-導入先・退避・更新手順は [Pets の README](https://github.com/pych-ky/codex-custom-pets#readme) を参照。
-導入後は Codex の `Settings → Pets → Refresh` を実行する。
-
-#### 更新
-
-Pets のチェックアウトで `git switch main`・`git pull --ff-only` 後、dotfiles に戻って `./scripts/setup-pets.sh` を再実行する。
-
-### 非公開 Agent Skills
-
-```sh
-./scripts/setup-skills.sh
-```
-
-導入後は新規 Codex セッションで確認する。
-配置・選択・単体導入・クラウドルーティンは [Agent Skills の README](https://github.com/pych-ky/agent-skills#readme) を参照。
-
-#### 更新
-
-Agent Skills のチェックアウトで `git pull --ff-only`・`./setup.sh` を実行する。
