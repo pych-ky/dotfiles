@@ -440,6 +440,7 @@ main() {
     ".shell/functions/codex.sh"
     ".shell/functions/ghq.sh"
     ".shell/functions/git-worktree.sh"
+    ".zprofile"
     ".zshenv"
     ".zshrc"
     # ターミナル

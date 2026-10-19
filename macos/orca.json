@@ -36,10 +36,12 @@
   "computerAwakeMode": "on",
   "defaultTuiAgent": "codex",
   "diffShowWhitespace": true,
+  "diffWordWrap": true,
   "experimentalAgentDashboardPopout": true,
   "experimentalAgentDashboardShowIdle": true,
   "experimentalNativeChat": false,
   "experimentalStructuredNativeChat": true,
+  "floatingTerminalEnabled": false,
   "keepComputerAwakeWhileAgentsRun": true,
   "nativeChatResumeWorkOnRestart": true,
   "nativeChatSessionOptions": {
@@ -53,6 +55,7 @@
     }
   },
   "refreshLocalBaseRefOnWorktreeCreate": true,
+  "showMobileButton": false,
   "skipCloseTerminalWithRunningProcessConfirm": true,
   "skipDeleteWorktreeConfirm": true,
   "sourceControlGroupOrder": "staged-first",

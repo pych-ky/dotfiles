@@ -28,6 +28,7 @@ brew "ghq"
 brew "gibo"
 brew "git"
 brew "git-lfs"
+brew "gitleaks"
 brew "lazygit"
 
 ### ランタイム / パッケージツール
