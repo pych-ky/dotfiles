@@ -8,7 +8,7 @@
 
 model        = "gpt-6.1-sol"
 review_model = "gpt-6.1-sol"
-service_tier = "default"  # 標準速度
+service_tier = "fast"
 
 model_reasoning_effort  = "ultra"
 model_reasoning_summary = "auto"

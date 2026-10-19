@@ -235,11 +235,27 @@ setup_homebrew_and_bundle() {
 setup_login_items() {
   local logi_options_app=/Applications/logioptionsplus.app
   local login_item_app
+  local system_events_status=0
 
-  open -g -a 'System Events' || {
-    record_failure 'launch System Events' "$?" || return
+  # 起動直後の -600 に限り、ログイン項目へ応答できるまで再試行
+  osascript <<'APPLESCRIPT' || system_events_status=$?
+repeat with attempt from 1 to 3
+  try
+    tell application "System Events"
+      launch
+      count login items
+    end tell
+    exit repeat
+  on error errorMessage number errorNumber
+    if errorNumber is not -600 or attempt is 3 then error errorMessage number errorNumber
+    delay 0.5
+  end try
+end repeat
+APPLESCRIPT
+  if ((system_events_status != 0)); then
+    record_failure 'launch System Events' "$system_events_status" || return
     return 0
-  }
+  fi
 
   # Logi Options+ はサービスで常駐するため、メインアプリの自動起動は不要
   run_and_record \
@@ -358,112 +374,6 @@ json_array_contains() {
   jq -e --arg value "$2" 'index($value) != null' <<<"$1" >/dev/null
 }
 
-# Claude Code に登録済みの marketplace 名を JSON 配列で返す
-list_claude_marketplaces() {
-  "$1" plugin marketplace list --json |
-    jq -ce '
-      arrays // error("expected an array")
-      | [.[] | objects | .name? | strings]
-    '
-}
-
-# Claude Code のユーザースコープのプラグイン ID を JSON 配列で返す
-list_claude_user_plugins() {
-  "$1" plugin list --json |
-    jq -ce '
-      arrays // error("expected an array")
-      | [.[] | objects | select(.scope == "user") | .id? | strings]
-    '
-}
-
-# 公式 marketplace を登録。戻り値は 0=登録済み、1=登録不可、他=中断
-ensure_claude_marketplace() {
-  local executable="$1"
-  local marketplaces="$2"
-  local add_status=0
-  local verify_status
-
-  if json_array_contains "$marketplaces" claude-plugins-official; then
-    return 0
-  fi
-
-  "$executable" plugin marketplace add \
-    anthropics/claude-plugins-official --scope user || add_status=$?
-  if ((add_status != 0)); then
-    record_failure 'Claude Code marketplace: claude-plugins-official' "$add_status" || return
-  fi
-
-  if marketplaces="$(list_claude_marketplaces "$executable")" &&
-    json_array_contains "$marketplaces" claude-plugins-official; then
-    return 0
-  else
-    verify_status=$?
-  fi
-
-  # 追加失敗との重複記録を避ける
-  if ((add_status == 0)); then
-    record_failure 'Claude Code marketplace verification' "$verify_status" || return
-  fi
-  return 1
-}
-
-# Claude Code のプラグインを公式 marketplace から導入・削除
-setup_claude_plugins() {
-  local executable
-  local marketplaces
-  local plugins
-  local plugin
-  local marketplace_status
-
-  if ! executable="$(resolve_user_executable claude)"; then
-    record_skip 'Claude Code plugins (Claude Code is unavailable)'
-    return 0
-  fi
-  if ! command -v jq >/dev/null 2>&1; then
-    record_skip 'Claude Code plugins (jq is unavailable)'
-    return 0
-  fi
-
-  marketplaces="$(list_claude_marketplaces "$executable")" || {
-    record_failure 'Claude Code marketplace list' "$?"
-    record_skip 'Claude Code plugins (official marketplace could not be inspected)'
-    return 0
-  }
-
-  marketplace_status=0
-  ensure_claude_marketplace "$executable" "$marketplaces" || marketplace_status=$?
-  if ((marketplace_status != 0)); then
-    # 中断は即時伝播
-    ((marketplace_status == 1)) || return "$marketplace_status"
-    record_skip 'Claude Code plugins (official marketplace could not be registered)'
-    return 0
-  fi
-
-  plugins="$(list_claude_user_plugins "$executable")" || {
-    record_failure 'Claude Code plugin list' "$?"
-    return 0
-  }
-
-  if json_array_contains "$plugins" context7@claude-plugins-official; then
-    run_and_record \
-      'remove Claude Code plugin: context7@claude-plugins-official' \
-      "$executable" plugin uninstall context7@claude-plugins-official --scope user
-  fi
-
-  for plugin in \
-    linear@claude-plugins-official \
-    microsoft-docs@claude-plugins-official \
-    playwright@claude-plugins-official; do
-    if json_array_contains "$plugins" "$plugin"; then
-      continue
-    fi
-
-    run_and_record \
-      "Claude Code plugin: $plugin" \
-      "$executable" plugin install "$plugin" --scope user
-  done
-}
-
 # Codex に Linear プラグインを導入
 setup_codex_plugins() {
   local executable
@@ -571,13 +481,8 @@ sudo -k 2>/dev/null || true
 trap - EXIT
 
 run_and_record 'Git settings' "$repo_dir/scripts/setup-git.sh"
-if [[ /etc/codex/config.toml -ef "$repo_dir/etc/codex/config.toml" ]]; then
-  run_optional_setup 'Codex permissions' "$repo_dir/scripts/setup-codex.sh"
-else
-  record_skip 'Codex permissions (base configuration is not installed)'
-fi
 run_and_record 'Typeless settings' "$repo_dir/scripts/setup-typeless.sh"
-run_and_record 'Orca settings' "$repo_dir/scripts/setup-orca.sh"
+run_optional_setup 'Orca settings' "$repo_dir/scripts/setup-orca.sh"
 run_and_record 'Menu bar settings' "$repo_dir/scripts/setup-menubar.sh"
 
 step 'Zsh plugins'
@@ -588,7 +493,6 @@ setup_mise_tools
 
 step 'Claude Code'
 install_user_cli claude 'Claude Code installer' https://claude.ai/install.sh /bin/bash
-setup_claude_plugins
 
 step 'Codex'
 install_user_cli codex 'Codex installer' \

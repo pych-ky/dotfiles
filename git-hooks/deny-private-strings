@@ -14,6 +14,7 @@ fi
 config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/dotfiles"
 # 非公開側で配置。1 行 1 固定文字列、大文字小文字を区別しない
 denylist_file="$config_dir/denylist.txt"
+public_url_origins_file="$config_dir/public-url-origins.txt"
 # 業務用 remote のパターン。全 remote と push 先が一致するリポジトリでは検査を省略
 work_remotes_file="$config_dir/work-remotes.txt"
 
@@ -34,6 +35,58 @@ patterns() {
 if [[ -z "$(patterns)" ]]; then
   exit 0
 fi
+
+# 公開 URL のホストだけを除外し、残る禁止文字列を元の行で報告する
+filter_public_origins() {
+  if [[ ! -r "$public_url_origins_file" ]]; then
+    cat
+    return
+  fi
+
+  awk -v mode="$mode" '
+    FILENAME == ARGV[1] {
+      origin = tolower($0)
+      if (origin !~ /^https:\/\/[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/) {
+        print "error: public-url-origins.txt は https://host 形式で指定してください" > "/dev/stderr"
+        exit 2
+      }
+      origins[++origin_count] = origin
+      next
+    }
+    FILENAME == ARGV[2] {
+      denied[++deny_count] = tolower($0)
+      next
+    }
+    {
+      text = tolower($0)
+      for (i = 1; i <= origin_count; i++) {
+        origin = origins[i]
+        offset = 1
+        while ((position = index(substr(text, offset), origin)) > 0) {
+          position += offset - 1
+          before = position == 1 ? "" : substr(text, position - 1, 1)
+          after = substr(text, position + length(origin), 1)
+          # 差分の追加・削除記号の直後も内容の行頭として扱う
+          at_start = position == 1 ||
+            (mode == "pre-push" && position == 2 && before ~ /^[+-]$/)
+          if ((at_start || before ~ /[[:space:]]/ || index("<>\"\047`([{=:", before)) &&
+              (after == "" || after ~ /[[:space:]]/ || index("/?#<>\"\047`)]}", after))) {
+            text = substr(text, 1, position - 1) "https:// " substr(text, position + length(origin))
+            offset = position + length("https:// ")
+          } else {
+            offset = position + length(origin)
+          }
+        }
+      }
+      for (i = 1; i <= deny_count; i++) {
+        if (index(text, denied[i])) {
+          print $0
+          break
+        }
+      }
+    }
+  ' <(strip_pattern_file "$public_url_origins_file") <(patterns) -
+}
 
 # シンボリックリンクをたどった実体の絶対パスを返す
 resolve_path() {
@@ -134,9 +187,11 @@ scan_pre_commit() {
 
   # 対象ファイル全体を index で検査（-I でバイナリを除外）
   hit="$(
-    git grep --cached --no-color -I -n -i -F -f <(patterns) -- "${paths[@]}" ||
-      true
-  )"
+    {
+      git grep --cached --no-color -I -n -i -F -f <(patterns) -- "${paths[@]}" ||
+        [[ $? == 1 ]]
+    } | filter_public_origins
+  )" || return 1
   [[ -n "$hit" ]] && report 'ステージ済みの内容が一致しました' <<<"$hit"
 
   return 0
@@ -184,7 +239,8 @@ scan_pre_push() {
       hit="$(
         git show --format='%B' -U0 --no-color --no-ext-diff --no-textconv \
           "$commit" -- 2>/dev/null |
-          { grep -iF -f <(patterns) || [[ $? == 1 ]]; }
+          { grep -iF -f <(patterns) || [[ $? == 1 ]]; } |
+          filter_public_origins
       )" || return 1
       [[ -n "$hit" ]] &&
         report "コミット ${commit:0:12} の内容が一致しました" <<<"$hit"
@@ -195,7 +251,12 @@ scan_pre_push() {
 }
 
 case "$mode" in
-pre-commit) scan_pre_commit ;;
+pre-commit)
+  if ! scan_pre_commit; then
+    printf 'denylist: ステージ済み内容の取得または検査に失敗したため、commit を中止します。\n' >&2
+    exit 1
+  fi
+  ;;
 pre-push)
   if ! scan_pre_push; then
     printf 'denylist: 履歴の取得または検査に失敗したため、push を中止します。\n' >&2
