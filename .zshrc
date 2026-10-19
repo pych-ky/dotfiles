@@ -12,7 +12,7 @@ path=(
   "$HOME/.local/bin"
   ${HOMEBREW_PREFIX:-/usr/local}/opt/git/bin(N-/)
   ${HOMEBREW_PREFIX:-/usr/local}/opt/libpq/bin(N-/)  # keg-only の libpq (psql など)
-  $HOME/.rd/bin(N-/)                                 # Rancher Desktop の CLI
+  $HOME/.orbstack/bin(N-/)                           # OrbStack の CLI
   $path
 )
 
@@ -33,6 +33,8 @@ unset f
 
 [[ -r "$HOME/.shell/functions/git-worktree.sh" ]] && . "$HOME/.shell/functions/git-worktree.sh"
 [[ -r "$HOME/.shell/functions/ghq.sh" ]] && . "$HOME/.shell/functions/ghq.sh"
+[[ -r "$HOME/.shell/functions/codex.sh" ]] && . "$HOME/.shell/functions/codex.sh"
+[[ -r "$HOME/.shell/functions/claude.sh" ]] && . "$HOME/.shell/functions/claude.sh"
 
 if command -v fzf >/dev/null 2>&1; then
   . <(fzf --zsh)

@@ -56,7 +56,6 @@ etc/codex/tmp/
 .claude/*
 !.claude/CLAUDE.md
 !.claude/hooks/
-!.claude/settings.json
 
 ## Karabiner-Elements
 .config/karabiner/assets/

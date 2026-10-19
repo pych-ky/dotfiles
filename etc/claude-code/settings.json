@@ -213,11 +213,12 @@
       "Read(~/**/id_rsa)",
       "Read(~/**/id_dsa)",
       "Read(~/**/id_ed25519)",
-      "Read(~/**/id_ecdsa)"
+      "Read(~/**/id_ecdsa)",
+      "Edit(~/**/etc/claude-code/settings.json)"
     ],
     "defaultMode": "auto"
   },
-  "model": "opus",
+  "fastModePerSessionOptIn": true,
   "hooks": {
     "PreToolUse": [
       {
@@ -238,9 +239,7 @@
     "refreshInterval": 10
   },
   "enabledPlugins": {
-    "linear@claude-plugins-official": true,
-    "microsoft-docs@claude-plugins-official": true,
-    "playwright@claude-plugins-official": true
+    "linear@claude-plugins-official": true
   },
   "language": "日本語",
   "modelSettings": {

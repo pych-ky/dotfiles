@@ -19,7 +19,7 @@ if [[ -z "$codex_config" || ! -r "$codex_config" ]]; then
     codex_config="$repo_dir/etc/codex/config.toml"
   fi
 fi
-claude_settings="${CODEX_STATUSLINE_CLAUDE_SETTINGS:-$repo_dir/.claude/settings.json}"
+claude_settings="${CODEX_STATUSLINE_CLAUDE_SETTINGS:-$repo_dir/etc/claude-code/settings.json}"
 
 # コマンドが利用可能か判定
 has_command() {
@@ -38,6 +38,7 @@ input_context_window=''
 input_used_tokens=''
 input_five_hour_limit=''
 input_weekly_limit=''
+input_fast_mode=''
 
 # 入力 JSON から表示に使う値を input_* 変数へ読み込む
 read_input_json() {
@@ -57,7 +58,8 @@ read_input_json() {
       IFS= read -r -d '' input_context_window &&
       IFS= read -r -d '' input_used_tokens &&
       IFS= read -r -d '' input_five_hour_limit &&
-      IFS= read -r -d '' input_weekly_limit
+      IFS= read -r -d '' input_weekly_limit &&
+      IFS= read -r -d '' input_fast_mode
   } < <(
     jq -j '
       . as $root
@@ -90,7 +92,8 @@ read_input_json() {
           $root.context.used_tokens
         ) catch null),
         (try $root.rate_limits.five_hour.used_percentage catch null),
-        (try $root.rate_limits.seven_day.used_percentage catch null)
+        (try $root.rate_limits.seven_day.used_percentage catch null),
+        (try ($root.fast_mode | if type == "boolean" then tostring else null end) catch null)
       ]
       | .[]
       | (. // "" | tostring) + "\u0000"
@@ -333,11 +336,18 @@ append_segment() {
 
 # 入力と設定からステータスラインを組み立てて出力
 main() {
-  local input
+  local input caller="${1:-claude}"
   input="$(cat)"
 
+  # Orca への利用状況通知と画面表示を両立する
+  if [[ "$caller" == claude && -x "$HOME/.orca/agent-hooks/claude-statusline.sh" ]]; then
+    "$HOME/.orca/agent-hooks/claude-statusline.sh" <<<"$input" >/dev/null 2>&1 || true
+  fi
+
   read_input_json "$input"
-  read_claude_settings "$claude_settings"
+  if [[ "$caller" == claude ]]; then
+    read_claude_settings "$claude_settings"
+  fi
 
   local cwd="${input_cwd:-$PWD}"
 
@@ -364,11 +374,10 @@ main() {
   fi
   context_used="$(ceil_percent "$context_used")"
 
-  local service_tier
-  service_tier="$(toml_scalar "$codex_config" service_tier)"
-  local fast_mode='Fast off'
-  case "$service_tier" in
-  fast | priority) fast_mode='Fast on' ;;
+  local fast_mode=''
+  case "$input_fast_mode" in
+  true) fast_mode='Fast on' ;;
+  false) fast_mode='Fast off' ;;
   esac
 
   local status_line=''
@@ -414,6 +423,10 @@ main() {
     *) ;;
     esac
   done
+
+  if [[ "$caller" == claude ]] && has_command jq && jq -e 'type=="object" and length>0' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/remote-settings.json" >/dev/null 2>&1; then
+    append_segment 'managed-settings' 'org'
+  fi
 
   printf '%s\n' "$status_line"
 }

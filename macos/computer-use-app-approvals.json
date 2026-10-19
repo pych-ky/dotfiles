@@ -1,0 +1,9 @@
+{
+  "approvedBundleIdentifiers": [
+    "com.anthropic.claudefordesktop",
+    "com.apple.controlcenter",
+    "com.microsoft.edgemac",
+    "com.stablyai.orca",
+    "com.tinyspeck.slackmacgap"
+  ]
+}

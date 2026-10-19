@@ -58,7 +58,8 @@ git config --global --replace-all branch.autoSetupMerge 'simple'
 git config --global --replace-all push.default 'simple'
 git config --global --replace-all push.autoSetupRemote true
 git config --global --replace-all transfer.credentialsInUrl 'die'
-git config --global --replace-all pull.ff 'only'
+git config --global --replace-all pull.rebase true
+git config --global --replace-all pull.ff true
 git config --global --replace-all merge.conflictStyle 'zdiff3'
 
 gitconfig_local="$HOME/.gitconfig.local"

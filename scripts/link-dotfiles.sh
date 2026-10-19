@@ -31,8 +31,13 @@ usage() {
 
 このリポジトリのファイルを $HOME 配下へシンボリックリンクする。
 Codex Browser の設定は、Codex がこのパスのシンボリックリンクを拒否するため通常ファイルとしてコピーする。
+Codex CLI と Orca のプロファイルも、モデル切替を端末固有の設定として保存するためコピーする。
 Orca のキー設定は、アプリの保存時にシンボリックリンクが通常ファイルへ置き換わるためコピーする。
+Computer Use の常時許可一覧は、リンク先の変更をアプリが検知できないためコピーする。
 etc/codex/config.toml は sudo で /etc/codex/config.toml へリンクし、既存のファイルや別のリンクがあればエラーにする。
+etc/claude-code/settings.json は sudo で /Library/Application Support/ClaudeCode/managed-settings.json へコピーし、claude シェル関数から --settings でも渡す。
+managed の既存ファイルは前回設置時の SHA-256 が一致する場合だけ更新し、組織配布などの変更は保持する。
+~/.claude/settings.json には Playwright の Edge 接続先だけを反映し、ツールが保存するその他の設定は保持する。
 $HOME 配下の既存の通常ファイル・ディレクトリは、先に ~/.dotfiles-backup/<timestamp>[-<sequence>]/ へ退避する。
 
 オプション:
@@ -291,6 +296,110 @@ link_codex_system_config() {
   report_link "$target" "$source"
 }
 
+# Claude のユーザー設定へ Playwright の Edge 接続先だけを反映
+configure_claude_browser() {
+  local source="$repo_dir/etc/claude-code/settings.json"
+  local user_settings="$HOME/.claude/settings.json"
+  local endpoint input_file="$user_settings" temporary_settings physical_repo_dir
+  endpoint="$(jq -er '.env.PLAYWRIGHT_MCP_CDP_ENDPOINT' "$source")" || return
+
+  if [[ -L "$user_settings" && (-f "$user_settings" || ! -e "$user_settings") ]]; then
+    physical_repo_dir="$(cd "$repo_dir" && pwd -P)" || return
+    case "$(readlink -f "$user_settings" 2>/dev/null)" in
+    "$physical_repo_dir"/*)
+      input_file=/dev/null
+      if ((dry_run)); then
+        printf 'info: would replace obsolete link with Playwright Edge settings: %s\n' "$user_settings"
+        return 0
+      fi
+      ;;
+    esac
+  fi
+
+  if [[ "$input_file" != /dev/null &&
+    (-L "$user_settings" || (-e "$user_settings" && ! -f "$user_settings")) ]]; then
+    printf 'error: Claude user settings must be a regular file: %s\n' "$user_settings" >&2
+    return 1
+  fi
+  if [[ -f "$input_file" ]]; then
+    if ! jq -se 'length == 1 and (.[0] | type == "object" and
+      ((has("env") | not) or (.env | type == "object")))' "$input_file" >/dev/null; then
+      printf 'error: Claude user settings must contain one JSON object with an optional env object: %s\n' "$user_settings" >&2
+      return 1
+    fi
+    if jq -e --arg endpoint "$endpoint" \
+      '.env.PLAYWRIGHT_MCP_CDP_ENDPOINT == $endpoint' "$input_file" >/dev/null; then
+      return 0
+    fi
+  fi
+  if ((dry_run)); then
+    printf 'info: would configure Playwright Edge connection: %s\n' "$user_settings"
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$user_settings")" || return
+  [[ -f "$input_file" ]] || input_file=/dev/null
+  temporary_settings="$(mktemp "$user_settings.XXXXXX")" || return
+  if ! jq -s --arg endpoint "$endpoint" \
+    '(if length == 0 then {} else .[0] end) | .env.PLAYWRIGHT_MCP_CDP_ENDPOINT = $endpoint' \
+    "$input_file" >"$temporary_settings"; then
+    rm -f -- "$temporary_settings"
+    return 1
+  fi
+  if ! mv -- "$temporary_settings" "$user_settings"; then
+    rm -f -- "$temporary_settings"
+    return 1
+  fi
+  printf 'changed: configured Playwright Edge connection: %s\n' "$user_settings"
+}
+
+# 自分が設置した managed 設定だけを更新
+install_claude_managed_config() {
+  local source="$repo_dir/etc/claude-code/settings.json"
+  local target="/Library/Application Support/ClaudeCode/managed-settings.json"
+  local hash_record="$backup_root/.claude-managed-settings.sha256"
+  local source_hash target_hash
+
+  if [[ ! -f "$source" || -L "$source" ]] || ! command -v jq >/dev/null 2>&1; then
+    printf 'error: Claude managed settings and jq are required\n' >&2
+    return 1
+  fi
+  jq -e 'type == "object"' "$source" >/dev/null || return
+  source_hash="$(shasum -a 256 "$source" | awk '{print $1}')" || return
+
+  if [[ -L "$target" ]]; then
+    if ! is_correct_symlink "$target" "$source" &&
+      ! is_correct_symlink "$target" "$repo_dir/etc/claude-code/managed-settings.json"; then
+      printf 'skipped: Claude managed settings symlink was not installed by dotfiles: %s\n' "$target"
+      return 0
+    fi
+  elif [[ -e "$target" ]]; then
+    if [[ ! -f "$target" || ! -f "$hash_record" || -L "$hash_record" ]] ||
+      ! target_hash="$(shasum -a 256 "$target" | awk '{print $1}')" ||
+      [[ "$target_hash" != "$(cat "$hash_record")" ]]; then
+      printf 'skipped: Claude managed settings were not installed by dotfiles or have changed: %s\n' "$target"
+      return 0
+    fi
+    [[ "$source_hash" != "$target_hash" ]] || return 0
+  fi
+
+  if [[ -L "$hash_record" || (-e "$hash_record" && ! -f "$hash_record") ]]; then
+    printf 'error: Claude managed settings hash record must be a regular file: %s\n' "$hash_record" >&2
+    return 1
+  fi
+  run sudo mkdir -p "$(dirname "$target")" || return
+  if [[ -L "$target" ]]; then
+    run sudo rm "$target" || return
+  fi
+  run sudo install -m 0644 "$source" "$target" || return
+  if ((dry_run)); then
+    printf 'info: would record Claude managed settings SHA-256: %s\n' "$hash_record"
+  else
+    printf '%s\n' "$source_hash" >"$hash_record" || return
+    printf 'changed: copied %s <- %s\n' "$target" "$source"
+  fi
+}
+
 # dotfiles のリンク・コピーと退避を行い、結果を表示
 main() {
   while (($#)); do
@@ -327,6 +436,8 @@ main() {
     ".bash_profile"
     ".bashrc"
     ".shell/functions/aws.sh"
+    ".shell/functions/claude.sh"
+    ".shell/functions/codex.sh"
     ".shell/functions/ghq.sh"
     ".shell/functions/git-worktree.sh"
     ".zshenv"
@@ -346,7 +457,6 @@ main() {
     ".claude/hooks/pre-bash-guard.py"
     ".claude/hooks/pre-bash-guard.sh"
     ".claude/hooks/statusline.sh"
-    ".claude/settings.json"
     ".config/agents/AGENTS.md"
     ".copilot/settings.json"
     ".copilot/statusline.sh"
@@ -374,8 +484,36 @@ main() {
     fi
   done
 
+  if ! configure_claude_browser; then
+    failed_items+=("Claude browser settings")
+  fi
+
+  if ! install_claude_managed_config; then
+    failed_items+=("Claude managed settings")
+  fi
+
+  local computer_use_approvals="Library/Group Containers/2DC432GLL2.com.openai.sky.CUAService/Library/Application Support/Software/ComputerUseAppApprovals.json"
+  if ! copy_regular_file "macos/computer-use-app-approvals.json" "$computer_use_approvals"; then
+    failed_items+=("$computer_use_approvals")
+  fi
+
   if ! copy_regular_file ".codex/browser/config.toml"; then
     failed_items+=(".codex/browser/config.toml")
+  fi
+
+  if ! copy_regular_file ".codex/cli.config.toml"; then
+    failed_items+=(".codex/cli.config.toml")
+  fi
+
+  if ! copy_regular_file ".codex/orca.config.toml"; then
+    failed_items+=(".codex/orca.config.toml")
+  fi
+
+  if [[ "$(uname -s)" == Darwin ]]; then
+    local orca_codex_profile="Library/Application Support/orca/codex-runtime-home/home/orca.config.toml"
+    if ! copy_regular_file ".codex/orca.config.toml" "$orca_codex_profile"; then
+      failed_items+=("$orca_codex_profile")
+    fi
   fi
 
   if ! copy_regular_file ".orca/keybindings.json"; then
@@ -431,7 +569,7 @@ main() {
     printf 'ok: Dotfiles (dry-run; no files changed)\n'
   elif [[ ${DOTFILES_BOOTSTRAP:-0} != 1 ]]; then
     printf 'ok: Dotfiles\n'
-    printf 'info: restart Codex to apply configuration changes; see README.md > Codex App の権限\n'
+    printf 'info: restart Codex to apply configuration changes; see README.md > Codex の設定\n'
   fi
 }
 

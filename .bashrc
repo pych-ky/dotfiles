@@ -6,8 +6,8 @@ elif [ -x /usr/local/bin/brew ]; then
   eval "$(/usr/local/bin/brew shellenv)"
 fi
 
-# ~/.local/bin、Homebrew Git、Rancher Desktop の順で標準 PATH より優先
-for dir in "$HOME/.rd/bin" "${HOMEBREW_PREFIX:-/usr/local}/opt/git/bin" "$HOME/.local/bin"; do
+# ~/.local/bin、Homebrew Git、OrbStack の順で標準 PATH より優先
+for dir in "$HOME/.orbstack/bin" "${HOMEBREW_PREFIX:-/usr/local}/opt/git/bin" "$HOME/.local/bin"; do
   [ -d "$dir" ] || continue
   case ":$PATH:" in
   *":$dir:"*) ;;
@@ -25,6 +25,8 @@ fi
 
 [ -r "$HOME/.shell/functions/git-worktree.sh" ] && . "$HOME/.shell/functions/git-worktree.sh"
 [ -r "$HOME/.shell/functions/ghq.sh" ] && . "$HOME/.shell/functions/ghq.sh"
+[ -r "$HOME/.shell/functions/codex.sh" ] && . "$HOME/.shell/functions/codex.sh"
+[ -r "$HOME/.shell/functions/claude.sh" ] && . "$HOME/.shell/functions/claude.sh"
 
 if command -v fzf >/dev/null 2>&1; then
   eval "$(fzf --bash)"

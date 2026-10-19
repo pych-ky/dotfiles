@@ -1,6 +1,5 @@
 # Homebrew パッケージ
 
-# OS 全体の CLI・GUI を管理。開発ツールは .config/mise/config.toml に集約
 # 任意の GUI はコメントアウトを外し、brew bundle --file=macos/Brewfile で導入
 
 ## 外部 tap
@@ -36,7 +35,6 @@ brew "mise"
 brew "uv"
 
 ### Lint / フォーマッタ
-# secretlint は mise の公式バイナリを使用
 brew "actionlint"
 brew "shellcheck"
 brew "shfmt"
@@ -46,17 +44,16 @@ cask "copilot-cli"
 brew "herdr"
 
 ### クラウド / IaC / ポリシー / Kubernetes
-# aws / terraform / terragrunt / tflint は mise
 brew "azure-cli"
+npm "cf"
 cask "gcloud-cli"
+brew "helm"
 brew "opa"
 brew "openshift-cli"
-brew "rosa-cli"
 cask "session-manager-plugin"
 brew "trivy"
 
 ### DB
-# keg-only の psql 等は .zshrc で PATH に追加
 brew "libpq"
 
 ## GUI アプリ
@@ -97,7 +94,4 @@ cask "stats"
 # cask "1password"
 
 ### コンテナ / 仮想化
-# Rancher Desktop と競合するため併用しない
-# cask "docker-desktop"
-# docker / kubectl / helm の CLI は Rancher Desktop の ~/.rd/bin に同梱
-cask "rancher"
+cask "orbstack"

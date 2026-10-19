@@ -98,6 +98,18 @@ defaults write NSGlobalDomain InitialKeyRepeat -int 15
 # F1、F2 などを標準のファンクションキーに
 defaults write NSGlobalDomain com.apple.keyboard.fnState -bool true
 
+# VS Code の ⌘+[ と競合する「次のウインドウを操作対象にする」を無効化
+symbolic_hotkey="$(
+  defaults export com.apple.symbolichotkeys - 2>/dev/null |
+    plutil -extract AppleSymbolicHotKeys.27 xml1 -o - -- - 2>/dev/null
+)" || symbolic_hotkey='<dict/>'
+symbolic_hotkey="$(
+  printf '%s' "$symbolic_hotkey" |
+    plutil -replace enabled -bool false -o - -- -
+)"
+defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys \
+  -dict-add 27 "$symbolic_hotkey"
+
 defaults write NSGlobalDomain NSAutomaticSpellingCorrectionEnabled -bool false
 defaults write NSGlobalDomain NSAutomaticCapitalizationEnabled -bool false
 defaults write NSGlobalDomain NSAutomaticQuoteSubstitutionEnabled -bool false
