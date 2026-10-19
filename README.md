@@ -127,7 +127,16 @@ Codex 画面と Chrome / Edge 拡張の既定モデルは現行版では `~/.cod
 - メニューバーの日本語入力メニュー > ユーザ辞書を編集
   - `しかく` → `■` / `ほし` → `★` / `やじるし` → `→` / `かっこ` → `「」` を登録
 - Claude Code の Playwright MCP
+  - Claude Code を一度起動してから、`claude plugin install playwright@claude-plugins-official --scope user` で導入する
   - Edge の `edge://inspect/#remote-debugging` で「Allow remote debugging for this browser instance」を有効にする（[接続方式](https://playwright.dev/mcp/configuration/browser-extension)）
+
+### Logi Options+
+
+1. マウスの共通設定で、既定の「戻る」ボタンに `End`、「進む」ボタンに `Home` を割り当てる
+2. Orca のアプリ別設定を追加し、「戻る」に「末尾に移動」(`Ctrl+End` → `Cmd+↓`)、「進む」に「先頭に移動」(`Ctrl+Home` → `Cmd+↑`) のマクロを割り当てる
+3. 各マクロは、それぞれのキー操作の直前に `21ms` の待機を入れる
+
+Orca 用マクロは、Karabiner の Home / End と同じキー列に揃える。
 
 ### キーボード
 

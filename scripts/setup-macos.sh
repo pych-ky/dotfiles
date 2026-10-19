@@ -126,6 +126,9 @@ defaults write com.apple.inputmethod.Kotoeri JIMPrefPredictiveCandidateKey -bool
 defaults write com.apple.inputmethod.Kotoeri JIMPrefAutocorrectionKey -bool false
 defaults write com.apple.inputmethod.Kotoeri JIMPrefConvertWithPunctuationKey -bool false
 
+# 数字を半角で入力
+defaults write com.apple.inputmethod.Kotoeri JIMPrefFullWidthNumeralCharactersKey -bool false
+
 ## マウス / トラックパッド
 
 # ナチュラルスクロールを無効化
@@ -165,6 +168,10 @@ set_desktop_arrangement grid
 ## メニューバー / コントロールセンター
 
 defaults write com.apple.controlcenter "NSStatusItem Visible Sound" -bool true
+
+## Maccy (クリップボード履歴)
+
+defaults write org.p0deje.Maccy historySize -int 999
 
 ## Rectangle (ウィンドウ管理)
 
