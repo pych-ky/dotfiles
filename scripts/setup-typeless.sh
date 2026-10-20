@@ -39,7 +39,7 @@ if [[ -L "$settings_file" || (-e "$settings_file" && ! -f "$settings_file") ]]; 
   exit 1
 fi
 
-# 次回の旧設定移行による管理ショートカットの上書きを防ぐ
+# 旧設定の移行によるショートカットの上書きを防ぐ
 if [[ -f "$settings_file" ]] &&
   jq -e '
     (.__COMPATIBLE_FEATURE_SHORTCUT_BINDINGS_MIGRATED_FLAG | IN(null, false, 0, "")) and
@@ -49,7 +49,6 @@ if [[ -f "$settings_file" ]] &&
   exit 1
 fi
 
-# 一致すれば起動中でも書き換えずに終了
 if [[ -f "$settings_file" ]] &&
   jq -e --slurpfile managed "$managed_settings" \
     '. == (. * $managed[0])' "$settings_file" >/dev/null; then
@@ -68,7 +67,6 @@ mkdir -p "$(dirname "$settings_file")"
 temporary_settings="$(mktemp "$settings_file.XXXXXX")"
 trap 'rm -f -- "$temporary_settings"' EXIT
 
-# 未指定の設定を保持し、書き出し成功後に置換
 if [[ -f "$settings_file" ]]; then
   jq -s '
     if length == 2 and all(.[]; type == "object") then

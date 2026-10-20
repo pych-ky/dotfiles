@@ -1,7 +1,6 @@
 # mise ツールバージョン設定
 
-# macos/Brewfile と重複させない
-# ~/.config/mise/config.toml に配置し、リポジトリの mise 設定で上書き可能
+# macos/Brewfile と重複させない。リポジトリ設定で上書き可
 
 
 [tools]
@@ -14,7 +13,7 @@ deno                           = "latest"
 go                             = "latest"
 golangci-lint                  = "latest"
 node                           = "lts"
-npm                            = "11"  # node 同梱版を上書きし、メジャーを固定
+npm                            = "11"  # node 同梱版を上書き
 pnpm                           = "latest"
 terraform                      = "latest"
 tflint                         = "latest"

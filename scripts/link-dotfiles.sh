@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# dotfiles のリンク
+# dotfiles の配置・退避
 
 set -euo pipefail
 
@@ -11,8 +11,8 @@ backup_compare_target=  # dry-run では退避元、通常は退避先
 dry_run=0
 backup_created=0
 backup_keep=5
-backup_diffs=()         # リポジトリ版と異なる退避元
-managed_targets=()      # ツールの自動追記がある退避元
+backup_diffs=()
+managed_targets=()
 MANAGED_BLOCK_MARKER='MANAGED BY RANCHER DESKTOP'
 
 setup_common_library="$repo_dir/lib/setup-common.sh"
@@ -29,24 +29,23 @@ usage() {
   cat <<'EOF'
 使い方: ./scripts/link-dotfiles.sh [--dry-run] [-h | --help]
 
-このリポジトリのファイルを $HOME 配下へシンボリックリンクする。
-Codex Browser の設定は、Codex がこのパスのシンボリックリンクを拒否するため通常ファイルとしてコピーする。
-Codex CLI と Orca のプロファイルも、モデル切替を端末固有の設定として保存するためコピーする。
-Orca のキー設定は、アプリの保存時にシンボリックリンクが通常ファイルへ置き換わるためコピーする。
-Computer Use の常時許可一覧は、リンク先の変更をアプリが検知できないためコピーする。
-etc/codex/config.toml は sudo で /etc/codex/config.toml へリンクし、既存のファイルや別のリンクがあればエラーにする。
-etc/claude-code/settings.json は sudo で /Library/Application Support/ClaudeCode/managed-settings.json へコピーし、claude シェル関数から --settings でも渡す。
-managed の既存ファイルは前回設置時の SHA-256 が一致する場合だけ更新し、組織配布などの変更は保持する。
-~/.claude/settings.json には Playwright の Edge 接続先だけを反映し、ツールが保存するその他の設定は保持する。
-$HOME 配下の既存の通常ファイル・ディレクトリは、先に ~/.dotfiles-backup/<timestamp>[-<sequence>]/ へ退避する。
+$HOME 配下へリンクし、既存の実体は ~/.dotfiles-backup/<timestamp>[-<sequence>]/ へ退避。
+コピー: Codex Browser 設定、CLI・Orca プロファイル、Orca キー設定、Computer Use 常時許可一覧
+
+sudo が必要な設定:
+  Codex: /etc/codex/config.toml へリンク（既存ファイル・別リンクとは競合）
+  Claude: /Library/Application Support/ClaudeCode/managed-settings.json へコピー
+Claude managed 設定は dotfiles 設置分のみ更新し、外部変更は保持。
+~/.claude/settings.json は Playwright の Edge 接続先だけ更新。
+コピーの理由・設定の使い分けは README.md を参照。
 
 オプション:
-  --dry-run   ファイルを変更せず、実行内容だけを表示する。
-  -h, --help  このヘルプを表示して終了する。
+  --dry-run   変更せず実行内容を表示
+  -h, --help  ヘルプを表示して終了
 EOF
 }
 
-# root 以外のユーザーと正しい HOME で実行されているか検証
+# root 実行を拒否・HOME を検証
 validate_environment() {
   if ((EUID == 0)); then
     printf 'error: do not run scripts/link-dotfiles.sh with sudo or as root\n' >&2
@@ -56,7 +55,7 @@ validate_environment() {
   setup_validate_home
 }
 
-# コマンドを実行し、dry-run では実行内容だけを表示
+# コマンドを実行（dry-run は表示のみ）
 run() {
   if ((dry_run)); then
     printf 'info: would run:'
@@ -73,26 +72,38 @@ report_link() {
   printf 'changed: linked %s -> %s\n' "$1" "$2"
 }
 
-# リンクを使えない設定を通常ファイルとしてコピー
-copy_regular_file() {
-  local source_relative="$1"
-  local target_relative="${2:-$1}"
-  local source="$repo_dir/$source_relative"
-  local target="$HOME/$target_relative"
+# 退避してリンク・コピーし、差分を記録
+install_file() {
+  local mode="$1" source_relative="$2" target_relative="${3:-$2}"
+  local source="$repo_dir/$source_relative" target="$HOME/$target_relative"
+  local different=0
 
-  if [[ ! -f "$source" || -L "$source" ]]; then
-    printf 'error: missing regular source: %s\n' "$source" >&2
-    return 1
-  fi
-
-  if [[ -f "$target" && ! -L "$target" ]] && cmp -s "$source" "$target"; then
-    return 0
+  if [[ "$mode" == copy ]]; then
+    if [[ ! -f "$source" || -L "$source" ]]; then
+      printf 'error: missing regular source: %s\n' "$source" >&2
+      return 1
+    fi
+    if [[ -f "$target" && ! -L "$target" ]] && cmp -s "$source" "$target"; then
+      return 0
+    fi
+  else
+    if [[ ! -e "$source" && ! -L "$source" ]]; then
+      printf 'error: missing source: %s\n' "$source" >&2
+      return 1
+    fi
+    is_correct_symlink "$target" "$source" && return 0
   fi
 
   run mkdir -p "$(dirname "$target")" || return
   backup_existing_target "$target" || return
-  if [[ -e "$backup_compare_target" ]] &&
-    ! cmp -s "$backup_compare_target" "$source"; then
+  if [[ -e "$backup_compare_target" ]]; then
+    if [[ "$mode" == copy ]]; then
+      cmp -s "$backup_compare_target" "$source" || different=1
+    elif [[ -e "$source" ]]; then
+      diff -rq "$backup_compare_target" "$source" >/dev/null 2>&1 || different=1
+    fi
+  fi
+  if ((different)); then
     if ((dry_run)); then
       backup_diffs+=("$target (planned backup: $backup_target)")
     else
@@ -100,18 +111,23 @@ copy_regular_file() {
     fi
   fi
 
-  run cp -p "$source" "$target" || return
-  if ((!dry_run)); then
-    printf 'changed: copied %s <- %s\n' "$target" "$source"
+  if [[ "$mode" == copy ]]; then
+    run cp -p "$source" "$target" || return
+    if ((!dry_run)); then
+      printf 'changed: copied %s <- %s\n' "$target" "$source"
+    fi
+  else
+    if [[ -f "$backup_compare_target" ]] &&
+      grep -qF "$MANAGED_BLOCK_MARKER" "$backup_compare_target" 2>/dev/null; then
+      managed_targets+=("$target")
+    fi
+    # -h でディレクトリリンク内への作成を防ぐ
+    run ln -sh "$source" "$target" || return
+    report_link "$target" "$source"
   fi
 }
 
-# 対象パスに対応する退避先のパスを返す
-backup_path() {
-  printf '%s/%s' "$backup_dir" "${1#"$HOME"/}"
-}
-
-# 同秒の再実行でも衝突しない退避先を確保
+# 同秒でも衝突しない退避先を確保
 ensure_backup_dir() {
   local timestamp
   local candidate
@@ -153,7 +169,7 @@ backup_existing_target() {
   [[ -e "$target" ]] || return 0
 
   ensure_backup_dir || return
-  backup_target="$(backup_path "$target")"
+  backup_target="$backup_dir/${target#"$HOME"/}"
   run mkdir -p "$(dirname "$backup_target")" || return
   run mv -n "$target" "$backup_target" || return
   if ((!dry_run)) && [[ -e "$target" || -L "$target" ]]; then
@@ -169,13 +185,12 @@ backup_existing_target() {
   fi
 }
 
-# 保持世代数を超えた古い退避ディレクトリを削除
+# 保持世代を超えた退避先を削除
 prune_backups() {
   local candidate
   local name
   [[ -d "$backup_root" ]] || return 0
 
-  # 14 桁名とマーカー付き連番名だけを削除候補にする
   {
     while IFS= read -r candidate; do
       name="${candidate##*/}"
@@ -185,7 +200,7 @@ prune_backups() {
         printf '%s\n' "$candidate"
       fi
     done < <(find "$backup_root" -mindepth 1 -maxdepth 1 -type d -print)
-    # dry-run でも未作成の今回分を世代数に含める
+    # dry-run でも今回分を世代数に含める
     if ((dry_run && backup_created)) &&
       [[ "${backup_dir%/*}" == "$backup_root" ]] &&
       [[ "${backup_dir##*/}" =~ ^[0-9]{14}(-[0-9]{6})?$ ]]; then
@@ -199,12 +214,12 @@ prune_backups() {
     done
 }
 
-# 対象が指定先を指すシンボリックリンクか判定
+# 指定先へのリンクか判定
 is_correct_symlink() {
   [[ -L "$1" && "$(readlink "$1")" == "$2" ]]
 }
 
-# 自リポジトリ由来の廃止リンクだけを削除
+# 自リポジトリの廃止リンクを削除
 remove_obsolete_symlink() {
   local source_relative="$1"
   local target_relative="${2:-$1}"
@@ -218,46 +233,7 @@ remove_obsolete_symlink() {
   fi
 }
 
-# 既存の実体を退避してリポジトリのファイルへリンク
-link_file() {
-  local source_relative="$1"
-  local target_relative="${2:-$1}"
-  local source="$repo_dir/$source_relative"
-  local target="$HOME/$target_relative"
-
-  # 壊れたリンクも source として扱う
-  if [[ ! -e "$source" && ! -L "$source" ]]; then
-    printf 'error: missing source: %s\n' "$source" >&2
-    return 1
-  fi
-
-  if is_correct_symlink "$target" "$source"; then
-    return 0
-  fi
-
-  run mkdir -p "$(dirname "$target")" || return
-
-  backup_existing_target "$target" || return
-  if [[ -e "$backup_compare_target" && -e "$source" ]] &&
-    ! diff -rq "$backup_compare_target" "$source" >/dev/null 2>&1; then
-    if ((dry_run)); then
-      backup_diffs+=("$target (planned backup: $backup_target)")
-    else
-      backup_diffs+=("$target (backup: $backup_target)")
-    fi
-  fi
-
-  if [[ -f "$backup_compare_target" ]] &&
-    grep -qF "$MANAGED_BLOCK_MARKER" "$backup_compare_target" 2>/dev/null; then
-    managed_targets+=("$target")
-  fi
-
-  # -h でディレクトリリンク配下への誤作成を防ぐ
-  run ln -sh "$source" "$target" || return
-  report_link "$target" "$source"
-}
-
-# 優先度の高い旧 managed_config.toml があれば警告
+# 優先される旧 managed_config.toml を警告
 warn_legacy_codex_managed_config() {
   local target="/etc/codex/managed_config.toml"
 
@@ -281,7 +257,6 @@ link_codex_system_config() {
     return 0
   fi
 
-  # /etc の既存ファイルは退避せず、競合時は中断
   if [[ -L "$target" ]]; then
     printf 'error: existing symlink is different: %s -> %s\n' "$target" "$(readlink "$target")" >&2
     return 1
@@ -296,7 +271,7 @@ link_codex_system_config() {
   report_link "$target" "$source"
 }
 
-# Claude のユーザー設定へ Playwright の Edge 接続先だけを反映
+# Claude の Playwright 接続先を Edge に設定
 configure_claude_browser() {
   local source="$repo_dir/etc/claude-code/settings.json"
   local user_settings="$HOME/.claude/settings.json"
@@ -353,7 +328,7 @@ configure_claude_browser() {
   printf 'changed: configured Playwright Edge connection: %s\n' "$user_settings"
 }
 
-# 自分が設置した managed 設定だけを更新
+# dotfiles 由来の managed 設定だけ更新
 install_claude_managed_config() {
   local source="$repo_dir/etc/claude-code/settings.json"
   local target="/Library/Application Support/ClaudeCode/managed-settings.json"
@@ -400,7 +375,7 @@ install_claude_managed_config() {
   fi
 }
 
-# dotfiles のリンク・コピーと退避を行い、結果を表示
+# dotfiles を配置・退避
 main() {
   while (($#)); do
     case "$1" in
@@ -431,7 +406,8 @@ main() {
   fi
 
   local files=(
-    # シェル
+    ## シェル
+
     ".aws/load-active-profile.sh"
     ".bash_profile"
     ".bashrc"
@@ -443,17 +419,26 @@ main() {
     ".zprofile"
     ".zshenv"
     ".zshrc"
-    # ターミナル
+
+    ## ターミナル
+
     ".config/ghostty/config.ghostty"
     ".config/starship.toml"
     ".wezterm.lua"
-    # ツール
+
+    ## 開発ツール
+
     ".config/gh/config.yml"
     ".config/git/ignore"
+    ".config/mise/config.toml"
+
+    ## キー入力
+
     # Karabiner の変更検知のためディレクトリごとリンク
     ".config/karabiner"
-    ".config/mise/config.toml"
-    # AI エージェント
+
+    ## AI エージェント
+
     ".claude/CLAUDE.md"
     ".claude/hooks/pre-bash-guard.py"
     ".claude/hooks/pre-bash-guard.sh"
@@ -480,7 +465,7 @@ main() {
   fi
 
   for file in "${files[@]}"; do
-    if ! link_file "$file"; then
+    if ! install_file link "$file"; then
       failed_items+=("$file")
     fi
   done
@@ -494,34 +479,28 @@ main() {
   fi
 
   local computer_use_approvals="Library/Group Containers/2DC432GLL2.com.openai.sky.CUAService/Library/Application Support/Software/ComputerUseAppApprovals.json"
-  if ! copy_regular_file "macos/computer-use-app-approvals.json" "$computer_use_approvals"; then
+  if ! install_file copy "macos/computer-use-app-approvals.json" "$computer_use_approvals"; then
     failed_items+=("$computer_use_approvals")
   fi
 
-  if ! copy_regular_file ".codex/browser/config.toml"; then
-    failed_items+=(".codex/browser/config.toml")
-  fi
-
-  if ! copy_regular_file ".codex/cli.config.toml"; then
-    failed_items+=(".codex/cli.config.toml")
-  fi
-
-  if ! copy_regular_file ".codex/orca.config.toml"; then
-    failed_items+=(".codex/orca.config.toml")
-  fi
+  for file in .codex/browser/config.toml .codex/cli.config.toml .codex/orca.config.toml; do
+    if ! install_file copy "$file"; then
+      failed_items+=("$file")
+    fi
+  done
 
   if [[ "$(uname -s)" == Darwin ]]; then
     local orca_codex_profile="Library/Application Support/orca/codex-runtime-home/home/orca.config.toml"
-    if ! copy_regular_file ".codex/orca.config.toml" "$orca_codex_profile"; then
+    if ! install_file copy ".codex/orca.config.toml" "$orca_codex_profile"; then
       failed_items+=("$orca_codex_profile")
     fi
   fi
 
-  if ! copy_regular_file ".orca/keybindings.json"; then
+  if ! install_file copy ".orca/keybindings.json"; then
     failed_items+=(".orca/keybindings.json")
   fi
 
-  if ! link_file ".config/agents/AGENTS.md" ".codex/AGENTS.md"; then
+  if ! install_file link ".config/agents/AGENTS.md" ".codex/AGENTS.md"; then
     failed_items+=(".codex/AGENTS.md")
   fi
 

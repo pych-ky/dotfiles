@@ -1,4 +1,6 @@
-# ブラウザ拡張のモデル設定と CLI の設定を分ける
+# Codex CLI プロファイル設定
+
+# ブラウザ拡張と CLI のモデル設定を分離
 codex() {
   local arg skip_value=0 skip_images=0 subcommand="" has_profile=0
   local -a embedded_args=(--no-daemon)
@@ -19,7 +21,7 @@ codex() {
 
   for arg in "$@"; do
     if [ "$skip_images" = 1 ]; then
-      # 空白で渡した画像は、次のオプションまで複数の値を受け取る
+      # 空白区切りの画像値は次のオプションまで続く
       case "$arg" in
       -*) skip_images=0 ;;
       *) continue ;;

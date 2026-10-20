@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# Bash 実行前ガードのフック
+# Bash 実行前ガードの起動
 
 set -u
 
-# シンボリックリンクを解決した本スクリプトのディレクトリを返す
+# リンク解決後のディレクトリ
 script_dir() {
   local source="${BASH_SOURCE[0]}"
-  local directory
-  local target
+  local directory target
 
   while [[ -L "$source" ]]; do
     directory="$(cd -P "$(dirname "$source")" && pwd)"

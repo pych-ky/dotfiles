@@ -1,9 +1,9 @@
 # Ghostty キー設定
 
-# Karabiner が変換した Option+Backspace で直前の単語を削除
+# Karabiner の Option+Backspace 変換で直前の単語を削除
 keybind = alt+backspace=text:\x1b\x7f
 
-# アプリ内のセッション先頭・末尾へのジャンプを送り、スクロールバックの先頭・末尾へ移動
+# セッション先頭・末尾とスクロールバックを同時に移動
 keybind = home=csi:1;5H
 keybind = chain=scroll_to_top
 keybind = end=csi:1;5F
@@ -16,5 +16,4 @@ keybind = chain=scroll_to_bottom
 keybind = ctrl+page_up=previous_tab
 keybind = ctrl+page_down=next_tab
 
-# 標準の分割キーを残し、下分割の共通キーを追加
 keybind = alt+shift+d=new_split:down

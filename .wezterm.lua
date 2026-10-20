@@ -1,104 +1,103 @@
 -- WezTerm キー設定
 
 local wezterm = require("wezterm")
+local act = wezterm.action
+
+-- Home/End の画面別キー設定
+local function home_end(key, scroll)
+  -- TUI はキー送信、通常画面はスクロール
+  return wezterm.action_callback(function(window, pane)
+    local action = pane:is_alt_screen_active()
+      and act.SendKey({ key = key, mods = "CTRL" })
+      or scroll
+    window:perform_action(action, pane)
+  end)
+end
 
 return {
-  -- TUI が要求する Kitty keyboard protocol に対応
   enable_kitty_keyboard = true,
   keys = {
-    -- Karabiner が変換した Option キーで単語移動・削除
+    -- Karabiner の Option キー変換で単語移動・削除
     {
       key = "LeftArrow",
       mods = "ALT",
-      action = wezterm.action.SendString("\x1bb"),
+      action = act.SendString("\x1bb"),
     },
     {
       key = "RightArrow",
       mods = "ALT",
-      action = wezterm.action.SendString("\x1bf"),
+      action = act.SendString("\x1bf"),
     },
     {
       key = "Backspace",
       mods = "ALT",
-      action = wezterm.action.SendString("\x1b\x7f"),
+      action = act.SendString("\x1b\x7f"),
     },
-    -- Home/End は全画面 TUI に送り、通常画面ではスクロールバックを移動
     {
       key = "Home",
       mods = "NONE",
-      action = wezterm.action_callback(function(window, pane)
-        local action = pane:is_alt_screen_active()
-          and wezterm.action.SendKey({ key = "Home", mods = "CTRL" })
-          or wezterm.action.ScrollToTop
-        window:perform_action(action, pane)
-      end),
+      action = home_end("Home", act.ScrollToTop),
     },
     {
       key = "End",
       mods = "NONE",
-      action = wezterm.action_callback(function(window, pane)
-        local action = pane:is_alt_screen_active()
-          and wezterm.action.SendKey({ key = "End", mods = "CTRL" })
-          or wezterm.action.ScrollToBottom
-        window:perform_action(action, pane)
-      end),
+      action = home_end("End", act.ScrollToBottom),
     },
-    -- アプリ内のセッション先頭・末尾へのジャンプを送り、スクロールバックの先頭・末尾へ移動
+    -- セッション先頭・末尾とスクロールバックを同時に移動
     {
       key = "Home",
       mods = "CMD",
-      action = wezterm.action.Multiple({
-        wezterm.action.SendKey({ key = "Home", mods = "CTRL" }),
-        wezterm.action.ScrollToTop,
+      action = act.Multiple({
+        act.SendKey({ key = "Home", mods = "CTRL" }),
+        act.ScrollToTop,
       }),
     },
     {
       key = "End",
       mods = "CMD",
-      action = wezterm.action.Multiple({
-        wezterm.action.SendKey({ key = "End", mods = "CTRL" }),
-        wezterm.action.ScrollToBottom,
+      action = act.Multiple({
+        act.SendKey({ key = "End", mods = "CTRL" }),
+        act.ScrollToBottom,
       }),
     },
-    -- スクロールバックを含めて全選択し、通常モードへ戻る
     {
       key = "a",
       mods = "CMD",
+      -- スクロールバック全体を選択し、通常モードへ戻す
+      -- overlay を解決し直すため CopyMode 起動と操作を分ける
       action = wezterm.action_callback(function(window, pane)
-        window:perform_action(wezterm.action.ActivateCopyMode, pane)
+        window:perform_action(act.ActivateCopyMode, pane)
         window:perform_action(
-          wezterm.action.Multiple({
-            wezterm.action.CopyMode("ClearSelectionMode"),
-            wezterm.action.CopyMode("MoveToScrollbackTop"),
-            wezterm.action.CopyMode({ SetSelectionMode = "Line" }),
-            wezterm.action.CopyMode("MoveToScrollbackBottom"),
-            wezterm.action.CopyMode("Close"),
+          act.Multiple({
+            act.CopyMode("ClearSelectionMode"),
+            act.CopyMode("MoveToScrollbackTop"),
+            act.CopyMode({ SetSelectionMode = "Line" }),
+            act.CopyMode("MoveToScrollbackBottom"),
+            act.CopyMode("Close"),
           }),
           pane
         )
       end),
     },
-    -- Ghostty・Orca の標準キーと下分割の共通キーを追加
     {
       key = "d",
       mods = "CMD",
-      action = wezterm.action.SplitHorizontal({ domain = "CurrentPaneDomain" }),
+      action = act.SplitHorizontal({ domain = "CurrentPaneDomain" }),
     },
     {
       key = "d",
       mods = "CMD|SHIFT",
-      action = wezterm.action.SplitVertical({ domain = "CurrentPaneDomain" }),
+      action = act.SplitVertical({ domain = "CurrentPaneDomain" }),
     },
     {
       key = "d",
       mods = "ALT|SHIFT",
-      action = wezterm.action.SplitVertical({ domain = "CurrentPaneDomain" }),
+      action = act.SplitVertical({ domain = "CurrentPaneDomain" }),
     },
-    -- Cmd+W でタブ全体ではなく現在のペインを閉じる
     {
       key = "w",
       mods = "CMD",
-      action = wezterm.action.CloseCurrentPane({ confirm = true }),
+      action = act.CloseCurrentPane({ confirm = true }),
     },
   },
 }

@@ -6,7 +6,7 @@ elif [ -x /usr/local/bin/brew ]; then
   eval "$(/usr/local/bin/brew shellenv)"
 fi
 
-# ~/.local/bin、Homebrew Git、OrbStack の順で標準 PATH より優先
+# PATH 優先順: ~/.local/bin → Homebrew Git → OrbStack
 for dir in "$HOME/.orbstack/bin" "${HOMEBREW_PREFIX:-/usr/local}/opt/git/bin" "$HOME/.local/bin"; do
   [ -d "$dir" ] || continue
   case ":$PATH:" in
@@ -34,6 +34,6 @@ fi
 
 [ -r "$HOME/.aws/load-active-profile.sh" ] && . "$HOME/.aws/load-active-profile.sh"
 
-# 組織固有設定・ツールの自動追記はローカル設定へ
+# 組織設定・ツールの自動追記はローカル設定へ
 # shellcheck source=/dev/null
 [ -r "$HOME/.bashrc.local" ] && . "$HOME/.bashrc.local"

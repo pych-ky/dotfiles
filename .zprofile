@@ -9,7 +9,6 @@ fi
 typeset -U path PATH
 path=("$HOME/.local/bin" $path)
 
-# OrbStack が生成する CLI・補完設定を読み込む
 if [[ -r "$HOME/.orbstack/shell/init.zsh" ]]; then
   . "$HOME/.orbstack/shell/init.zsh"
 fi

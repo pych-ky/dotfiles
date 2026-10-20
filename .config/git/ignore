@@ -1,3 +1,5 @@
+# Git 共通除外
+
 mise.local.toml
 
 **/.claude/.cc-writes/

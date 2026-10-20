@@ -58,9 +58,7 @@
                   {
                     "type": "frontmost_application_if",
                     "bundle_identifiers": [
-                      "^com\\.github\\.wez\\.wezterm$",
-                      "^com\\.mitchellh\\.ghostty$",
-                      "^com\\.stablyai\\.orca$"
+                      "^com\\.(github\\.wez\\.wezterm|mitchellh\\.ghostty|stablyai\\.orca)$"
                     ]
                   }
                 ]
@@ -84,9 +82,7 @@
                   {
                     "type": "frontmost_application_if",
                     "bundle_identifiers": [
-                      "^com\\.github\\.wez\\.wezterm$",
-                      "^com\\.mitchellh\\.ghostty$",
-                      "^com\\.stablyai\\.orca$"
+                      "^com\\.(github\\.wez\\.wezterm|mitchellh\\.ghostty|stablyai\\.orca)$"
                     ]
                   }
                 ]
@@ -110,9 +106,7 @@
                   {
                     "type": "frontmost_application_if",
                     "bundle_identifiers": [
-                      "^com\\.github\\.wez\\.wezterm$",
-                      "^com\\.mitchellh\\.ghostty$",
-                      "^com\\.stablyai\\.orca$"
+                      "^com\\.(github\\.wez\\.wezterm|mitchellh\\.ghostty|stablyai\\.orca)$"
                     ]
                   }
                 ]
@@ -136,9 +130,7 @@
                   {
                     "type": "frontmost_application_if",
                     "bundle_identifiers": [
-                      "^com\\.github\\.wez\\.wezterm$",
-                      "^com\\.mitchellh\\.ghostty$",
-                      "^com\\.stablyai\\.orca$"
+                      "^com\\.(github\\.wez\\.wezterm|mitchellh\\.ghostty|stablyai\\.orca)$"
                     ]
                   }
                 ]
@@ -162,9 +154,7 @@
                   {
                     "type": "frontmost_application_if",
                     "bundle_identifiers": [
-                      "^com\\.github\\.wez\\.wezterm$",
-                      "^com\\.mitchellh\\.ghostty$",
-                      "^com\\.stablyai\\.orca$"
+                      "^com\\.(github\\.wez\\.wezterm|mitchellh\\.ghostty|stablyai\\.orca)$"
                     ]
                   }
                 ]
@@ -188,9 +178,7 @@
                   {
                     "type": "frontmost_application_if",
                     "bundle_identifiers": [
-                      "^com\\.github\\.wez\\.wezterm$",
-                      "^com\\.mitchellh\\.ghostty$",
-                      "^com\\.stablyai\\.orca$"
+                      "^com\\.(github\\.wez\\.wezterm|mitchellh\\.ghostty|stablyai\\.orca)$"
                     ]
                   }
                 ]
@@ -214,9 +202,7 @@
                   {
                     "type": "frontmost_application_if",
                     "bundle_identifiers": [
-                      "^com\\.github\\.wez\\.wezterm$",
-                      "^com\\.mitchellh\\.ghostty$",
-                      "^com\\.stablyai\\.orca$"
+                      "^com\\.(github\\.wez\\.wezterm|mitchellh\\.ghostty|stablyai\\.orca)$"
                     ]
                   }
                 ]
@@ -240,9 +226,7 @@
                   {
                     "type": "frontmost_application_if",
                     "bundle_identifiers": [
-                      "^com\\.github\\.wez\\.wezterm$",
-                      "^com\\.mitchellh\\.ghostty$",
-                      "^com\\.stablyai\\.orca$"
+                      "^com\\.(github\\.wez\\.wezterm|mitchellh\\.ghostty|stablyai\\.orca)$"
                     ]
                   }
                 ]
@@ -497,10 +481,8 @@
                   {
                     "type": "frontmost_application_if",
                     "bundle_identifiers": [
-                      "^com\\.google\\.Chrome$",
-                      "^com\\.microsoft\\.edgemac$",
-                      "^org\\.mozilla\\.firefox$",
-                      "^com\\.apple\\.Safari$"
+                      "^com\\.(apple\\.Safari|google\\.Chrome|microsoft\\.edgemac)$",
+                      "^org\\.mozilla\\.firefox$"
                     ]
                   }
                 ]
@@ -519,8 +501,7 @@
                   {
                     "type": "frontmost_application_if",
                     "bundle_identifiers": [
-                      "^com\\.google\\.Chrome$",
-                      "^com\\.microsoft\\.edgemac$",
+                      "^com\\.(google\\.Chrome|microsoft\\.edgemac)$",
                       "^org\\.mozilla\\.firefox$"
                     ]
                   }

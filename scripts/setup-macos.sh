@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # macOS 独自設定の反映
 
-# 再実行可（一部は再ログイン後に反映）
-
 set -euo pipefail
 
 if ((EUID == 0)); then
@@ -17,13 +15,12 @@ fi
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Rectangle の終了を最大 10 秒待機
 rectangle_shutdown_max_attempts=50
 rectangle_shutdown_interval=0.2
 
 rectangle_restart_pending=0
 
-# Rectangle の終了を待ち、時間切れならエラー
+# Rectangle の終了を待機
 wait_for_rectangle_exit() {
   local attempts=0
 
@@ -45,7 +42,7 @@ restart_rectangle() {
   open -a Rectangle
 }
 
-# 終了時に Rectangle を再起動し、終了コードを引き継いで終了
+# 終了コードを保って Rectangle を復帰
 restore_rectangle_on_exit() {
   local status="$1"
   local restart_status
@@ -64,7 +61,7 @@ restore_rectangle_on_exit() {
   exit "$status"
 }
 
-# defaults write は辞書を置換するため、既存 plist の並べ方だけを変更
+# plist の他項目を保ってデスクトップの配置を変更
 set_desktop_arrangement() {
   local value="$1"
   local keypath
@@ -72,7 +69,6 @@ set_desktop_arrangement() {
 
   plist="$(defaults export com.apple.finder -)"
 
-  # 表示設定の未保存端末には入れ子の辞書が無い
   for keypath in DesktopViewSettings DesktopViewSettings.IconViewSettings; do
     if ! printf '%s' "$plist" |
       plutil -extract "$keypath" xml1 -o /dev/null -- - >/dev/null 2>&1; then
@@ -91,11 +87,11 @@ set_desktop_arrangement() {
 
 ## キーボード
 
-# キーリピートを最速、開始待ちを最短に
-defaults write NSGlobalDomain KeyRepeat -int 2
+# キーリピートは最速・最短
 defaults write NSGlobalDomain InitialKeyRepeat -int 15
+defaults write NSGlobalDomain KeyRepeat -int 2
 
-# F1、F2 などを標準のファンクションキーに
+# F1 等を標準ファンクションキーに
 defaults write NSGlobalDomain com.apple.keyboard.fnState -bool true
 
 # VS Code の ⌘+[ と競合する「次のウインドウを操作対象にする」を無効化
@@ -110,47 +106,37 @@ symbolic_hotkey="$(
 defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys \
   -dict-add 27 "$symbolic_hotkey"
 
-defaults write NSGlobalDomain NSAutomaticSpellingCorrectionEnabled -bool false
 defaults write NSGlobalDomain NSAutomaticCapitalizationEnabled -bool false
-defaults write NSGlobalDomain NSAutomaticQuoteSubstitutionEnabled -bool false
 defaults write NSGlobalDomain NSAutomaticDashSubstitutionEnabled -bool false
-defaults write NSGlobalDomain NSAutomaticPeriodSubstitutionEnabled -bool false
-
 defaults write NSGlobalDomain NSAutomaticInlinePredictionEnabled -bool false
+defaults write NSGlobalDomain NSAutomaticPeriodSubstitutionEnabled -bool false
+defaults write NSGlobalDomain NSAutomaticQuoteSubstitutionEnabled -bool false
+defaults write NSGlobalDomain NSAutomaticSpellingCorrectionEnabled -bool false
 
 ## 日本語入力
 
-# 再ログイン後に反映
-defaults write com.apple.inputmethod.Kotoeri JIMPrefLiveConversionKey -bool false
-defaults write com.apple.inputmethod.Kotoeri JIMPrefPredictiveCandidateKey -bool false
 defaults write com.apple.inputmethod.Kotoeri JIMPrefAutocorrectionKey -bool false
 defaults write com.apple.inputmethod.Kotoeri JIMPrefConvertWithPunctuationKey -bool false
-
-# 数字を半角で入力
 defaults write com.apple.inputmethod.Kotoeri JIMPrefFullWidthNumeralCharactersKey -bool false
+defaults write com.apple.inputmethod.Kotoeri JIMPrefLiveConversionKey -bool false
+defaults write com.apple.inputmethod.Kotoeri JIMPrefPredictiveCandidateKey -bool false
 
 ## マウス / トラックパッド
 
-# ナチュラルスクロールを無効化
-defaults write NSGlobalDomain com.apple.swipescrolldirection -bool false
-
-# マウスの軌跡の速さ
 defaults write NSGlobalDomain com.apple.mouse.scaling -float 3
+defaults write NSGlobalDomain com.apple.swipescrolldirection -bool false
 
 ## 外観
 
-# 再ログイン後に完全反映
 defaults write NSGlobalDomain AppleInterfaceStyle -string Dark
 defaults write NSGlobalDomain AppleShowScrollBars -string Always
 
 ## Dock / Mission Control
 
-defaults write com.apple.dock tilesize -int 72
-
-defaults write com.apple.dock show-recents -bool false
-
-# 使用状況による操作スペースの自動並べ替えを無効化
+# 使用履歴で操作スペースを並べ替えない
 defaults write com.apple.dock mru-spaces -bool false
+defaults write com.apple.dock show-recents -bool false
+defaults write com.apple.dock tilesize -int 72
 
 ## Finder
 
@@ -160,7 +146,7 @@ defaults write NSGlobalDomain AppleShowAllExtensions -bool true
 
 defaults write com.apple.finder ShowPathbar -bool true
 
-# デフォルトをリスト表示に
+# Nlsv はリスト表示
 defaults write com.apple.finder FXPreferredViewStyle -string Nlsv
 
 set_desktop_arrangement grid
@@ -169,11 +155,11 @@ set_desktop_arrangement grid
 
 defaults write com.apple.controlcenter "NSStatusItem Visible Sound" -bool true
 
-## Maccy (クリップボード履歴)
+## Maccy
 
 defaults write org.p0deje.Maccy historySize -int 999
 
-## Rectangle (ウィンドウ管理)
+## Rectangle
 
 # 終了時の旧設定書き戻しと import の競合を防ぐ
 if pgrep -xq Rectangle; then
@@ -183,15 +169,11 @@ if pgrep -xq Rectangle; then
   wait_for_rectangle_exit
 fi
 
-# 保存済みのショートカット・スナップ設定を取り込み
 defaults import com.knollsoft.Rectangle "$repo_dir/macos/rectangle.plist"
 
 ## 電源管理
 
-# 電源接続時の自動スリープを無効化
 sudo -n pmset -c sleep 0 2>/dev/null || printf 'warning: skipped pmset sleep setting\n' >&2
-
-## 設定の反映
 
 killall Dock 2>/dev/null || true
 killall Finder 2>/dev/null || true

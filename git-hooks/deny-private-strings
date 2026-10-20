@@ -12,22 +12,21 @@ if [[ "$mode" != pre-commit && "$mode" != pre-push ]]; then
 fi
 
 config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/dotfiles"
-# 非公開側で配置。1 行 1 固定文字列、大文字小文字を区別しない
+# 非公開側で配置。1 行 1 固定文字列、大小文字は区別しない
 denylist_file="$config_dir/denylist.txt"
 public_url_origins_file="$config_dir/public-url-origins.txt"
-# 業務用 remote のパターン。全 remote と push 先が一致するリポジトリでは検査を省略
+# 全 remote・push 先が業務用パターンに一致すれば検査を省略
 work_remotes_file="$config_dir/work-remotes.txt"
 
 [[ -r "$denylist_file" ]] || exit 0
 
-# 空パターンの全行一致を防ぐため、前後空白・コメント行・空行を除去
+# 前後空白・コメント・空行を除去（空パターンの全行一致を防ぐ）
 strip_pattern_file() {
   sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -- "$1" |
     grep -v -e '^#' -e '^$' || true
 }
 
-# denylist の有効なパターンを出力
-# 非公開パターンはディスクに残さずプロセス置換で渡す
+# ディスクに残さず渡す非公開パターンの取得
 patterns() {
   strip_pattern_file "$denylist_file"
 }
@@ -36,7 +35,7 @@ if [[ -z "$(patterns)" ]]; then
   exit 0
 fi
 
-# 公開 URL のホストだけを除外し、残る禁止文字列を元の行で報告する
+# 公開 URL ホストを除外し、禁止文字列のある元の行を出力
 filter_public_origins() {
   if [[ ! -r "$public_url_origins_file" ]]; then
     cat
@@ -66,7 +65,7 @@ filter_public_origins() {
           position += offset - 1
           before = position == 1 ? "" : substr(text, position - 1, 1)
           after = substr(text, position + length(origin), 1)
-          # 差分の追加・削除記号の直後も内容の行頭として扱う
+          # 差分の +/- 直後も行頭とみなす
           at_start = position == 1 ||
             (mode == "pre-push" && position == 2 && before ~ /^[+-]$/)
           if ((at_start || before ~ /[[:space:]]/ || index("<>\"\047`([{=:", before)) &&
@@ -88,7 +87,7 @@ filter_public_origins() {
   ' <(strip_pattern_file "$public_url_origins_file") <(patterns) -
 }
 
-# シンボリックリンクをたどった実体の絶対パスを返す
+# symlink を解決した絶対パスを取得
 resolve_path() {
   local path="$1"
   local target dir
@@ -106,7 +105,7 @@ resolve_path() {
   printf '%s/%s\n' "$dir" "$(basename "$path")"
 }
 
-# パターン自身が一致する配置元リポジトリは denylist 検査を省略
+# パターン自身が一致する配置元リポジトリは検査を省略
 denylist_source="$(resolve_path "$denylist_file" 2>/dev/null || true)"
 current_repo="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 denylist_repo=
@@ -122,9 +121,9 @@ if [[ -n "$current_repo" && -n "$denylist_repo" ]]; then
   [[ "$current_repo" == "$denylist_repo" ]] && exit 0
 fi
 
-# 全 remote と push 先が業務用パターンに一致するか判定
+# 全 remote・push 先の業務用パターン一致を確認
 is_work_repository() {
-  local url total=0 matched=0
+  local url has_remote=0
 
   [[ -r "$work_remotes_file" ]] || return 1
   [[ -n "$(strip_pattern_file "$work_remotes_file")" ]] || return 1
@@ -137,14 +136,12 @@ is_work_repository() {
 
   while IFS= read -r url; do
     [[ -n "$url" ]] || continue
-    total=$((total + 1))
-    if printf '%s\n' "$url" |
-      grep -qiF -f <(strip_pattern_file "$work_remotes_file"); then
-      matched=$((matched + 1))
-    fi
+    printf '%s\n' "$url" |
+      grep -qiF -f <(strip_pattern_file "$work_remotes_file") || return 1
+    has_remote=1
   done < <(git remote -v 2>/dev/null | awk '{ print $2 }' | sort -u)
 
-  ((total > 0 && matched == total))
+  ((has_remote))
 }
 
 if is_work_repository; then
@@ -153,7 +150,7 @@ fi
 
 found=0
 
-# 一致した行を見出し付きで表示し、検出を記録
+# 一致行を見出し付きで表示し、検出を記録
 report() {
   local heading="$1"
   local line
@@ -169,7 +166,7 @@ report() {
   found=1
 }
 
-# ステージ済みのパス名と内容を denylist で検査
+# ステージ済みのパス・内容を検査
 scan_pre_commit() {
   local -a paths=()
   local path hit
@@ -185,7 +182,7 @@ scan_pre_commit() {
   )"
   [[ -n "$hit" ]] && report 'ステージ済みのパス名が一致しました' <<<"$hit"
 
-  # 対象ファイル全体を index で検査（-I でバイナリを除外）
+  # 差分だけでなく index のファイル全体を検査
   hit="$(
     {
       git grep --cached --no-color -I -n -i -F -f <(patterns) -- "${paths[@]}" ||
@@ -197,7 +194,7 @@ scan_pre_commit() {
   return 0
 }
 
-# push するコミットを denylist で検査
+# push 対象コミットを検査
 scan_pre_push() {
   local _local_ref local_sha _remote_ref remote_sha
   local -a range remote_tips
@@ -205,12 +202,12 @@ scan_pre_push() {
 
   while read -r _local_ref local_sha _remote_ref remote_sha; do
     [[ -n "${local_sha:-}" ]] || continue
-    # ref の削除は検査対象外
+    # 0 SHA（ref 削除）は対象外
     [[ "$local_sha" =~ ^0+$ ]] && continue
 
     if [[ "${remote_sha:-}" =~ ^0+$ ]]; then
-      # fetch 先と実送信先が一致する場合だけ、remote のコミットを除外
-      # --remotes では private の履歴を public へ初回 push する検査が抜ける
+      # fetch・実送信先が同じ remote の履歴だけ除外
+      # --remotes は private 履歴の public 初回 push を見逃す
       remote_tips=()
       if [[ -n "$remote_name" && -n "$remote_url" ]] &&
         [[ "$(git remote get-url "$remote_name" 2>/dev/null)" == "$remote_url" ]]; then
@@ -232,7 +229,7 @@ scan_pre_push() {
         "$count" >&2
     fi
 
-    # 追加後に削除された内容も検出するため、各コミットを検査
+    # 途中で削除された内容も検出するため各コミットを検査
     commits="$(git rev-list "${range[@]}" 2>/dev/null)" || return 1
     while IFS= read -r commit; do
       [[ -n "$commit" ]] || continue
