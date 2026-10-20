@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 # Copilot CLI ステータスライン
 
-# 表示を Codex TUI に合わせる
-
 set -euo pipefail
 
 script_dir="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 
-# モデル未確定時の Claude 設定による補完を防ぐ
+# モデル未確定時は Claude 設定で補完しない
 # 推論レベルは display_name にのみ含まれる
 payload="$(jq -e 'select(.model.id) | {
   workspace,

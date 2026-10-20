@@ -68,7 +68,7 @@ settings_db="$data_dir/profiles/$profile_id/profile-state.db"
 
 jq -e 'type == "object"' "$managed_settings" >/dev/null
 
-# SQLite の整合性管理は Orca 内蔵の保存処理に任せる
+# SQLite は Orca 内蔵の保存 API 経由で更新
 if [[ -e "$settings_db" || -L "$settings_db" ]]; then
   if [[ -L "$settings_db" || ! -f "$settings_db" ]]; then
     printf 'error: Orca profile database must be a regular file: %s\n' "$settings_db" >&2
@@ -81,10 +81,12 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { isDeepStrictEqual } = require("node:util");
 
+// 設定オブジェクトか判定
 function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+// 管理値を再帰的に上書き
 function mergeSettings(current, managed) {
   const merged = { ...current };
   for (const [key, value] of Object.entries(managed)) {
@@ -95,19 +97,23 @@ function mergeSettings(current, managed) {
   return merged;
 }
 
+// Orca の保存 API で設定を反映
 function main() {
   const [appPath, dataDir, profileId, managedFile] = process.argv.slice(2);
   const mainDir = path.join(appPath, "Contents/Resources/app.asar.unpacked/out/main");
   const chunksDir = path.join(mainDir, "chunks");
+  // 保存モジュールの候補を抽出
   const authorityFiles = fs.readdirSync(chunksDir).filter((name) =>
     /^profile-state-sqlite-authority-.*\.js$/.test(name));
   if (authorityFiles.length !== 1) {
     throw new Error("unsupported Orca profile-state API");
   }
-  // 内部モジュールは短縮された export 名に依存せず、必要なメソッドで特定
+  // 短縮された export 名には依存しない
   const methods = ["readAcceptedState", "readInitialState", "writeSerializedDomains", "close"];
+  // 保存 API を持つクラスを抽出
   const authorities = Object.values(require(path.join(chunksDir, authorityFiles[0])))
     .filter((value) => typeof value === "function" &&
+      // メソッドの有無を確認
       methods.every((method) => typeof value.prototype?.[method] === "function"));
   if (authorities.length !== 1) {
     throw new Error("unsupported Orca profile-state API");
@@ -120,7 +126,6 @@ function main() {
   const managed = JSON.parse(fs.readFileSync(managedFile, "utf8"));
   if (!isObject(managed)) throw new Error("Orca managed settings must be an object");
 
-  // Orca の同時起動と設定更新を排他し、既存プロファイルの整合性を確認
   const maintenance = acquireProfileStateMaintenance(dataDir);
   let authority;
   try {
@@ -133,7 +138,7 @@ function main() {
     const current = snapshot.takeParsedState()?.settings;
     if (!isObject(current)) throw new Error("Orca profile settings must be an object");
     const merged = mergeSettings(current, managed);
-    // エージェントごとの環境は空オブジェクトも明示的な設定として置換
+    // エージェント環境は空オブジェクトも置換
     merged.agentDefaultEnv = { ...current.agentDefaultEnv, ...managed.agentDefaultEnv };
     if (isDeepStrictEqual(current, merged)) return;
 
@@ -168,10 +173,9 @@ fi
 
 jq -e '.settings | type == "object"' "$settings_file" >/dev/null
 
-# エージェントごとの環境は空オブジェクトも明示的な設定として置換
+# エージェント環境は空オブジェクトも置換
 settings_filter=".settings *= \$managed[0] | .settings.agentDefaultEnv += \$managed[0].agentDefaultEnv"
 
-# 一致している場合は書き換えずに終了
 if jq -e --slurpfile managed "$managed_settings" \
   ". == ($settings_filter)" "$settings_file" >/dev/null; then
   if [[ ${DOTFILES_BOOTSTRAP:-0} != 1 ]]; then
@@ -183,7 +187,6 @@ fi
 temporary_settings="$(mktemp "$settings_file.XXXXXX")"
 trap 'rm -f -- "$temporary_settings"' EXIT
 
-# 未指定の設定・アカウント・作業状態を保持
 jq --slurpfile managed "$managed_settings" \
   "$settings_filter" "$settings_file" >"$temporary_settings"
 mv -- "$temporary_settings" "$settings_file"

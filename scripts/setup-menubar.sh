@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# メニューバーの表示項目と保存済みの位置を反映
+# メニューバーの表示・配置
 
 set -euo pipefail
 
@@ -15,7 +15,7 @@ fi
 
 changed_count=0
 
-# 管理するキーだけを比較・更新し、保存結果を読み戻す
+# 管理キーを比較・更新・読み戻し検証
 write_default() {
   local domain="$1" key="$2" type="$3" value="$4"
   local current expected="$4"
@@ -43,11 +43,10 @@ write_default() {
 write_default eu.exelban.Stats CombinedModules -bool false
 write_default eu.exelban.Stats keep_menubar_positions -bool false
 
-for module in GPU Sensors Bluetooth Clock Remote; do
+for module in Bluetooth Clock GPU Remote Sensors; do
   write_default eu.exelban.Stats "${module}_state" -bool false
 done
 
-# 独立したウィジェットを左から CPU・RAM・SSD・通信量・バッテリーの順に表示
 while read -r module widget position; do
   write_default eu.exelban.Stats "${module}_state" -bool true
   write_default eu.exelban.Stats "${module}_widget" -string "$widget"
@@ -70,7 +69,7 @@ write_default org.p0deje.Maccy showInStatusBar -bool false
 
 ## macOS 標準項目
 
-# 位置は右端からの距離で、大きい値ほど左。OS 更新後は並びを確認する
+# 位置は右端からの距離。OS 更新後は並びを確認
 write_default com.apple.controlcenter "NSStatusItem Preferred Position WiFi" -float 261
 write_default com.apple.TextInputMenuAgent "NSStatusItem Preferred Position Item-0" -float 217
 write_default com.apple.Spotlight "NSStatusItem Preferred Position Item-0" -float 185

@@ -1,4 +1,6 @@
-# 組織の managed settings 配布でローカルの managed が無視されても、共通設定を読み込む
+# Claude Code 共通設定
+
+# 組織配布でローカル managed が無視されても共通設定を追加
 claude() {
   local arg source link file
   for arg in "$@"; do
@@ -12,7 +14,7 @@ claude() {
     esac
   done
 
-  # CLI 本体が先頭で分岐するサブコマンドへ --settings を追加しない
+  # 先頭で分岐するサブコマンドには --settings を追加しない
   case "${1:-}" in
   remote-control | rc | remote | sync | bridge)
     command claude "$@"

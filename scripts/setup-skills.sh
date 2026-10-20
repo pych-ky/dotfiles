@@ -13,7 +13,7 @@ fi
 # shellcheck source=lib/setup-common.sh
 source "$setup_common_library"
 
-# Agent Skills のリポジトリを取得し、付属の setup.sh を実行
+# Agent Skills を取得・セットアップ
 main() {
   local skip
   local strict

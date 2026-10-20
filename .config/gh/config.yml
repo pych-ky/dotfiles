@@ -1,16 +1,25 @@
 # GitHub CLI 設定
 
 version: 1
-git_protocol: https
-editor:
-prompt: enabled
-prefer_editor_prompt: disabled
-pager:
+
+## Git
+
 aliases:
     co: pr checkout
-http_unix_socket:
+git_protocol: https
+
+## 外部コマンド・接続
+
 browser:
-color_labels: disabled
+editor:
+http_unix_socket:
+pager:
+
+## 操作・表示
+
 accessible_colors: disabled
 accessible_prompter: disabled
+color_labels: disabled
+prefer_editor_prompt: disabled
+prompt: enabled
 spinner: enabled

@@ -51,16 +51,20 @@ if ((10#$git_major < 2 || (10#$git_major == 2 && 10#$git_minor < 37))); then
   exit 1
 fi
 
-git config --global --replace-all user.useConfigOnly true
-git config --global --replace-all fetch.prune true
-git config --global --replace-all init.defaultBranch 'main'
-git config --global --replace-all branch.autoSetupMerge 'simple'
-git config --global --replace-all push.default 'simple'
-git config --global --replace-all push.autoSetupRemote true
-git config --global --replace-all transfer.credentialsInUrl 'die'
-git config --global --replace-all pull.rebase true
-git config --global --replace-all pull.ff true
-git config --global --replace-all merge.conflictStyle 'zdiff3'
+while read -r key value; do
+  git config --global --replace-all "$key" "$value"
+done <<'SETTINGS'
+branch.autoSetupMerge simple
+fetch.prune true
+init.defaultBranch main
+merge.conflictStyle zdiff3
+pull.ff true
+pull.rebase true
+push.autoSetupRemote true
+push.default simple
+transfer.credentialsInUrl die
+user.useConfigOnly true
+SETTINGS
 
 gitconfig_local="$HOME/.gitconfig.local"
 if [[ -f "$gitconfig_local" ]] &&
@@ -79,7 +83,7 @@ else
     "$gitconfig_local" >&2
 fi
 
-# 空設定で継承 helper をリセットし、gh の二重登録を防ぐ
+# 空設定で継承 helper を無効化
 git config --global --replace-all 'credential.https://github.com.helper' ''
 git config --global --add \
   'credential.https://github.com.helper' '!gh auth git-credential'
@@ -90,17 +94,17 @@ if ! command -v gh >/dev/null 2>&1; then
   printf "         install it, then run \`gh auth login\`\n" >&2
 fi
 
-# 組織固有の includeIf・helper 上書き用。未作成なら Git が無視
+# 組織別の includeIf・helper はローカルで上書き
 if ! git config --global --get-all include.path 2>/dev/null |
   grep -qxF \~/.gitconfig.local; then
   git config --global --add include.path \~/.gitconfig.local
 fi
 
-# dispatch が dirname $0 から deny-private-strings を参照するため同じ場所に配置
+# dispatch と検査フックは同じ場所に置く
 hooks_dir="$HOME/.local/share/dotfiles/git-hooks"
 
-# 実行可能なフックを共通フックディレクトリへリンク
-# Git が壊れたリンクを無視するため、core.hooksPath 設定前に実行権を検証
+# 実行権を検証してフックをリンク
+# Git は壊れたフックを無視するため、設定前に検証
 link_hook() {
   local source="$1"
   local target="$hooks_dir/$2"
@@ -138,7 +142,7 @@ else
   exit 1
 fi
 
-# Git LFS のフックは dispatch が呼ぶため、フィルタだけを導入
+# LFS フックは dispatch に任せ、フィルタだけ導入
 if command -v git-lfs >/dev/null 2>&1; then
   if lfs_output="$(git lfs install --skip-repo)"; then
     if [[ -n "$lfs_output" && "$lfs_output" != 'Git LFS initialized.' ]]; then

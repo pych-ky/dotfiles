@@ -4,13 +4,13 @@
 SETUP_TEMPORARY_CLONE_DIR=
 PROCESS_LOCK_HELD=0
 
-# エラーメッセージを標準エラーに出して失敗を返す
+# エラーを表示して失敗
 setup_error() {
   printf 'error: %s\n' "$1" >&2
   return 1
 }
 
-# 認証プロンプトを出さない設定で git を実行
+# git の対話認証を抑止
 setup_run_noninteractive_git() {
   GIT_TERMINAL_PROMPT=0 \
     GCM_INTERACTIVE=Never \
@@ -20,7 +20,7 @@ setup_run_noninteractive_git() {
     git "$@"
 }
 
-# HOME が / 以外の既存の絶対パスか検証
+# HOME の実在・絶対パス・ルート除外を検証
 setup_validate_home() {
   local home_dir="${HOME:-}"
   local physical_home
@@ -37,7 +37,7 @@ setup_validate_home() {
   fi
 }
 
-# 環境変数を 0/1 として読み出す（未設定は 0）
+# 環境変数を 0/1 で検証・取得
 setup_read_flag() {
   local variable_name="$1"
   local value="${!variable_name:-0}"
@@ -51,7 +51,7 @@ setup_read_flag() {
   esac
 }
 
-# 末尾の / と /. を除いた絶対パスを返す
+# 末尾の /・/. を除いて絶対パスを検証
 setup_normalize_repository_dir() {
   local repository_dir="$1"
   local variable_name="$2"
@@ -70,20 +70,7 @@ setup_normalize_repository_dir() {
   printf '%s\n' "$repository_dir"
 }
 
-# アクセス不可を strict ならエラー、それ以外はスキップとして表示
-setup_handle_access_failure() {
-  local strict="$1"
-  local label="$2"
-
-  if [[ "$strict" == 1 ]]; then
-    printf 'error: private %s repository is not accessible\n' "$label" >&2
-    return 1
-  fi
-
-  printf 'skipped: %s (private repository is inaccessible)\n' "$label"
-}
-
-# checkout の root・origin・実行ファイルを検証し、不一致の理由を出力
+# checkout の root・origin・実行ファイルを検証
 setup_verify_repository() {
   local repository_dir="$1"
   local expected_url="$2"
@@ -130,7 +117,7 @@ setup_verify_repository() {
   fi
 }
 
-# setup_verify_repository の失敗理由をエラーとして表示
+# checkout の検証エラーを表示
 setup_verify_repository_or_error() {
   local repository_error
 
@@ -140,19 +127,19 @@ setup_verify_repository_or_error() {
   fi
 }
 
-# ファイルのデバイス番号と inode を返す
+# デバイス番号・inode を取得
 process_lock_file_identity() {
   stat -L -f '%d:%i' "$1" 2>/dev/null
 }
 
-# ロックの記述子を閉じてエラーを表示
+# ロックを閉じてエラー表示
 process_lock_fail() {
   exec 9>&-
   printf 'error: %s\n' "$1" >&2
   return 1
 }
 
-# lockf で排他し、ロック取得前後のすり替えを検出
+# ロック取得前後のすり替えを検出して排他
 process_lock_acquire() {
   local lock_path="$1"
   local label="$2"
@@ -217,16 +204,14 @@ process_lock_release() {
   PROCESS_LOCK_HELD=0
 }
 
-# private checkout を用意。アクセス不可でスキップ時は 3 を返す
+# private checkout を取得（アクセス不可のスキップは 3）
 setup_ensure_private_checkout() {
   local repository_dir="$1"
   local repository_url="$2"
   local label="$3"
-  local directory_variable="$4"
   local url_variable="$5"
-  local executable_relative="$6"
-  local executable_error="$7"
   local strict="$8"
+  local verification_args=("${@:1:7}")
   local repository_parent
 
   if ! command -v git >/dev/null 2>&1; then
@@ -239,13 +224,16 @@ setup_ensure_private_checkout() {
   fi
 
   if [[ -e "$repository_dir" || -L "$repository_dir" ]]; then
-    setup_verify_repository_or_error "$repository_dir" "$repository_url" "$label" \
-      "$directory_variable" "$url_variable" "$executable_relative" "$executable_error" || return 1
+    setup_verify_repository_or_error "${verification_args[@]}" || return 1
     return 0
   fi
 
   if ! setup_run_noninteractive_git ls-remote -- "$repository_url" HEAD >/dev/null 2>&1; then
-    setup_handle_access_failure "$strict" "$label" || return 1
+    if [[ "$strict" == 1 ]]; then
+      printf 'error: private %s repository is not accessible\n' "$label" >&2
+      return 1
+    fi
+    printf 'skipped: %s (private repository is inaccessible)\n' "$label" || return 1
     return 3
   fi
 
@@ -258,20 +246,18 @@ setup_ensure_private_checkout() {
     setup_error "$label repository could not be cloned"
     return 1
   fi
-  setup_verify_repository_or_error "$SETUP_TEMPORARY_CLONE_DIR" "$repository_url" "$label" \
-    "$directory_variable" "$url_variable" "$executable_relative" "$executable_error" || return 1
+  setup_verify_repository_or_error "$SETUP_TEMPORARY_CLONE_DIR" "${verification_args[@]:1}" || return 1
 
   process_lock_acquire "$repository_dir.publish-lock" "$label publish" 30 || return 1
   if [[ ! -e "$repository_dir" && ! -L "$repository_dir" ]]; then
     mv "$SETUP_TEMPORARY_CLONE_DIR" "$repository_dir" || return 1
     SETUP_TEMPORARY_CLONE_DIR=
   fi
-  setup_verify_repository_or_error "$repository_dir" "$repository_url" "$label" \
-    "$directory_variable" "$url_variable" "$executable_relative" "$executable_error" || return 1
+  setup_verify_repository_or_error "${verification_args[@]}" || return 1
   process_lock_release
 }
 
-# 終了時に一時 clone と自プロセスの公開ロックを清掃
+# 一時 clone を清掃・公開ロックを解放
 setup_cleanup_private_checkout() {
   [[ -z "$SETUP_TEMPORARY_CLONE_DIR" ]] || rm -rf "$SETUP_TEMPORARY_CLONE_DIR"
   process_lock_release 2>/dev/null || true

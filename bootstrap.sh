@@ -19,7 +19,7 @@ fi
 # shellcheck source=lib/setup-common.sh
 source "$setup_common_library"
 
-# 実行中ステップの結果を失敗・スキップ件数付きで表示
+# ステップの結果を表示
 finish_step() {
   [[ -n "$current_step" ]] || return 0
 
@@ -35,7 +35,7 @@ finish_step() {
   current_step=
 }
 
-# 前のステップを締めて新しいステップを開始
+# ステップを切り替え
 step() {
   finish_step
   current_step="$1"
@@ -44,12 +44,11 @@ step() {
   printf '\n==> %s\n' "$1"
 }
 
-# 失敗を記録し、後続ステップを続行
+# 中断以外の失敗を記録して続行
 record_failure() {
   local label="$1"
   local status="$2"
 
-  # 中断は即時伝播
   if ((status == 130 || status == 143)); then
     return "$status"
   fi
@@ -58,7 +57,7 @@ record_failure() {
   printf 'error: %s (exit %d); continuing\n' "$label" "$status" >&2
 }
 
-# スキップした作業を集計用に記録して表示
+# スキップを記録・表示
 record_skip() {
   local reason="$1"
 
@@ -66,7 +65,7 @@ record_skip() {
   printf 'skipped: %s\n' "$reason"
 }
 
-# 任意の setup を実行し、未実施を示す終了コード 3 はスキップとして記録
+# 任意の setup を実行（終了コード 3 はスキップ）
 run_optional_setup() {
   local label="$1"
   shift
@@ -80,7 +79,7 @@ run_optional_setup() {
   esac
 }
 
-# コマンドを実行し、失敗を記録して続行
+# コマンドの失敗を記録して続行
 run_and_record() {
   local label="$1"
   shift
@@ -88,7 +87,7 @@ run_and_record() {
   "$@" || record_failure "$label" "$?"
 }
 
-# sudo の認証を確認し、未認証なら端末で入力を求める
+# 必要なら端末で sudo 認証
 ensure_sudo() {
   if sudo -n -v 2>/dev/null; then
     return 0
@@ -103,7 +102,7 @@ ensure_sudo() {
   sudo -v
 }
 
-# ダウンロードしたインストーラーを指定のインタプリタで実行
+# インストーラーを取得・実行
 run_downloaded_installer() {
   local url="$1"
   local interpreter="$2"
@@ -123,7 +122,7 @@ run_downloaded_installer() {
   fi
 }
 
-# PATH か ~/.local/bin からコマンドの実行ファイルを返す
+# PATH・~/.local/bin から実行ファイルを検索
 resolve_user_executable() {
   local name="$1"
   local candidate
@@ -141,7 +140,7 @@ resolve_user_executable() {
   return 1
 }
 
-# 未導入の CLI を公式インストーラーで導入
+# 未導入の CLI を公式配布から導入
 install_user_cli() {
   local name="$1"
   local label="$2"
@@ -158,7 +157,7 @@ install_user_cli() {
     run_downloaded_installer "$url" "$interpreter" "$environment_assignment"
 }
 
-# PATH か既定のインストール先から brew の実行ファイルを返す
+# PATH・既定パスから brew を検索
 resolve_homebrew_executable() {
   local candidate
 
@@ -177,7 +176,7 @@ resolve_homebrew_executable() {
   return 1
 }
 
-# Homebrew を導入し、現在のシェルに環境を読み込む
+# Homebrew を導入・有効化
 setup_homebrew() {
   local homebrew_installer
   local homebrew_shellenv
@@ -206,7 +205,7 @@ setup_homebrew() {
   eval "$homebrew_shellenv"
 }
 
-# Homebrew を用意して Brewfile のパッケージを導入
+# Homebrew と Brewfile のパッケージを導入
 setup_homebrew_and_bundle() {
   local brew_cellar
 
@@ -217,7 +216,6 @@ setup_homebrew_and_bundle() {
   }
 
   step 'Homebrew packages'
-  # MDM などによる所有者変更で bundle が失敗する場合の案内
   brew_cellar="$("$brew_executable" --prefix)/Cellar"
   if [[ -d "$brew_cellar" && ! -w "$brew_cellar" ]]; then
     printf 'warning: %s is not writable\n' "$brew_cellar" >&2
@@ -225,19 +223,19 @@ setup_homebrew_and_bundle() {
       "$(id -un)" "$brew_cellar" >&2
   fi
 
-  # Homebrew は起動時に sudo timestamp を無効化するため、認証も任せる
+  # Homebrew が sudo timestamp を無効化するため、再認証も任せる
   run_and_record \
     'Homebrew packages' \
     "$brew_executable" bundle --quiet --no-upgrade --file="$repo_dir/macos/Brewfile"
 }
 
-# ログイン項目を追加・削除して起動するアプリを揃える
+# ログイン項目を設定
 setup_login_items() {
   local logi_options_app=/Applications/logioptionsplus.app
   local login_item_app
   local system_events_status=0
 
-  # 起動直後の -600 に限り、ログイン項目へ応答できるまで再試行
+  # 起動直後の -600 だけ再試行
   osascript <<'APPLESCRIPT' || system_events_status=$?
 repeat with attempt from 1 to 3
   try
@@ -261,6 +259,7 @@ APPLESCRIPT
   run_and_record \
     "remove login item: $logi_options_app" \
     osascript - "$logi_options_app" <<'APPLESCRIPT'
+-- 対象アプリのログイン項目を削除
 on run argv
   set targetPath to item 1 of argv
   set removedItem to false
@@ -289,6 +288,7 @@ APPLESCRIPT
     run_and_record \
       "add login item: $login_item_app" \
       osascript - "$login_item_app" <<'APPLESCRIPT'
+-- 未登録のアプリをログイン項目に追加
 on run argv
   set targetPath to item 1 of argv
   tell application "System Events"
@@ -305,7 +305,7 @@ APPLESCRIPT
 
 # mise で開発ツールを導入
 setup_mise_tools() {
-  # mise install は設定なしでも成功するため、リンク失敗を先に検出
+  # mise install は設定なしでも成功するため事前検証
   local mise_config="${XDG_CONFIG_HOME:-$HOME/.config}/mise/config.toml"
 
   if ! command -v mise >/dev/null 2>&1; then
@@ -319,12 +319,12 @@ setup_mise_tools() {
   fi
 }
 
-# 未導入の Zsh プラグインを clone して導入
+# 未導入の Zsh プラグインを取得
 install_zsh_plugin() {
   local plugins_dir="$1"
   local name="$2"
   local url="$3"
-  local entrypoint="$4"
+  local entrypoint="$name.plugin.zsh"
   local target="$plugins_dir/$name"
 
   [[ -f "$target/$entrypoint" && -r "$target/$entrypoint" ]] && return 0
@@ -344,7 +344,7 @@ install_zsh_plugin() {
   printf 'changed: installed Zsh plugin: %s\n' "$name"
 }
 
-# 使用する Zsh プラグインをすべて導入
+# Zsh プラグインを導入
 setup_zsh_plugins() {
   local plugins_dir="$HOME/.zsh/plugins"
 
@@ -353,25 +353,13 @@ setup_zsh_plugins() {
     return 0
   }
 
-  run_and_record \
-    'zsh-autosuggestions' \
-    install_zsh_plugin \
-    "$plugins_dir" \
-    zsh-autosuggestions \
-    https://github.com/zsh-users/zsh-autosuggestions \
-    zsh-autosuggestions.plugin.zsh
-  run_and_record \
-    'fast-syntax-highlighting' \
-    install_zsh_plugin \
-    "$plugins_dir" \
-    fast-syntax-highlighting \
-    https://github.com/zdharma-continuum/fast-syntax-highlighting.git \
-    fast-syntax-highlighting.plugin.zsh
-}
-
-# JSON 配列が指定値を含むか判定
-json_array_contains() {
-  jq -e --arg value "$2" 'index($value) != null' <<<"$1" >/dev/null
+  local plugin name
+  for plugin in \
+    'zsh-autosuggestions https://github.com/zsh-users/zsh-autosuggestions' \
+    'fast-syntax-highlighting https://github.com/zdharma-continuum/fast-syntax-highlighting.git'; do
+    name="${plugin%% *}"
+    run_and_record "$name" install_zsh_plugin "$plugins_dir" "$name" "${plugin#* }"
+  done
 }
 
 # Codex に Linear プラグインを導入
@@ -404,7 +392,7 @@ setup_codex_plugins() {
     return 0
   }
 
-  if json_array_contains "$plugins" linear@openai-curated-remote; then
+  if jq -e 'index("linear@openai-curated-remote") != null' <<<"$plugins" >/dev/null; then
     return 0
   fi
 
@@ -417,7 +405,7 @@ setup_codex_plugins() {
   fi
 }
 
-# 非公開リポジトリを取得し、その setup.sh を実行
+# 非公開設定を取得・適用
 setup_private_overlay() {
   local overlay_dir
   local overlay_url
@@ -428,7 +416,7 @@ setup_private_overlay() {
     return 0
   fi
 
-  # publish-lock の親が未作成の取得先にならないよう末尾の / を除く
+  # publish-lock が未作成の取得先に入らないよう末尾の / を除く
   overlay_dir="$(setup_normalize_repository_dir \
     "${DOTFILES_PRIVATE_DIR:-$HOME/ghq/github.com/pych-ky/dotfiles-private}" \
     DOTFILES_PRIVATE_DIR)" || {
@@ -463,7 +451,7 @@ setup_validate_home
 export DOTFILES_BOOTSTRAP=1
 
 step 'Administrator access'
-# 認証中の終了でも sudo timestamp を無効化
+# 認証中の終了時も sudo timestamp を破棄
 trap 'sudo -k 2>/dev/null || true' EXIT
 ensure_sudo
 
@@ -476,7 +464,6 @@ setup_homebrew_and_bundle
 step 'Configuration'
 run_and_record 'Configuration files' "$repo_dir/scripts/link-dotfiles.sh"
 
-# 以降は管理者権限が不要
 sudo -k 2>/dev/null || true
 trap - EXIT
 

@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # Claude Code ステータスライン
 
-# 表示を Codex TUI に合わせる
-
 set -euo pipefail
 
 status_separator=' · '
@@ -10,7 +8,7 @@ codex_context_baseline_tokens=12000
 default_claude_context_window=200000
 
 script_path="$(readlink -f "${BASH_SOURCE[0]}")"
-repo_dir="$(cd "$(dirname "$script_path")/../.." && pwd)"
+repo_dir="$(cd "${script_path%/*}/../.." && pwd)"
 codex_config="${CODEX_STATUSLINE_CODEX_CONFIG:-}"
 if [[ -z "$codex_config" || ! -r "$codex_config" ]]; then
   if [[ -r /etc/codex/config.toml ]]; then
@@ -21,12 +19,11 @@ if [[ -z "$codex_config" || ! -r "$codex_config" ]]; then
 fi
 claude_settings="${CODEX_STATUSLINE_CLAUDE_SETTINGS:-$repo_dir/etc/claude-code/settings.json}"
 
-# コマンドが利用可能か判定
+# コマンドの存在確認
 has_command() {
   command -v "$1" >/dev/null 2>&1
 }
 
-# jq 不在・読み取り失敗時は空値を使う
 input_cwd=''
 input_model_name=''
 input_effort=''
@@ -40,33 +37,22 @@ input_five_hour_limit=''
 input_weekly_limit=''
 input_fast_mode=''
 
-# 入力 JSON から表示に使う値を input_* 変数へ読み込む
+# 表示用 JSON フィールドの読み込み
 read_input_json() {
-  local payload="$1"
+  local payload="$1" field
 
   [[ -n "$payload" ]] || return 0
   has_command jq || return 0
 
-  {
-    IFS= read -r -d '' input_cwd &&
-      IFS= read -r -d '' input_model_name &&
-      IFS= read -r -d '' input_effort &&
-      IFS= read -r -d '' input_transcript_path &&
-      IFS= read -r -d '' input_context_used &&
-      IFS= read -r -d '' input_context_input_tokens &&
-      IFS= read -r -d '' input_context_window_size &&
-      IFS= read -r -d '' input_context_window &&
-      IFS= read -r -d '' input_used_tokens &&
-      IFS= read -r -d '' input_five_hour_limit &&
-      IFS= read -r -d '' input_weekly_limit &&
-      IFS= read -r -d '' input_fast_mode
-  } < <(
+  for field in cwd model_name effort transcript_path context_used context_input_tokens \
+    context_window_size context_window used_tokens five_hour_limit weekly_limit fast_mode; do
+    IFS= read -r -d '' "input_$field" || break
+  done < <(
     jq -j '
-      . as $root
-      | (try $root.model catch null) as $model
+      (try .model catch null) as $model
       |
       [
-        (try ($root.workspace.current_dir // $root.cwd) catch null),
+        (try (.workspace.current_dir // .cwd) catch null),
         (
           if ($model | type) == "object" then
             $model.display_name // $model.name // $model.id
@@ -76,36 +62,35 @@ read_input_json() {
             null
           end
         ),
-        (try $root.effort.level catch null),
-        (try $root.transcript_path catch null),
-        (try $root.context_window.used_percentage catch null),
-        (try $root.context_window.total_input_tokens catch null),
-        (try $root.context_window.context_window_size catch null),
+        (try .effort.level catch null),
+        (try .transcript_path catch null),
+        (try .context_window.used_percentage catch null),
+        (try .context_window.total_input_tokens catch null),
+        (try .context_window.context_window_size catch null),
         (try (
-          $root.model_context_window //
-          $root.context.window //
-          $root.usage.context_window
+          .model_context_window //
+          .context.window //
+          .usage.context_window
         ) catch null),
         (try (
-          $root.usage.total_tokens //
-          $root.context.total_tokens //
-          $root.context.used_tokens
+          .usage.total_tokens //
+          .context.total_tokens //
+          .context.used_tokens
         ) catch null),
-        (try $root.rate_limits.five_hour.used_percentage catch null),
-        (try $root.rate_limits.seven_day.used_percentage catch null),
-        (try ($root.fast_mode | if type == "boolean" then tostring else null end) catch null)
+        (try .rate_limits.five_hour.used_percentage catch null),
+        (try .rate_limits.seven_day.used_percentage catch null),
+        (try (.fast_mode | if type == "boolean" then tostring else null end) catch null)
       ]
       | .[]
       | (. // "" | tostring) + "\u0000"
     ' 2>/dev/null <<<"$payload"
-  ) || true
+  )
 }
 
-# 入力 JSON の欠損を Claude 設定で補う
 settings_model=''
 settings_effort=''
 
-# Claude 設定からモデルと effort を settings_* 変数へ読み込む
+# Claude のモデル・effort 設定の読み込み
 read_claude_settings() {
   local file="$1"
 
@@ -127,7 +112,7 @@ read_claude_settings() {
   ) || true
 }
 
-# TOML ファイルから指定キーのスカラー値を返す
+# TOML スカラー値の取得
 toml_scalar() {
   local file="$1"
   local key="$2"
@@ -148,7 +133,7 @@ toml_scalar() {
   ' "$file" 2>/dev/null || true
 }
 
-# Codex 設定の status_line に並ぶ項目名を1行ずつ返す
+# status_line の項目列挙
 read_status_items() {
   local file="$1"
 
@@ -160,7 +145,7 @@ read_status_items() {
     tr -d '"' || true
 }
 
-# ホーム配下を ~ に置き換えたディレクトリ表示を返す
+# ホームを ~ に省略した表示
 format_directory_display() {
   local dir="${1:-$PWD}"
 
@@ -173,7 +158,7 @@ format_directory_display() {
   fi
 }
 
-# 指定ディレクトリの現在の Git ブランチ名を返す
+# 現在の Git ブランチ取得
 current_git_branch() {
   local dir="$1"
 
@@ -181,7 +166,7 @@ current_git_branch() {
   git -C "$dir" branch --show-current 2>/dev/null | sed -n '1p' || true
 }
 
-# 百分率を 100 を上限に整数へ切り上げて返す
+# 百分率の切り上げ（上限 100）
 ceil_percent() {
   local value="$1"
 
@@ -194,16 +179,12 @@ ceil_percent() {
       }
 
       rounded = int(value)
-      if (value > rounded) {
-        rounded += 1
-      }
-
-      printf "%d", rounded
+      printf "%d", rounded + (value > rounded)
     }
   '
 }
 
-# transcript の最後の使用トークン数を返す
+# transcript の最後の使用トークン数を取得
 last_transcript_usage_total() {
   local transcript_path="$1"
 
@@ -227,7 +208,7 @@ last_transcript_usage_total() {
     tail -n 1 || true
 }
 
-# baseline を差し引いた使用率を未丸めで返す
+# baseline 控除後の使用率（未丸め）
 token_usage_percent() {
   local used_tokens="$1"
   local context_window="$2"
@@ -236,7 +217,7 @@ token_usage_percent() {
   [[ "$used_tokens" =~ ^[0-9]+$ ]] || return 0
   [[ "$context_window" =~ ^[0-9]+$ ]] || return 0
 
-  # ceil_percent が読めるよう、小数点を . に固定する
+  # ceil_percent 用に小数点を . に固定
   LC_ALL=C awk \
     -v used_tokens="$used_tokens" \
     -v context_window="$context_window" \
@@ -254,92 +235,65 @@ token_usage_percent() {
           used = 0
         }
 
-        # ceil_percent の切り上げ用に精度を保つ
+        # 切り上げ用の精度を保持
         printf "%.17f", (used / (context_window - baseline)) * 100
       }
     '
 }
 
-# effort を推論レベルの表示名に変換
-# 未指定時は Codex と同じ default 表示
-reasoning_label() {
-  local value="$1"
-
-  if [[ -z "$value" || "$value" == "null" || "$value" == "none" ]]; then
-    printf 'default'
-  else
-    printf '%s' "$value"
-  fi
-}
-
-# レート制限の使用率ラベルを返す
+# レート制限ラベルの作成
 rate_limit_label() {
-  local label="$1"
-  local used_percentage="$2"
   local used_percent
 
-  [[ -n "$used_percentage" ]] || return 0
-
-  used_percent="$(ceil_percent "$used_percentage")"
+  used_percent="$(ceil_percent "$2")"
   [[ -n "$used_percent" ]] || return 0
 
-  printf '%s %s%% used' "$label" "$used_percent"
+  printf '%s %s%% used' "$1" "$used_percent"
 }
 
 status_line_use_colors="$(toml_scalar "$codex_config" status_line_use_colors)"
 [[ -n "$status_line_use_colors" ]] || status_line_use_colors=true
+if [[ "$status_line_use_colors" == true ]]; then
+  status_separator="$(printf '\033[2m%s\033[0m' "$status_separator")"
+fi
 
-# 項目に応じた色を付けたテキストを返す
-styled() {
+# 区切り・項目色付きで status_line に追加
+append_segment() {
   local item="$1"
   local text="$2"
   local code
 
-  if [[ "$status_line_use_colors" != true ]]; then
-    printf '%s' "$text"
-    return 0
-  fi
-
-  case "$item" in
-  model | model-name | model-with-reasoning | reasoning | fast-mode)
-    code=36
-    ;;
-  current-dir | context-used | context-usage)
-    code=32
-    ;;
-  git-branch | five-hour-limit | weekly-limit)
-    code=35
-    ;;
-  *)
-    code=2
-    ;;
-  esac
-  printf '\033[%sm%s\033[0m' "$code" "$text"
-}
-
-# 区切りを挟んで status_line に項目を追加
-append_segment() {
-  local item="$1"
-  local text="$2"
-
   [[ -n "$text" ]] || return 0
 
-  if [[ -n "$status_line" ]]; then
-    if [[ "$status_line_use_colors" == true ]]; then
-      status_line+="$(printf '\033[2m%s\033[0m' "$status_separator")"
-    else
-      status_line+="$status_separator"
-    fi
+  if [[ "$status_line_use_colors" == true ]]; then
+    case "$item" in
+    model | model-name | model-with-reasoning | reasoning | fast-mode)
+      code=36
+      ;;
+    current-dir | context-used | context-usage)
+      code=32
+      ;;
+    git-branch | five-hour-limit | weekly-limit)
+      code=35
+      ;;
+    *)
+      code=2
+      ;;
+    esac
+    text="$(printf '\033[%sm%s\033[0m' "$code" "$text")"
+  else
+    text="$(printf '%s' "$text")"
   fi
-  status_line+="$(styled "$item" "$text")"
+
+  [[ -z "$status_line" ]] || status_line+="$status_separator"
+  status_line+="$text"
 }
 
-# 入力と設定からステータスラインを組み立てて出力
+# ステータスラインの出力
 main() {
   local input caller="${1:-claude}"
   input="$(cat)"
 
-  # Orca への利用状況通知と画面表示を両立する
   if [[ "$caller" == claude && -x "$HOME/.orca/agent-hooks/claude-statusline.sh" ]]; then
     "$HOME/.orca/agent-hooks/claude-statusline.sh" <<<"$input" >/dev/null 2>&1 || true
   fi
@@ -354,11 +308,12 @@ main() {
   local model_name="${input_model_name:-$settings_model}"
   [[ -n "$model_name" ]] || model_name="$(toml_scalar "$codex_config" model)"
 
-  local claude_effort="${input_effort:-$settings_effort}"
-  [[ -n "$claude_effort" ]] || claude_effort="$(toml_scalar "$codex_config" model_reasoning_effort)"
-
-  local reasoning
-  reasoning="$(reasoning_label "$claude_effort")"
+  local reasoning="${input_effort:-$settings_effort}"
+  [[ -n "$reasoning" ]] || reasoning="$(toml_scalar "$codex_config" model_reasoning_effort)"
+  case "$reasoning" in
+  '' | null | none) reasoning=default ;;
+  esac
+  reasoning="$(printf '%s' "$reasoning")"
 
   local context_used="$input_context_used"
   if [[ -z "$context_used" ]]; then
@@ -380,18 +335,10 @@ main() {
   false) fast_mode='Fast off' ;;
   esac
 
-  local status_line=''
-  local -a status_items=()
-  local item
+  local status_line='' status_items item
+  status_items="$(read_status_items "$codex_config")"
+  [[ -n "$status_items" ]] || status_items=$'model-with-reasoning\ncurrent-dir'
   while IFS= read -r item; do
-    [[ -n "$item" ]] && status_items+=("$item")
-  done < <(read_status_items "$codex_config")
-
-  if ((${#status_items[@]} == 0)); then
-    status_items=("model-with-reasoning" "current-dir")
-  fi
-
-  for item in "${status_items[@]}"; do
     case "$item" in
     model | model-name)
       append_segment "$item" "$model_name"
@@ -422,7 +369,7 @@ main() {
       ;;
     *) ;;
     esac
-  done
+  done <<<"$status_items"
 
   if [[ "$caller" == claude ]] && has_command jq && jq -e 'type=="object" and length>0' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/remote-settings.json" >/dev/null 2>&1; then
     append_segment 'managed-settings' 'org'

@@ -1,19 +1,22 @@
 # Homebrew パッケージ
 
-# 任意の GUI はコメントアウトを外し、brew bundle --file=macos/Brewfile で導入
+# 任意 GUI はコメント解除後、brew bundle --file=macos/Brewfile で導入
 
 ## 外部 tap
+
 tap "stablyai/orca"
 
 ## CLI
 
 ### シェル / ターミナル UX
+
 brew "bash"
 brew "fzf"
 brew "starship"
 brew "zoxide"
 
 ### 基本ユーティリティ
+
 brew "coreutils"
 brew "duti"
 brew "gnu-sed"
@@ -23,6 +26,7 @@ brew "tree"
 brew "yq"
 
 ### Git / GitHub
+
 brew "gh"
 brew "ghq"
 brew "gibo"
@@ -32,19 +36,23 @@ brew "gitleaks"
 brew "lazygit"
 
 ### ランタイム / パッケージツール
+
 brew "mise"
 brew "uv"
 
 ### Lint / フォーマッタ
+
 brew "actionlint"
 brew "shellcheck"
 brew "shfmt"
 
 ### AI ツール
+
 cask "copilot-cli"
 brew "herdr"
 
 ### クラウド / IaC / ポリシー / Kubernetes
+
 brew "azure-cli"
 npm "cf"
 cask "gcloud-cli"
@@ -55,35 +63,42 @@ cask "session-manager-plugin"
 brew "trivy"
 
 ### DB
+
 brew "libpq"
 
 ## GUI アプリ
 
 ### ブラウザ
+
 # cask "google-chrome"
 cask "microsoft-edge"
 
 ### ターミナル
+
 cask "ghostty"
 cask "wezterm"
 
 ### 開発エディタ / AI ツール
+
 cask "chatgpt"
 # cask "claude"
 cask "stablyai/orca/orca"
-# cask "visual-studio-code"  # 設定・拡張は VS Code Settings Sync 側で管理
+# cask "visual-studio-code"  # 設定・拡張は Settings Sync 管理
 
 ### コミュニケーション / コラボレーション
+
 cask "notion"
 # cask "slack"
 
 ### 入力 / ウィンドウ管理
+
 cask "karabiner-elements"
 cask "logi-options+"
 cask "rectangle"
 cask "typeless"
 
 ### ユーティリティ
+
 cask "appcleaner"
 cask "licecap"
 cask "maccy"
@@ -92,7 +107,9 @@ cask "raycast"
 cask "stats"
 
 ### セキュリティ / パスワード管理
+
 # cask "1password"
 
 ### コンテナ / 仮想化
+
 cask "orbstack"

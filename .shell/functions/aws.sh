@@ -1,12 +1,11 @@
 # AWS プロファイル切り替え
 
-# AWS SSO プロファイルを永続化し、一時認証情報の解決は AWS SDK に任せる
 # Claude Code の shell snapshot に含めるため __aws_* 名を使う
 
 [ -n "${__AWS_FUNCTIONS_LOADED:-}" ] && return
 __AWS_FUNCTIONS_LOADED=1
 
-# 認証情報の解決に使われる環境変数名を列挙
+# 認証プロバイダーの環境変数名を列挙
 __aws_credential_provider_variables() {
   printf '%s\n' \
     AWS_PROFILE \
@@ -25,19 +24,19 @@ __aws_credential_provider_variables() {
     AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE
 }
 
-# 認証情報の環境変数が1つでも設定されているか判定
+# 空でない認証プロバイダー変数を確認
 __aws_has_credential_provider() {
   local variable
 
   while IFS= read -r variable; do
-    # 値を展開せず、空でない変数の有無だけを確認
+    # 秘密値を展開せず、空でない変数の有無だけ確認
     eval "[ \"\${$variable:+x}\" = x ]" && return 0
   done < <(__aws_credential_provider_variables)
 
   return 1
 }
 
-# 認証情報の環境変数をすべて解除
+# 認証プロバイダーの環境変数を解除
 __aws_clear_credentials() {
   local clear_status=0
   local variable
@@ -49,13 +48,13 @@ __aws_clear_credentials() {
   return "$clear_status"
 }
 
-# 認証情報の環境変数を外したサブシェルでコマンドを実行
+# 認証プロバイダーを外したサブシェルで実行
 __aws_run_without_credentials() (
   __aws_clear_credentials || exit
   "$@"
 )
 
-# プロファイルの認証情報で STS に接続できるか確認
+# プロファイルで STS 接続を確認
 __aws_verify_profile_credentials() (
   local profile="$1"
 
@@ -63,7 +62,7 @@ __aws_verify_profile_credentials() (
   AWS_PROFILE="$profile" AWS_PAGER='' aws sts get-caller-identity
 )
 
-# SSO 用に設定されたプロファイルか確認
+# SSO プロファイルか確認
 __aws_require_sso_profile() {
   local profile="${1:?使い方: __aws_require_sso_profile <profile>}"
   local sso_session
@@ -80,7 +79,7 @@ __aws_require_sso_profile() {
   fi
 }
 
-# 次回のシェル起動用にプロファイル名を保存
+# 次回起動用にプロファイル名を保存
 __aws_persist_active_profile() {
   local profile="${1:?使い方: __aws_persist_active_profile <profile>}"
   local file="$HOME/.aws/active-profile"
@@ -98,7 +97,7 @@ __aws_persist_active_profile() {
   fi
 }
 
-# SSO ログインしてプロファイルを切り替え、次回のシェル起動用に保存
+# SSO ログイン後にプロファイルを切り替え・保存
 aws-use() {
   local profile="${1:?使い方: aws-use <profile>}"
 
@@ -116,7 +115,7 @@ aws-use() {
   export AWS_PROFILE="$profile"
 }
 
-# 認証情報の環境変数と保存済みのプロファイル名を消去
+# 認証プロバイダーと保存済みプロファイルを解除
 aws-clear() {
   local clear_status=0
 

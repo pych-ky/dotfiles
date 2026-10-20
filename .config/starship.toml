@@ -1,37 +1,27 @@
 # Starship プロンプト設定
 
+## VCS / メタデータ
 
-## VCS / プロジェクトメタデータ
+git_status.disabled = true
 
-[git_status]
-disabled = true
-
-[package]
-disabled = true
+package.disabled = true
 
 
-## 言語ランタイム / ビルドツール
+## 言語 / ビルド
 
-[gradle]
-disabled = true
+gradle.disabled = true
 
-[java]
-disabled = true
+java.disabled = true
 
-[nodejs]
-disabled = true
+nodejs.disabled = true
 
-[python]
-disabled = true
+python.disabled = true
 
 
-## インフラ / クラウド
+## クラウド
 
-[aws]
-disabled = true
+aws.disabled = true
 
-[gcloud]
-disabled = true
+gcloud.disabled = true
 
-[terraform]
-disabled = true
+terraform.disabled = true

@@ -13,7 +13,7 @@ fi
 # shellcheck source=lib/setup-common.sh
 source "$setup_common_library"
 
-# / 以外で . や .. を含まない絶対パスか判定
+# /・.・.. を除く絶対パスか判定
 path_is_safe_absolute() {
   [[ "$1" == /* && "$1" != / ]] || return 1
   case "$1" in
@@ -21,7 +21,7 @@ path_is_safe_absolute() {
   esac
 }
 
-# 未作成の末尾を保ち、既存の親まで物理パスを解決
+# 未作成の末尾を保って物理パスを解決
 resolve_physical_path() {
   local candidate="$1"
   local suffix=
@@ -47,12 +47,12 @@ resolve_physical_path() {
   printf '%s%s\n' "$candidate" "$suffix"
 }
 
-# 2つのパスが同一か親子関係にあるか判定
+# 同一・親子パスか判定
 paths_overlap() {
   [[ "$1" == "$2" || "$1" == "$2"/* || "$2" == "$1"/* ]]
 }
 
-# リポジトリと CODEX_HOME/pets が重ならないか検証
+# リポジトリと CODEX_HOME/pets の重複を拒否
 verify_install_paths() {
   local repository_physical
   local codex_root_physical
@@ -104,7 +104,7 @@ install_repository_pets() {
   ((found)) || setup_error 'Codex Custom Pets repository does not contain installable pets'
 }
 
-# Codex Custom Pets のリポジトリを取得し、ペットを導入
+# Codex Custom Pets を取得・導入
 main() {
   local skip
   local strict
@@ -172,7 +172,6 @@ main() {
   *) return 1 ;;
   esac
 
-  # CODEX_HOME/pets へのインストールを直列化
   pets_root_physical="$(resolve_physical_path "$codex_root/pets")" || {
     setup_error 'CODEX_HOME/pets must resolve through directories'
     return 1

@@ -6,13 +6,13 @@ elif [[ -x /usr/local/bin/brew ]]; then
   eval "$(/usr/local/bin/brew shellenv)"
 fi
 
-# PATH の重複を除き、(N-/) は既存ディレクトリだけ追加
+# (N-/) は既存ディレクトリだけ追加
 typeset -U path PATH
 path=(
   "$HOME/.local/bin"
   ${HOMEBREW_PREFIX:-/usr/local}/opt/git/bin(N-/)
-  ${HOMEBREW_PREFIX:-/usr/local}/opt/libpq/bin(N-/)  # keg-only の libpq (psql など)
-  $HOME/.orbstack/bin(N-/)                           # OrbStack の CLI
+  ${HOMEBREW_PREFIX:-/usr/local}/opt/libpq/bin(N-/)  # keg-only の libpq
+  $HOME/.orbstack/bin(N-/)
   $path
 )
 
@@ -38,7 +38,7 @@ unset f
 
 if command -v fzf >/dev/null 2>&1; then
   . <(fzf --zsh)
-  # cghq を実行してプロンプトを再描画する ZLE ウィジェット
+  # cghq 後にプロンプトを再描画
   _cghq_widget() {
     cghq
     zle reset-prompt
@@ -47,11 +47,11 @@ if command -v fzf >/dev/null 2>&1; then
   bindkey '^G' _cghq_widget
 fi
 
-# Karabiner が端末で Home/End を Ctrl+Home/End に変換するため行頭・行末へ割り当て
+# Karabiner の Home/End → Ctrl+Home/End を行頭・行末へ割り当て
 bindkey '^[[1;5H' beginning-of-line
 bindkey '^[[1;5F' end-of-line
-# Karabiner が Orca で Cmd+Delete を Option+Delete に変換するため次の単語削除へ割り当て
+# Orca 向け Karabiner 変換（Cmd+Delete → Option+Delete）を次の単語削除へ
 bindkey '^[[3;3~' kill-word
 
-# 組織固有設定・ツールの自動追記はローカル設定へ
+# 組織設定・ツールの自動追記はローカル設定へ
 [[ -r "$HOME/.zshrc.local" ]] && . "$HOME/.zshrc.local"

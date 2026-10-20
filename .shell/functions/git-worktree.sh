@@ -1,6 +1,6 @@
 # Git worktree 展開
 
-# main・master を除くローカルと origin のブランチ名を重複なく列挙
+# main・master 以外のローカル・origin ブランチを重複なく列挙
 _wto_branches() {
   local repository_root="$1"
 
@@ -13,7 +13,7 @@ _wto_branches() {
     awk '!seen[$0]++'
 }
 
-# 文字列の SHA-1 の先頭6桁を返す
+# SHA-1 の先頭6桁を取得
 _wto_hash6() {
   if command -v shasum >/dev/null 2>&1; then
     printf '%s' "$1" | shasum -a 1
@@ -22,7 +22,7 @@ _wto_hash6() {
   fi | awk '{print substr($1, 1, 6)}'
 }
 
-# 指定パスの worktree が指定ブランチを展開済みか判定
+# worktree のブランチを確認
 _wto_path_has_branch() {
   local repository_root="$1"
   local worktree_path="$2"
@@ -34,14 +34,14 @@ _wto_path_has_branch() {
 
   git -C "$repository_root" worktree list --porcelain |
     awk -v path="$worktree_path_physical" -v branch="refs/heads/$branch" '
-    # 空白を含むパスも取得する
+    # パス内の空白を保持
     $1 == "worktree" { worktree = substr($0, 10) }
     $1 == "branch" && worktree == path && $2 == branch { found = 1 }
     END { exit found ? 0 : 1 }
   '
 }
 
-# fzf で選んだ複数ブランチを .worktrees 配下に展開
+# fzf で選んだブランチを .worktrees に展開
 wto() {
   local repository_root
   repository_root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
@@ -61,7 +61,7 @@ wto() {
   [ -n "$branches" ] || return 1
 
   local branch dir leaf
-  local failed_count=0
+  local failed=0
   local -a created_paths=()
 
   while IFS= read -r branch; do
@@ -90,7 +90,7 @@ wto() {
       created_paths+=("$dir")
     else
       echo "failed: $dir (branch=$branch)" >&2
-      failed_count=$((failed_count + 1))
+      failed=1
     fi
   done <<<"$branches"
 
@@ -99,5 +99,5 @@ wto() {
     printf '  %s\n' "${created_paths[@]}"
   fi
 
-  ((failed_count == 0))
+  ((failed == 0))
 }

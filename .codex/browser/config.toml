@@ -1,11 +1,10 @@
 # Codex Browser 設定
 
-
 ## 承認ポリシー
 
-approval_mode          = "never_ask"  # サイト操作の承認
-history_approval_mode  = "never_ask"
+approval_mode          = "never_ask"  # サイト操作
 download_approval_mode = "never_ask"
+history_approval_mode  = "never_ask"
 upload_approval_mode   = "never_ask"
 
 
