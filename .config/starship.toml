@@ -1,27 +1,30 @@
 # Starship プロンプト設定
 
-## VCS / メタデータ
-
-git_status.disabled = true
-
-package.disabled = true
-
-
-## 言語 / ビルド
-
-gradle.disabled = true
-
-java.disabled = true
-
-nodejs.disabled = true
-
-python.disabled = true
-
-
-## クラウド
-
-aws.disabled = true
-
-gcloud.disabled = true
-
-terraform.disabled = true
+# 言語・ツール・実行環境の自動表示を除外
+format = """
+$username\
+$hostname\
+$localip\
+$shlvl\
+$directory\
+$vcsh\
+$fossil_branch\
+$fossil_metrics\
+$git_branch\
+$git_commit\
+$git_state\
+$git_metrics\
+$hg_branch\
+$hg_state\
+$pijul_channel\
+$memory_usage\
+$sudo\
+$cmd_duration\
+$line_break\
+$jobs\
+$battery\
+$time\
+$status\
+$os\
+$shell\
+$character"""

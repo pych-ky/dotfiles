@@ -26,6 +26,23 @@ brew bundle --no-upgrade --file=macos/Brewfile
 brew bundle upgrade --file=macos/Brewfile
 ```
 
+プロジェクトで指定がなければ、`python3` は Homebrew の Python 3.14 を使う。
+Homebrew formula の旧版は自動削除しない。
+
+### 開発ツール（mise）
+
+旧バージョンを残して更新する。
+プロジェクト側の固定版指定は上書きしない。
+グローバル設定を使った Node の導入・更新時は、非公開設定の `install-node-tools` があれば導入済み CLI を復元する。
+CLI の初回導入は非公開設定の `setup.sh` が行う。
+
+```sh
+mise install
+mise upgrade
+```
+
+CLI の復元に失敗した場合は、原因を解消して `mise install node` を再実行する。
+
 ### シンボリックリンク
 
 ```sh

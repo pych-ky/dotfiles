@@ -12,8 +12,13 @@ aws-cli                        = { version = "latest", symlink_bins = "true" }
 deno                           = "latest"
 go                             = "latest"
 golangci-lint                  = "latest"
-node                           = "lts"
+node                           = { version = "lts", postinstall = { run = 'if [ -x "$HOME/.local/bin/install-node-tools" ]; then "$HOME/.local/bin/install-node-tools" "$MISE_TOOL_INSTALL_PATH"; fi', when = "always" } }
 npm                            = "11"  # node 同梱版を上書き
 pnpm                           = "latest"
+python                         = "path:{{exec(command='brew --prefix python@3.14')}}/libexec"
 terraform                      = "latest"
 tflint                         = "latest"
+uv                             = "latest"
+
+[settings.upgrade]
+auto_prune = false
