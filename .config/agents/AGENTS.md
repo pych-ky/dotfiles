@@ -138,6 +138,7 @@ credential helper・認証エージェント・署名ブローカー・認証済
 
 [GitHub Flow](https://docs.github.com/en/get-started/using-github/github-flow) を基本とし、各工程は依頼の承認範囲内で行う。
 
+- GitHub 操作には `git` と `gh` を使用し、GitHub MCP はユーザーが明示的に指定した場合だけ使用する
 - ユーザーの明示なしにステージングしない
 - 個人リポジトリ以外では、`main` / `master` への直接 push を例外なく禁止する
 - PR のタイトル・本文は、仕事用リポジトリでは既存の言語・表記・テンプレートに合わせ、`pych-ky` 所有の個人 GitHub リポジトリでは簡潔な日本語にする

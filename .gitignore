@@ -48,6 +48,7 @@ __pycache__/
 *.bak
 *.log
 *.tmp
+.copilot/settings.json.lock
 .tmp/
 work/
 
