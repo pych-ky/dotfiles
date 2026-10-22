@@ -226,6 +226,7 @@ setup_homebrew_and_bundle() {
   # Homebrew が sudo timestamp を無効化するため、再認証も任せる
   run_and_record \
     'Homebrew packages' \
+    env HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_AUTOREMOVE=1 \
     "$brew_executable" bundle --quiet --no-upgrade --file="$repo_dir/macos/Brewfile"
 }
 

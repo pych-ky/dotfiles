@@ -38,7 +38,7 @@ brew "lazygit"
 ### ランタイム / パッケージツール
 
 brew "mise"
-brew "uv"
+brew "python@3.14"
 
 ### Lint / フォーマッタ
 
@@ -54,7 +54,6 @@ brew "herdr"
 ### クラウド / IaC / ポリシー / Kubernetes
 
 brew "azure-cli"
-npm "cf"
 cask "gcloud-cli"
 brew "helm"
 brew "opa"

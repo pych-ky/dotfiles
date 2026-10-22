@@ -431,6 +431,7 @@ main() {
     ".config/gh/config.yml"
     ".config/git/ignore"
     ".config/mise/config.toml"
+    ".homebrew/brew.env"
 
     ## キー入力
 
