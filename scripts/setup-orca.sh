@@ -31,7 +31,7 @@ if [[ ! -d "$orca_app" ]]; then
 fi
 if [[ ! -d "$orca_app" ]]; then
   printf 'skipped: Orca is not installed\n'
-  exit 0
+  exit 3
 fi
 
 process_status=0
@@ -59,7 +59,7 @@ managed_settings="$repo_dir/macos/orca.json"
 
 if [[ ! -f "$profile_index" ]]; then
   printf 'skipped: launch and quit Orca once, then run scripts/setup-orca.sh\n'
-  exit 0
+  exit 3
 fi
 
 profile_id="$(jq -er '.activeProfileId | strings | select(test("^[A-Za-z0-9_-]+$"))' "$profile_index")"
