@@ -7,7 +7,7 @@ elif [[ -x /usr/local/bin/brew ]]; then
 fi
 
 typeset -U path PATH
-path=("$HOME/.local/bin" $path)
+export PATH="$HOME/.local/bin:$PATH"
 
 if [[ -r "$HOME/.orbstack/shell/init.zsh" ]]; then
   . "$HOME/.orbstack/shell/init.zsh"

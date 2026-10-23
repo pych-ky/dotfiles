@@ -9,12 +9,12 @@ fi
 # (N-/) は既存ディレクトリだけ追加
 typeset -U path PATH
 path=(
-  "$HOME/.local/bin"
   ${HOMEBREW_PREFIX:-/usr/local}/opt/git/bin(N-/)
   ${HOMEBREW_PREFIX:-/usr/local}/opt/libpq/bin(N-/)  # keg-only の libpq
   $HOME/.orbstack/bin(N-/)
   $path
 )
+export PATH="$HOME/.local/bin:$PATH"
 
 if command -v mise >/dev/null 2>&1; then
   eval "$(mise activate zsh)"

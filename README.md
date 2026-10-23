@@ -98,7 +98,8 @@ Orca は設定を同期するため専用ファイルを dotfiles へリンク�
 
 ### Codex の設定
 
-`~/.codex/config.toml` は端末固有設定だけを置く。
+`~/.codex/config.toml` はアプリが管理する端末固有設定。
+`./scripts/setup-codex.sh` で通常アプリ・Orca runtime のモデル保存値を `etc/codex/config.toml` の既定値へ揃える。
 
 - 対話シェル: `--profile cli`。シェル関数を経由しない通常 CLI には `--no-daemon --profile cli` を付ける
 - Orca: `--profile orca`。起動引数の Sol / Ultra により、セッション中のモデル切替は新規起動に持ち越さない
@@ -109,6 +110,28 @@ Orca は設定を同期するため専用ファイルを dotfiles へリンク�
 
 - 変更後は新規タスクで「保護付きフルアクセス」の選択を確認する。既存タスクは旧承認方式を引き継ぐ
 - 組み込みの「フルアクセス」を選び直すと承認方式が `never` に戻る
+
+### Hermes Agent
+
+`bootstrap.sh` で公式安定版の CLI を導入し、更新は `hermes update` で行う。
+Homebrew 版は [Hermes の公式サポート対象外](https://hermes-agent.nousresearch.com/docs/getting-started/platform-support)のため使用しない。
+端末へ適用する設定は dotfiles に置き、会話・スケジュール参照用の ai-man-config には置かない。
+
+- 設定: `./scripts/setup-hermes.sh` で適用する。変更はこのスクリプトに反映して再実行する
+- 共通規約: `~/.hermes/SOUL.md` は `.config/agents/AGENTS.md` へのリンクとし、リンク元で一元管理する。SOUL が自動注入されないサブエージェントには `prefill-messages.json` から読込を指示する
+- 認証: `hermes auth add openai-codex --type oauth --browser` で ChatGPT にログインする。既存 Codex / Claude Code の認証を自動共有しない
+- 実行ガード: 初回起動時・変更時に `.hermes/hooks/pre-tool-guard.py` の実行を承認し、`hermes hooks doctor` で確認する。未承認の hook は実行されない
+- デスクトップ操作: 通常のターミナルで `./scripts/setup-hermes-computer-use.sh` を実行し、macOS のアクセシビリティ・画面収録を許可する。権限要求が `/Applications/CuaDriver.app` を参照するため、Hermes PM と同じ署名付きアプリをそこにも配置する。`hermes update` 後も再実行する
+
+独自の記憶・委譲機能を維持するため標準の実行基盤を使う。
+この基盤では Ultra を指定しても Max として送信されるため、推論量を Max に設定する。
+共通スキルは `~/.agents/skills` を参照する。
+認証情報・会話履歴・自動生成状態は Git 管理外とし、`~/.hermes/config.yaml` 自体はリンクしない。
+
+ローカル実行は OS の隔離環境ではなく、ガードは直接記述された既知の危険操作を静的に検査する。
+動的に組み立てたパス、起動済みプロセスへ送る標準入力、外部 CLI 内部の処理は追跡しない。
+フックにはプロセスの作業ディレクトリが渡されるため、`terminal` の `cd` やセッションの作業場所切替後の相対パスは実際の場所とずれ、見逃しや誤拒否が起こりうる。
+手動承認は危険パターンに一致したコマンドが対象で、チェックポイントも shell による全変更の復旧を保証しない。
 
 ## 手動セットアップ
 

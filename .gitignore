@@ -64,6 +64,12 @@ etc/codex/tmp/
 !.claude/CLAUDE.md
 !.claude/hooks/
 
+## Hermes Agent
+
+.hermes/*
+!.hermes/hooks/
+!.hermes/prefill-messages.json
+
 ## Karabiner-Elements
 
 .config/karabiner/assets/
