@@ -44,7 +44,7 @@ def load_guard(cwd):
         """認証保存先・バックアップとシェルスナップショットを保護"""
         if original_credential_path(value, directory):
             return True
-        return any(
+        return bool(value) and any(
             re.fullmatch(r"hermes-snap-[^/]+\.sh(?:\.tmp\.[^/]+)?", os.path.basename(path))
             or any(path.startswith(root + "/") and protected.fullmatch(path[len(root) + 1:]) for root in roots)
             for path in guard.path_spellings(value, directory)
