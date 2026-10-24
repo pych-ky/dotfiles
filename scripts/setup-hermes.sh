@@ -11,7 +11,8 @@ hermes config set model.openai_runtime auto
 hermes config set agent.reasoning_effort max
 hermes config set auth.adopt_external_logins false
 hermes config set auth.codex_login_flow browser
-hermes config set display.busy_input_mode steer
+hermes config set display.busy_input_mode interrupt
+hermes config set display.bell_on_prompt true
 hermes config set prefill_messages_file "$HOME/.hermes/prefill-messages.json"
 
 hermes config set approvals.mode manual
