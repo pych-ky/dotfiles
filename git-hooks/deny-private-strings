@@ -22,18 +22,20 @@ work_remotes_file="$config_dir/work-remotes.txt"
 
 # 前後空白・コメント・空行を除去（空パターンの全行一致を防ぐ）
 strip_pattern_file() {
-  sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -- "$1" |
-    grep -v -e '^#' -e '^$' || true
+  sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+    -e '/^#/d' -e '/^$/d' -- "$1"
 }
 
 # ディスクに残さず渡す非公開パターンの取得
 patterns() {
-  strip_pattern_file "$denylist_file"
+  printf '%s\n' "$deny_patterns"
 }
 
-if [[ -z "$(patterns)" ]]; then
-  exit 0
+if ! deny_patterns="$(strip_pattern_file "$denylist_file")"; then
+  printf 'denylist: 非公開パターンを読み取れないため、検査を中止します。\n' >&2
+  exit 1
 fi
+[[ -n "$deny_patterns" ]] || exit 0
 
 # 公開 URL ホストを除外し、禁止文字列のある元の行を出力
 filter_public_origins() {
@@ -42,7 +44,7 @@ filter_public_origins() {
     return
   fi
 
-  awk -v mode="$mode" '
+  awk '
     FILENAME == ARGV[1] {
       origin = tolower($0)
       if (origin !~ /^https:\/\/[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/) {
@@ -65,10 +67,7 @@ filter_public_origins() {
           position += offset - 1
           before = position == 1 ? "" : substr(text, position - 1, 1)
           after = substr(text, position + length(origin), 1)
-          # 差分の +/- 直後も行頭とみなす
-          at_start = position == 1 ||
-            (mode == "pre-push" && position == 2 && before ~ /^[+-]$/)
-          if ((at_start || before ~ /[[:space:]]/ || index("<>\"\047`([{=:", before)) &&
+          if ((position == 1 || before ~ /[[:space:]]/ || index("<>\"\047`([{=:", before)) &&
               (after == "" || after ~ /[[:space:]]/ || index("/?#<>\"\047`)]}", after))) {
             text = substr(text, 1, position - 1) "https:// " substr(text, position + length(origin))
             offset = position + length("https:// ")
@@ -194,6 +193,49 @@ scan_pre_commit() {
   return 0
 }
 
+# 不正バイトによる照合漏れと awk の NUL 以後の切り捨てを防止
+normalize_push_text() {
+  python3 -c '
+import sys
+
+for line in sys.stdin.buffer:
+    text = line.decode("utf-8", errors="replace").replace("\0", "\n")
+    sys.stdout.buffer.write(text.encode("utf-8"))
+'
+}
+
+# NUL 区切りの変更後パスと Git object の検査
+scan_push_postimages() {
+  local record path new_mode new_oid
+  local record_pattern='^:[0-7]{6} ([0-7]{6}) [0-9a-f]+ ([0-9a-f]+) [AMT]$'
+
+  while IFS= read -r -d '' record; do
+    [[ "$record" =~ $record_pattern ]] || return 1
+    new_mode="${BASH_REMATCH[1]}"
+    new_oid="${BASH_REMATCH[2]}"
+    IFS= read -r -d '' path || return 1
+    [[ -n "$path" ]] || return 1
+
+    printf '%s\n' "$path" | normalize_push_text |
+      { grep -aiF -f <(patterns) || [[ $? == 1 ]]; } || return 1
+
+    {
+      case "$new_mode" in
+      100644 | 100755 | 120000)
+        git cat-file blob "$new_oid" 2>/dev/null
+        ;;
+      160000)
+        printf '%s\n' "$new_oid"
+        ;;
+      *) return 1 ;;
+      esac
+    } | normalize_push_text | { grep -aiF -f <(patterns) || [[ $? == 1 ]]; } |
+      filter_public_origins || return 1
+  done
+
+  [[ -z "$record" ]]
+}
+
 # push 対象コミットを検査
 scan_pre_push() {
   local _local_ref local_sha _remote_ref remote_sha
@@ -234,13 +276,23 @@ scan_pre_push() {
     while IFS= read -r commit; do
       [[ -n "$commit" ]] || continue
       hit="$(
-        git show --format='%B' -U0 --no-color --no-ext-diff --no-textconv \
+        git show -s --format='%B' --no-color --no-show-signature \
           "$commit" -- 2>/dev/null |
-          { grep -iF -f <(patterns) || [[ $? == 1 ]]; } |
+          normalize_push_text |
+          { grep -aiF -f <(patterns) || [[ $? == 1 ]]; } |
           filter_public_origins
       )" || return 1
       [[ -n "$hit" ]] &&
-        report "コミット ${commit:0:12} の内容が一致しました" <<<"$hit"
+        report "コミット ${commit:0:12} のメッセージが一致しました" <<<"$hit"
+
+      hit="$(
+        git diff-tree --root -r -m --no-commit-id --raw --no-abbrev \
+          --no-renames --diff-filter=AMT -z \
+          --ignore-submodules=none "$commit" -- 2>/dev/null |
+          scan_push_postimages
+      )" || return 1
+      [[ -n "$hit" ]] &&
+        report "コミット ${commit:0:12} の変更後のパス・内容が一致しました" <<<"$hit"
     done <<<"$commits"
   done
 
