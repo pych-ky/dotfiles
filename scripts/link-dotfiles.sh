@@ -447,6 +447,8 @@ main() {
     ".config/agents/AGENTS.md"
     ".copilot/settings.json"
     ".copilot/statusline.sh"
+    ".hermes/hooks/pre-tool-guard.py"
+    ".hermes/prefill-messages.json"
   )
 
   local file
@@ -470,6 +472,10 @@ main() {
       failed_items+=("$file")
     fi
   done
+
+  if ! install_file link ".config/agents/AGENTS.md" ".hermes/SOUL.md"; then
+    failed_items+=(".hermes/SOUL.md")
+  fi
 
   if ! configure_claude_browser; then
     failed_items+=("Claude browser settings")

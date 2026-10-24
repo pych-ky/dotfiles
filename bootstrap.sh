@@ -106,8 +106,10 @@ ensure_sudo() {
 run_downloaded_installer() {
   local url="$1"
   local interpreter="$2"
-  local environment_assignment="${3:-}"
+  local environment_assignment="$3"
   local installer
+
+  shift 3
 
   installer="$(curl -fsSL "$url")" || return
   if [[ -z "$installer" ]]; then
@@ -116,9 +118,9 @@ run_downloaded_installer() {
   fi
 
   if [[ -n "$environment_assignment" ]]; then
-    env "$environment_assignment" "$interpreter" <<<"$installer"
+    env "$environment_assignment" "$interpreter" -s -- "$@" <<<"$installer"
   else
-    "$interpreter" <<<"$installer"
+    "$interpreter" -s -- "$@" <<<"$installer"
   fi
 }
 
@@ -148,13 +150,19 @@ install_user_cli() {
   local interpreter="$4"
   local environment_assignment="${5:-}"
 
+  if (($# >= 5)); then
+    shift 5
+  else
+    shift 4
+  fi
+
   if resolve_user_executable "$name" >/dev/null; then
     return 0
   fi
 
   run_and_record \
     "$label" \
-    run_downloaded_installer "$url" "$interpreter" "$environment_assignment"
+    run_downloaded_installer "$url" "$interpreter" "$environment_assignment" "$@"
 }
 
 # PATH・既定パスから brew を検索
@@ -485,7 +493,13 @@ install_user_cli claude 'Claude Code installer' https://claude.ai/install.sh /bi
 step 'Codex'
 install_user_cli codex 'Codex installer' \
   https://chatgpt.com/codex/install.sh /bin/sh CODEX_NON_INTERACTIVE=1
+run_and_record 'Codex settings' "$repo_dir/scripts/setup-codex.sh"
 setup_codex_plugins
+
+step 'Hermes Agent'
+install_user_cli hermes 'Hermes Agent installer' \
+  https://hermes-agent.nousresearch.com/install.sh /bin/bash '' --non-interactive
+run_and_record 'Hermes settings' "$repo_dir/scripts/setup-hermes.sh"
 
 step 'Codex pets'
 run_optional_setup 'Codex pets' "$repo_dir/scripts/setup-pets.sh"
