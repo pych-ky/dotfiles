@@ -644,8 +644,7 @@ def inspect_packages(command, args, words):
                 words = words[2:]
         if words and words[0] in PACKAGE_CONFIG_ALIASES[command]:
             words = PACKAGE_CONFIG_ALIASES[command][words[0]].split() + words[1:]
-        # config edit はエディタ経由で .npmrc を出力し得る
-        if command == "npm" and (matches_subcommand(words, {"config list", "config ls", "config edit"}) or words in (["config", "get"], ["config"])):
+        if command == "npm" and (matches_subcommand(words, {"config list", "config ls"}) or words in (["config", "get"], ["config"])):
             deny(SECRET_OUTPUT_REASON)
         if words[:2] == ["config", "get"] and any(secret_name(word) or "_auth" in word.casefold() for word in words[2:]):
             deny(SECRET_OUTPUT_REASON)
@@ -753,7 +752,7 @@ CREDENTIAL_FRAGMENTS = tuple(path.casefold() for path in CREDENTIAL_LOCATIONS) +
 )
 CREDENTIAL_NAMES = set("""
     .git-credentials .netrc .pgpass .pg_service.conf pg_service.conf
-    .npmrc .pypirc .zsh_history .bash_history fish_history pip.conf
+    .pypirc .zsh_history .bash_history fish_history pip.conf
 """.split())
 CREDENTIAL_SUFFIXES = (".p12", ".pfx", ".p8", ".ppk", ".key", ".keystore", ".jks", ".kdbx")
 CREDENTIAL_PATH_VARIABLES = set("""
@@ -761,7 +760,7 @@ CREDENTIAL_PATH_VARIABLES = set("""
     GOOGLE_APPLICATION_CREDENTIALS GOOGLE_CREDENTIALS CLOUDSDK_CONFIG
     DOCKER_CONFIG REGISTRY_AUTH_FILE TF_CLI_CONFIG_FILE OCM_CONFIG
     HELM_REPOSITORY_CONFIG HELM_REGISTRY_CONFIG PGPASSFILE PGSERVICEFILE
-    PIP_CONFIG_FILE NETRC NPM_CONFIG_USERCONFIG NPM_CONFIG_GLOBALCONFIG
+    PIP_CONFIG_FILE NETRC
     AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE AWS_LOGIN_CACHE_DIRECTORY
     AWS_WEB_IDENTITY_TOKEN_FILE AZURE_CONFIG_DIR BUNDLE_USER_CONFIG
     CARGO_HOME COMPOSER_HOME DOCKER_CERT_PATH GNUPGHOME
