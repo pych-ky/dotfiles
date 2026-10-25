@@ -4,8 +4,8 @@ macOS・シェル・開発ツール・AI エージェントの個人用設定。
 
 ## 一括セットアップ
 
-macOS・対話可能なローカル端末・`sudo` 権限が必要。
-スクリプトには `sudo` を付けない。
+- macOS・対話可能なローカル端末・`sudo` 権限が必要
+- スクリプトには `sudo` を付けない
 
 ```sh
 git clone <このリポジトリ> && cd dotfiles
@@ -15,7 +15,7 @@ git clone <このリポジトリ> && cd dotfiles
 多くの設定はリンクされ、編集が実環境へ反映される。
 macOS 設定の一部は再ログイン後に反映される。
 
-警告・未実施項目を解消し、[手動セットアップ](#手動セットアップ)へ進む。
+- 警告・未実施項目を解消し、[手動セットアップ](#手動セットアップ)へ進む
 
 ## 個別セットアップ
 
@@ -26,13 +26,14 @@ brew bundle --no-upgrade --file=macos/Brewfile
 brew bundle upgrade --file=macos/Brewfile
 ```
 
-プロジェクトで指定がなければ、`python3` は Homebrew の Python 3.14 を使う。
-Homebrew formula の旧版は自動削除しない。
+- プロジェクトで指定がなければ、`python3` は Homebrew の Python 3.14 を使う
+- Homebrew formula の旧版は自動削除しない
 
 ### 開発ツール（mise）
 
-旧バージョンを残して更新する。
-プロジェクト側の固定版指定は上書きしない。
+- 旧バージョンを残して更新する
+- プロジェクト側の固定版指定は上書きしない
+
 グローバル設定を使った Node の導入・更新時は、非公開設定の `install-node-tools` があれば導入済み CLI を復元する。
 CLI の初回導入は非公開設定の `setup.sh` が行う。
 
@@ -41,7 +42,7 @@ mise install
 mise upgrade
 ```
 
-CLI の復元に失敗した場合は、原因を解消して `mise install node` を再実行する。
+- CLI の復元に失敗した場合は、原因を解消して `mise install node` を再実行する
 
 ### シンボリックリンク
 
@@ -51,7 +52,8 @@ CLI の復元に失敗した場合は、原因を解消して `mise install node
 ```
 
 通常ファイル・ディレクトリは `~/.dotfiles-backup/` に最新 5 世代を退避する。
-事前確認で差異があれば、端末の変更をリポジトリや `~/.zshrc.local` などへ統合してから実行する。
+
+- 事前確認で差異があれば、端末の変更をリポジトリや `~/.zshrc.local` などへ統合してから実行する
 
 ### 共通設定
 
@@ -63,8 +65,8 @@ CLI の復元に失敗した場合は、原因を解消して `mise install node
 ./scripts/setup-menubar.sh
 ```
 
-電源管理には事前の `sudo` 認証が必要。
-アプリの表示許可は「システム設定 > メニューバー」で設定する。
+- 電源管理には事前の `sudo` 認証が必要
+- アプリの表示許可は「システム設定 > メニューバー」で設定する
 
 ### 非公開リポジトリ
 
@@ -75,31 +77,33 @@ CLI の復元に失敗した場合は、原因を解消して `mise install node
 
 ### コピーする設定
 
-アプリ側の変更は、共通化する分だけ次回セットアップ前にリポジトリへ取り込む。
+- アプリ側の変更は、共通化する分だけ次回セットアップ前にリポジトリへ取り込む
 
 - Browser Use: リンク非対応
 - Codex CLI・Orca プロファイル: モデル切替を別々に保存し、Orca 専用 HOME にも配置
 - Orca キー設定: アプリの保存でリンクが外れる。反映後はキーボード設定で再読み込みするか再起動する
 - Computer Use 常時許可一覧: アプリがリンク先の変更を検知しない
 
-配置先は [scripts/link-dotfiles.sh](scripts/link-dotfiles.sh) を参照。
+- 配置先は [scripts/link-dotfiles.sh](scripts/link-dotfiles.sh) を参照
 
 ### Claude Code
 
 共通設定は `etc/claude-code/settings.json`。
-変更後は `scripts/link-dotfiles.sh` を再実行し、Claude Code を再起動する。
+
+- 変更後は `scripts/link-dotfiles.sh` を再実行し、Claude Code を再起動する
 
 - 端末・Orca ペイン: `claude` 関数の `--settings` で共通設定を使用。素の起動は `command claude`
 - IDE 拡張・Desktop: `/Library/Application Support/ClaudeCode/managed-settings.json` に配置するが、組織配布が優先。dotfiles 設置分のみ更新し、外部からの変更は保持
 - `~/.claude/settings.json`: Git 管理外のユーザー設定（Orca フック・プラグイン・`/model`）。セットアップは Playwright の Edge 接続先だけ反映
 
-プロジェクトの `.claude/settings.local.json` は保持する。
-Orca は設定を同期するため専用ファイルを dotfiles へリンクせず、共通設定を重複させない。
+- プロジェクトの `.claude/settings.local.json` は保持する
+- Orca は設定を同期するため専用ファイルを dotfiles へリンクせず、共通設定を重複させない
 
 ### Codex の設定
 
 `~/.codex/config.toml` はアプリが管理する端末固有設定。
-`./scripts/setup-codex.sh` で通常アプリ・Orca runtime のモデル保存値を `etc/codex/config.toml` の既定値へ揃える。
+
+- `./scripts/setup-codex.sh` で通常アプリ・Orca runtime のモデル保存値を `etc/codex/config.toml` の既定値へ揃える
 
 - 対話シェル: `--profile cli`。シェル関数を経由しない通常 CLI には `--no-daemon --profile cli` を付ける
 - Orca: `--profile orca`。起動引数の Sol / Ultra により、セッション中のモデル切替は新規起動に持ち越さない
@@ -113,9 +117,9 @@ Orca は設定を同期するため専用ファイルを dotfiles へリンク�
 
 ### Hermes Agent
 
-`bootstrap.sh` で公式安定版の CLI を導入し、更新は `hermes update` で行う。
-Homebrew 版は [Hermes の公式サポート対象外](https://hermes-agent.nousresearch.com/docs/getting-started/platform-support)のため使用しない。
-端末へ適用する設定は dotfiles に置き、会話・スケジュール参照用の ai-man-config には置かない。
+- `bootstrap.sh` で公式安定版の CLI を導入し、更新は `hermes update` で行う
+- Homebrew 版は [Hermes の公式サポート対象外](https://hermes-agent.nousresearch.com/docs/getting-started/platform-support)のため使用しない
+- 端末へ適用する設定は dotfiles に置き、会話・スケジュール参照用の ai-man-config には置かない
 
 - 設定: `./scripts/setup-hermes.sh` で適用する。変更はこのスクリプトに反映して再実行する
 - 共通規約: `~/.hermes/SOUL.md` は `.config/agents/AGENTS.md` へのリンクとし、リンク元で一元管理する。SOUL が自動注入されないサブエージェントには `prefill-messages.json` から読込を指示する
@@ -123,14 +127,16 @@ Homebrew 版は [Hermes の公式サポート対象外](https://hermes-agent.nou
 - 実行ガード: 初回起動時・変更時に `.hermes/hooks/pre-tool-guard.py` の実行を承認し、`hermes hooks doctor` で確認する。未承認の hook は実行されない
 - デスクトップ操作: 通常のターミナルで `./scripts/setup-hermes-computer-use.sh` を実行し、macOS のアクセシビリティ・画面収録を許可する。権限要求が `/Applications/CuaDriver.app` を参照するため、Hermes PM と同じ署名付きアプリをそこにも配置する。`hermes update` 後も再実行する
 
-独自の記憶・委譲機能を維持するため標準の実行基盤を使う。
-この基盤では Ultra を指定しても Max として送信されるため、推論量を Max に設定する。
+- 独自の記憶・委譲機能を維持するため標準の実行基盤を使う
+- この基盤では Ultra を指定しても Max として送信されるため、推論量を Max に設定する
+
 共通スキルは `~/.agents/skills` を参照する。
-認証情報・会話履歴・自動生成状態は Git 管理外とし、`~/.hermes/config.yaml` 自体はリンクしない。
+
+- 認証情報・会話履歴・自動生成状態は Git 管理外とし、`~/.hermes/config.yaml` 自体はリンクしない
 
 ローカル実行は OS の隔離環境ではなく、ガードは直接記述された既知の危険操作を静的に検査する。
 動的に組み立てたパス、起動済みプロセスへ送る標準入力、外部 CLI 内部の処理は追跡しない。
-フックにはプロセスの作業ディレクトリが渡されるため、`terminal` の `cd` やセッションの作業場所切替後の相対パスは実際の場所とずれ、見逃しや誤拒否が起こりうる。
+フックはプロセスの作業ディレクトリを基準にするため、`terminal` の `cd` やセッションの作業場所変更後は相対パスがずれ、見逃し・誤拒否が起こりうる。
 手動承認は危険パターンに一致したコマンドが対象で、チェックポイントも shell による全変更の復旧を保証しない。
 
 ## 手動セットアップ
@@ -160,7 +166,7 @@ Homebrew 版は [Hermes の公式サポート対象外](https://hermes-agent.nou
 
 ### キーボード
 
-外付けキーボードは Mac モードを使う。
+- 外付けキーボードは Mac モードを使う
 
 #### Keychron K8 Pro 本体の移行
 
@@ -170,4 +176,4 @@ Homebrew 版は [Hermes の公式サポート対象外](https://hermes-agent.nou
 3. Karabiner の Keychron 機器設定で Simple Modifications を空にする
 4. 左 Ctrl 位置でのコピー、かな・英数、F13、Fn 音量操作を確認する
 
-復元時は旧レイアウトを読み込み、Karabiner の Keychron 機器設定で左 Control / Option / Command を各々同じキーへ変換する 3 件を追加する。
+- 復元時は旧レイアウトを読み込み、Karabiner の Keychron 機器設定で左 Control / Option / Command を各々同じキーへ変換する 3 件を追加する
