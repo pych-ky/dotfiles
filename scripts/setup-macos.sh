@@ -138,6 +138,12 @@ defaults write com.apple.dock mru-spaces -bool false
 defaults write com.apple.dock show-recents -bool false
 defaults write com.apple.dock tilesize -int 72
 
+# Rectangle と操作が重複しないようにする
+defaults write com.apple.WindowManager EnableTilingByEdgeDrag -bool false
+defaults write com.apple.WindowManager EnableTopTilingByEdgeDrag -bool false
+defaults write com.apple.WindowManager EnableTilingOptionAccelerator -bool false
+defaults write com.apple.WindowManager EnableTiledWindowMargins -bool false
+
 ## Finder
 
 defaults write com.apple.finder AppleShowAllFiles -bool true
