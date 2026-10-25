@@ -240,7 +240,6 @@ setup_homebrew_and_bundle() {
 
 # ログイン項目を設定
 setup_login_items() {
-  local logi_options_app=/Applications/logioptionsplus.app
   local login_item_app
   local system_events_status=0
 
@@ -264,10 +263,13 @@ APPLESCRIPT
     return 0
   fi
 
-  # Logi Options+ はサービスで常駐するため、メインアプリの自動起動は不要
-  run_and_record \
-    "remove login item: $logi_options_app" \
-    osascript - "$logi_options_app" <<'APPLESCRIPT'
+  # サービス常駐アプリと休止中の Typeless はログイン項目から外す
+  for login_item_app in \
+    /Applications/logioptionsplus.app \
+    /Applications/Typeless.app; do
+    run_and_record \
+      "remove login item: $login_item_app" \
+      osascript - "$login_item_app" <<'APPLESCRIPT'
 -- 対象アプリのログイン項目を削除
 on run argv
   set targetPath to item 1 of argv
@@ -284,11 +286,14 @@ on run argv
   if removedItem then return "changed: removed login item: " & targetPath
 end run
 APPLESCRIPT
+  done
 
   for login_item_app in \
+    "/Applications/Aqua Voice.app" \
     /Applications/Maccy.app \
-    /Applications/Rectangle.app \
-    /Applications/Typeless.app; do
+    /Applications/noTunes.app \
+    /Applications/Raycast.app \
+    /Applications/Rectangle.app; do
     if [[ ! -d "$login_item_app" ]]; then
       record_skip "add login item: $login_item_app (application is missing)"
       continue

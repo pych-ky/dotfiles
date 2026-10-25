@@ -137,12 +137,13 @@ Homebrew 版は [Hermes の公式サポート対象外](https://hermes-agent.nou
 
 ### システムとアプリ
 
+- Aqua Voice: 初回起動時にログインし、マイク・アクセシビリティの利用を許可する。「設定 > キーバインド > ハンズフリーを有効化」に `F13` を割り当てる
 - Muse: [公式配布](https://ai.meta.com/muse/download/)からダウンロードし、`Muse.app` を `/Applications` に配置する。[Homebrew 版](https://github.com/Homebrew/homebrew-cask/blob/HEAD/Casks/m/muse.rb)は署名付き URL に対応できず無効化されている
 - システム設定 > プライバシーとセキュリティ
   - 必要なアプリにフルディスクアクセス・アクセシビリティ・入力監視を許可
   - ログイン項目の登録には、オートメーションで System Events を許可
 - システム設定 > 一般 > ログイン項目と拡張機能
-  - 「ログイン時に開く」: Maccy・Rectangle・Stats・Typeless の登録を確認
+  - 「ログイン時に開く」: Stats の登録を確認
   - 「アプリのバックグラウンドでのアクティビティ」: Karabiner・Logi Options+・Logitech Inc をオン
   - 拡張機能 > Driver Extensions: Karabiner DriverKit VirtualHIDDevice をオン
 - メニューバーの日本語入力メニュー > ユーザ辞書を編集

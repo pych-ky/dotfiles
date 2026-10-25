@@ -92,6 +92,7 @@ cask "notion"
 
 ### 入力 / ウィンドウ管理
 
+cask "aqua-voice"
 cask "karabiner-elements"
 cask "logi-options+"
 cask "rectangle"
