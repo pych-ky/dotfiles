@@ -15,9 +15,5 @@
   },
   "preferredLanguage": "ja",
   "enableShowAppInDock": false,
-  "showFlowBarOnDesktop": false,
-  "enabledMuteBackgroundAudio": true,
-  "translationModeTargetLanguageCodes": [
-    "en-US"
-  ]
+  "enabledMuteBackgroundAudio": true
 }
