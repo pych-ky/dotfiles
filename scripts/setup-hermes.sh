@@ -41,6 +41,8 @@ hermes config set delegation.max_spawn_depth 2
 hermes config set agent.disabled_toolsets '[]'
 
 hermes config set web.search_backend openai-native
+hermes config set web.provider_tier.keenable free
+hermes config set web.extract_backend keenable
 hermes config set AGENT_BROWSER_EXECUTABLE_PATH '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'
 hermes config set browser.use_real_profile false
 hermes config set browser.allow_unsafe_evaluate false
