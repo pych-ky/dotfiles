@@ -31,27 +31,24 @@ default_permissions = "保護付きフルアクセス"
 
 # 旧 sandbox_mode / [sandbox_workspace_write] とは併用しない
 [permissions."保護付きフルアクセス"]
-description = "AI エージェントの認証情報と shell 履歴・snapshot を除くフルアクセス"
+description = "CLI の内部認証を許可し、shell 履歴・snapshot 等を保護"
 
 [permissions."保護付きフルアクセス".filesystem]
 ":root"                                         = "write"
 "~/.codex/plugins/cache/openai-bundled/browser" = "read"  # Browser RPC の改変防止
 
-# 外部 CLI の設定・認証ファイルは内部利用のため deny 対象外
+# .claude.json・Codex の auth.json は内部利用のため deny 対象外。直接取得は共通規約と実行前ガードで禁止
 
 ### エージェントの認証情報・snapshot
 
-"~/.claude.json"                        = "deny"
 "~/.claude.json.backup"                 = "deny"
 "~/.claude/.credentials.json"           = "deny"
 "~/.claude/backups"                     = "deny"
 "~/.claude/shell-snapshots"             = "deny"
 "~/.codex-account-*/.credentials.json"  = "deny"
-"~/.codex-account-*/auth.json"          = "deny"
 "~/.codex-account-*/shell_snapshots"    = "deny"
 "~/.codex-account-*/shell_snapshots/**" = "deny"
 "~/.codex/.credentials.json"            = "deny"
-"~/.codex/auth.json"                    = "deny"
 "~/.codex/shell_snapshots"              = "deny"
 
 ### シェル履歴
