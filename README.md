@@ -137,6 +137,7 @@ Homebrew 版は [Hermes の公式サポート対象外](https://hermes-agent.nou
 
 ### システムとアプリ
 
+- Muse: [公式配布](https://ai.meta.com/muse/download/)からダウンロードし、`Muse.app` を `/Applications` に配置する。[Homebrew 版](https://github.com/Homebrew/homebrew-cask/blob/HEAD/Casks/m/muse.rb)は署名付き URL に対応できず無効化されている
 - システム設定 > プライバシーとセキュリティ
   - 必要なアプリにフルディスクアクセス・アクセシビリティ・入力監視を許可
   - ログイン項目の登録には、オートメーションで System Events を許可
