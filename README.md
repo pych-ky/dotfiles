@@ -26,11 +26,11 @@ brew bundle --no-upgrade --file=macos/Brewfile
 brew bundle upgrade --file=macos/Brewfile
 ```
 
-- プロジェクトで指定がなければ、`python3` は Homebrew の Python 3.14 を使う
 - Homebrew formula の旧版は自動削除しない
 
 ### 開発ツール（mise）
 
+- プロジェクトで指定がなければ、`python3` は mise 管理の Python 3.14 を使う
 - 旧バージョンを残して更新する
 - プロジェクト側の固定版指定は上書きしない
 

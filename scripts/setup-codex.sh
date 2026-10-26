@@ -66,7 +66,8 @@ for home in homes:
         result = request(2, "config/batchWrite", {"edits": edits})
         if result["status"] != "ok":
             raise RuntimeError(f"Codex model settings are overridden: {home}")
-        print(f"ok: Codex model settings: {home / 'config.toml'}")
+        if os.environ.get("DOTFILES_BOOTSTRAP") != "1":
+            print(f"ok: Codex model settings: {home / 'config.toml'}")
     finally:
         process.stdin.close()
         try:
