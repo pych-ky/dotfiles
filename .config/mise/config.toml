@@ -1,6 +1,6 @@
 # mise ツールバージョン設定
 
-# macos/Brewfile と重複させない。リポジトリ設定で上書き可
+# Python 以外は macos/Brewfile と重複させない。リポジトリ設定で上書き可
 
 
 [tools]
@@ -15,7 +15,7 @@ golangci-lint                  = "latest"
 node                           = { version = "lts", postinstall = { run = 'if [ -x "$HOME/.local/bin/install-node-tools" ]; then "$HOME/.local/bin/install-node-tools" "$MISE_TOOL_INSTALL_PATH"; fi', when = "always" } }
 npm                            = "11"  # node 同梱版を上書き
 pnpm                           = "latest"
-python                         = "path:{{exec(command='brew --prefix python@3.14')}}/libexec"
+python                         = "3.14"
 terraform                      = "latest"
 tflint                         = "latest"
 uv                             = "latest"
