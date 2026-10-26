@@ -172,7 +172,7 @@ scan_pre_commit() {
 
   while IFS= read -r -d '' path; do
     paths+=("$path")
-  done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+  done < <(git diff --cached --name-only --diff-filter=ACMRT -z)
 
   ((${#paths[@]} > 0)) || return 0
 
