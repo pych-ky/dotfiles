@@ -5,7 +5,6 @@
 
 [tools]
 "aqua:gruntwork-io/terragrunt" = "latest"
-"aqua:secretlint/secretlint"   = "13.0.5"
 "aqua:suzuki-shunsuke/ghtkn"   = "latest"
 "aqua:suzuki-shunsuke/tfcmt"   = "latest"
 aws-cli                        = { version = "latest", symlink_bins = "true" }
@@ -14,6 +13,7 @@ go                             = "latest"
 golangci-lint                  = "latest"
 node                           = { version = "lts", postinstall = { run = 'if [ -x "$HOME/.local/bin/install-node-tools" ]; then "$HOME/.local/bin/install-node-tools" "$MISE_TOOL_INSTALL_PATH"; fi', when = "always" } }
 npm                            = "11"  # node 同梱版を上書き
+"npm:@secretlint/quick-start"  = "13.0.5"
 pnpm                           = "latest"
 python                         = "3.14"
 terraform                      = "latest"
