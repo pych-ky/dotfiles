@@ -69,15 +69,18 @@ fi
 
 # 秘密値を漏らさないよう blob 検査の全出力を抑止
 if ((!skip_global_checks)) && [[ "$hook_name" == pre-commit ]]; then
-  if ! command -v secretlint >/dev/null 2>&1; then
-    printf 'error: secretlint が見つかりません\n' >&2
-    printf '       mise install aqua:secretlint/secretlint で導入してから、もう一度コミットしてください\n' >&2
+  # プロジェクトの Node.js 設定に依存せず共通の LTS で検査
+  if ! secretlint_node="$(mise -C "$HOME" which node --tool node@lts 2>/dev/null)" ||
+    ! secretlint_cli="$(mise -C "$HOME" which quick-start 2>/dev/null)"; then
+    printf 'error: secretlint または Node.js LTS が見つかりません\n' >&2
+    printf '       mise -C ~ install node@lts npm:@secretlint/quick-start で導入してから、もう一度コミットしてください\n' >&2
     exit 1
   fi
+  secretlint=(env "PATH=${secretlint_node%/*}:$PATH" "$secretlint_cli")
 
   secretlint_config='{"rules":[{"id":"@secretlint/secretlint-rule-preset-recommend"}]}'
   # 空コミット・削除のみでも実行・設定・ルールを検証
-  if ! secretlint --secretlintrcJSON "$secretlint_config" --maskSecrets \
+  if ! "${secretlint[@]}" --secretlintrcJSON "$secretlint_config" --maskSecrets \
     --stdinFileName=secretlint-preflight </dev/null >/dev/null 2>&1; then
     printf 'error: secretlint を実行できません。導入状態とフック内の設定を確認してください\n' >&2
     exit 1
@@ -98,7 +101,7 @@ if ((!skip_global_checks)) && [[ "$hook_name" == pre-commit ]]; then
 
         # symlink はリンク先を読まず blob だけ検査
         git --no-replace-objects cat-file blob "$new_oid" |
-          secretlint --secretlintrcJSON "$secretlint_config" --maskSecrets \
+          "${secretlint[@]}" --secretlintrcJSON "$secretlint_config" --maskSecrets \
             --stdinFileName="./$path" || exit $?
       done
   } >/dev/null 2>&1; then
