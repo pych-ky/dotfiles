@@ -58,6 +58,8 @@ main() {
   esac
 
   "$repository_dir/setup.sh"
+  mise exec -- npx --yes skills add nanaism/yomiyasu --global \
+    --agent codex --agent claude-code --skill yomiyasu --yes
 }
 
 main "$@"
