@@ -6,6 +6,7 @@ version: 1
 
 aliases:
     co: pr checkout
+expiring_credentials: enabled
 git_protocol: https
 
 ## 外部コマンド・接続
