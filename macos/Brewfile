@@ -17,6 +17,7 @@ brew "zoxide"
 
 ### 基本ユーティリティ
 
+brew "ca-certificates"
 brew "coreutils"
 brew "duti"
 brew "gnu-sed"
