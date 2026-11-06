@@ -45,6 +45,7 @@ brew "python@3.14"
 ### Lint / フォーマッタ
 
 brew "actionlint"
+brew "markdownlint-cli2"
 brew "shellcheck"
 brew "shfmt"
 
