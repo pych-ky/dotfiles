@@ -248,7 +248,7 @@
   "showClearContextOnPlanAccept": true,
   "plansDirectory": ".claude/plans",
   "tui": "fullscreen",
-  "autoMemoryEnabled": false,
+  "autoMemoryEnabled": true,
   "showThinkingSummaries": true,
   "skipWorkflowUsageWarning": true,
   "theme": "dark",
