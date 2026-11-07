@@ -52,7 +52,7 @@ CLI_VALUE_OPTIONS = {
         "git": "--config --config-env --exec-path --git-dir --namespace --super-prefix --work-tree -C -c",
         "kubectl": "--as --as-group --cache-dir --certificate-authority --client-certificate --client-key --cluster --context --field-selector --kubeconfig --namespace --output --password --request-timeout --selector --server --token --user --username -l -n -o -s -v",
         "npm": "--cache --call --editor --location --message --otp --tag --workspace -L -c -m -w",
-        "op": "--account --config --encoding --format --session --vault",
+        "op": "--account --config --encoding --env-file --environment --format --session --vault",
         "pnpm": "--dir --filter --reporter -F",
         "security": "-C -D -P -a -c -d -f -j -l -o -p -s -t",
         "terraform": "-backup -chdir -lock-timeout -plugin-dir -replace -state -state-out -target -var -var-file",
@@ -1695,8 +1695,6 @@ def inspect_assignment(value, cwd):
     if not match:
         return
     name, content = match.groups()
-    if name == "OP_RUN_NO_MASKING" and content.casefold() not in {"false", "0", ""}:
-        deny(EXEC_OVERRIDE_REASON)
     if name == "GOOGLE_CREDENTIALS":
         if content and (any(char in content for char in "{}\r\n$") or not content.startswith(("/", "./", "../"))):
             deny("GOOGLE_CREDENTIALS には静的なファイルパスだけを指定してください。")
@@ -2439,33 +2437,11 @@ def inspect_interpreter(language, args, cwd, depth, stdin, external):
         raise unsupported
 
 
-def inspect_op_consumer(argv, cwd, depth, stdin, external):
-    """注入先の直接 CLI を検査し、環境を出力できる実行器を拒否"""
-    if depth > 32:
-        raise ParseError("nested command limit exceeded")
-    argv = list(argv)
-    assignments = pop_assignments(argv, cwd)
-    if not argv:
-        raise ParseError("op run command is missing")
-    command, args = os.path.basename(argv[0]).casefold(), argv[1:]
-    if command in WRAPPER_OPTIONS:
-        if command == "env":
-            args = env_split_args(args)
-        child, child_cwd = unwrap(command, args, cwd, assignments)
-        if not child:
-            deny(SECRET_OUTPUT_REASON)
-        inspect_op_consumer(child, child_cwd, depth + 1, stdin, external)
-        return
-    if command != "gh-bozu":
-        deny(SECRET_OUTPUT_REASON)
-    inspect_argv(argv, cwd, depth + 1, stdin, external)
-
-
-def inspect_op(args, assignments, cwd, depth, stdin, external):
-    """秘密値を返さないサインインと直接 CLI への認証情報注入を検査"""
+def inspect_op(args, assignments):
+    """秘密値を返さないサインインを検査"""
     values = CLI_VALUE_OPTIONS["op"]
     flags = {"--cache", "--debug", "--iso-timestamps", "--no-color"}
-    if has_option(args, {"--help", "-h", "--version"}, value_options=values | {"--env-file", "--environment"}):
+    if has_option(args, {"--help", "-h", "--version"}, value_options=values):
         return True
     index = 0
     while index < len(args) and args[index].startswith("-"):
@@ -2485,29 +2461,7 @@ def inspect_op(args, assignments, cwd, depth, stdin, external):
         if assignments.get("OP_BIOMETRIC_UNLOCK_ENABLED") != "true" or has_option(options, {"--raw", "--force"}, "f", value_options=values, short_bool_values=True):
             deny(SECRET_OUTPUT_REASON)
         return True
-    if subcommand != "run":
-        return False
-    index = 0
-    while index < len(options):
-        argument = options[index]
-        option, separator, _ = argument.partition("=")
-        if argument == "--":
-            inspect_op_consumer(options[index + 1:], cwd, depth + 1, stdin, external)
-            return True
-        if option in {"--help", "-h", "--version"}:
-            index += 1
-            continue
-        if option == "--no-masking":
-            deny(SECRET_OUTPUT_REASON)
-        if option in values | {"--env-file", "--environment"}:
-            if not separator and index + 1 >= len(options):
-                raise ParseError("op run option argument is missing")
-            index += 1 if separator else 2
-        elif option in flags:
-            index += 1
-        else:
-            deny(SECRET_OUTPUT_REASON)
-    deny(SECRET_OUTPUT_REASON)
+    return False
 
 
 def inspect_argv(argv, cwd, depth, stdin=None, external=False):
@@ -2524,14 +2478,12 @@ def inspect_argv(argv, cwd, depth, stdin=None, external=False):
     command = {"pn": "pnpm", "podman": "docker", "nerdctl": "docker"}.get(command, command)
     if command in {"export", "readonly", "declare", "typeset", "local", "env", "sudo"}:
         for arg in args:
-            if arg == "OP_RUN_NO_MASKING" and command in {"export", "readonly", "declare", "typeset", "local"}:
-                deny(EXEC_OVERRIDE_REASON)
             inspect_assignment(arg, cwd)
     if (
         command in {"read", "mapfile", "readarray"}
-        and any(arg in EXECUTION_VARIABLES or arg == "OP_RUN_NO_MASKING" for arg in args)
+        and any(arg in EXECUTION_VARIABLES for arg in args)
         or command == "printf"
-        and any(name in EXECUTION_VARIABLES or name == "OP_RUN_NO_MASKING" for name in option_values(args, {"-v"}))
+        and any(name in EXECUTION_VARIABLES for name in option_values(args, {"-v"}))
     ):
         deny("組み込みコマンドによる実行設定の差し替えは許可していません。")
     if command == "env":
@@ -2539,7 +2491,7 @@ def inspect_argv(argv, cwd, depth, stdin=None, external=False):
     if command in WRAPPER_OPTIONS:
         inspect_wrapper(command, args, assignments, cwd, depth, stdin, external)
         return
-    if command == "op" and inspect_op(args, assignments, cwd, depth, stdin, external):
+    if command == "op" and inspect_op(args, assignments):
         return
     if command in {"terraform", "terragrunt"}:
         args = terraform_args(command, args, assignments)
