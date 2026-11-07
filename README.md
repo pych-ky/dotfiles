@@ -102,7 +102,7 @@ mise upgrade
 
 共通設定は `etc/claude-code/settings.json`。
 
-- 変更後は `scripts/link-dotfiles.sh` を再実行し、Claude Code を再起動する
+- 変更後は `scripts/link-dotfiles.sh --claude-settings-only` を実行し、Claude Code を再起動する
 
 - 端末・Orca ペイン: `claude` 関数の `--settings` で共通設定を使用。素の起動は `command claude`
 - IDE 拡張・Desktop: `/Library/Application Support/ClaudeCode/managed-settings.json` に配置するが、組織配布が優先。dotfiles 設置分のみ更新し、外部からの変更は保持
@@ -168,7 +168,10 @@ mise upgrade
   - `しかく` → `■` / `ほし` → `★` / `やじるし` → `→` / `かっこ` → `「」` を登録
 - Claude Code の Playwright MCP
   - Claude Code の初回起動後、`claude plugin install playwright@claude-plugins-official --scope user` で導入する
+  - Chrome 用は `claude mcp add --scope user playwright-chrome -- npx @playwright/mcp@latest --cdp-endpoint=chrome` で登録する
   - Edge の `edge://inspect/#remote-debugging` で「Allow remote debugging for this browser instance」を有効にする（[接続方式](https://playwright.dev/mcp/configuration/browser-extension)）
+  - Chrome を使う場合は `chrome://inspect/#remote-debugging` でも同じ項目を有効にする
+  - 接続時にブラウザの確認ダイアログが表示されたら、接続を許可する
 
 ### Logi Options+
 

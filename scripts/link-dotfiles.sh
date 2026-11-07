@@ -9,6 +9,7 @@ backup_dir=
 backup_target=
 backup_compare_target=  # dry-run では退避元、通常は退避先
 dry_run=0
+claude_settings_only=0
 backup_created=0
 backup_keep=5
 backup_diffs=()
@@ -27,7 +28,7 @@ source "$setup_common_library"
 # 使い方を表示
 usage() {
   cat <<'EOF'
-使い方: ./scripts/link-dotfiles.sh [--dry-run] [-h | --help]
+使い方: ./scripts/link-dotfiles.sh [--claude-settings-only] [--dry-run] [-h | --help]
 
 $HOME 配下へリンクし、既存の実体は ~/.dotfiles-backup/<timestamp>[-<sequence>]/ へ退避。
 コピー: Codex Browser 設定、CLI・Orca プロファイル、Orca キー設定、Computer Use 常時許可一覧
@@ -40,8 +41,9 @@ Claude managed 設定は dotfiles 設置分のみ更新し、外部変更は保�
 コピーの理由・設定の使い分けは README.md を参照。
 
 オプション:
-  --dry-run   変更せず実行内容を表示
-  -h, --help  ヘルプを表示して終了
+  --claude-settings-only  Claude のユーザー設定・managed 設定だけ反映
+  --dry-run               変更せず実行内容を表示
+  -h, --help              ヘルプを表示して終了
 EOF
 }
 
@@ -382,6 +384,9 @@ main() {
     --dry-run)
       dry_run=1
       ;;
+    --claude-settings-only)
+      claude_settings_only=1
+      ;;
     -h | --help)
       usage
       return 0
@@ -403,6 +408,17 @@ main() {
       'dotfiles link' \
       30 || return
     trap 'process_lock_release' EXIT
+  fi
+
+  if ((claude_settings_only)); then
+    configure_claude_browser || return
+    install_claude_managed_config || return
+    if ((dry_run)); then
+      printf 'ok: Claude Code settings (dry-run; no files changed)\n'
+    elif [[ ${DOTFILES_BOOTSTRAP:-0} != 1 ]]; then
+      printf 'ok: Claude Code settings\n'
+    fi
+    return 0
   fi
 
   local files=(

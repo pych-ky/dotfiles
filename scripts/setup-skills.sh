@@ -13,6 +13,27 @@ fi
 # shellcheck source=lib/setup-common.sh
 source "$setup_common_library"
 
+# 既存の配置を保ち、同じスキルへのリンクを作成
+link_skill() {
+  local source="$1"
+  local destination="$2"
+
+  if [[ ! -f "$source/SKILL.md" ]]; then
+    setup_error "skill is missing: $source"
+    return 1
+  fi
+  if [[ "$source/SKILL.md" -ef "$destination/SKILL.md" ]]; then
+    return 0
+  fi
+  if [[ -e "$destination" || -L "$destination" ]]; then
+    setup_error "skill destination already exists: $destination"
+    return 1
+  fi
+  mkdir -p "${destination%/*}"
+  ln -s "$source" "$destination"
+  printf 'changed: linked skill: %s\n' "$destination"
+}
+
 # Agent Skills を取得・セットアップ
 main() {
   local skip
@@ -60,6 +81,14 @@ main() {
   "$repository_dir/setup.sh"
   mise exec -- npx --yes skills add nanaism/yomiyasu --global \
     --agent codex --agent claude-code --skill yomiyasu --yes
+  orca skills install --skill orca-cli --skill orca-computer-use \
+    --skill orchestration --agent claude,codex
+  if [[ ! -e "$home_dir/.agents/skills/find-skills" &&
+    ! -L "$home_dir/.agents/skills/find-skills" ]]; then
+    mise exec -- npx --yes skills add vercel-labs/skills --global \
+      --agent codex --agent claude-code --skill find-skills --yes
+  fi
+  link_skill "$home_dir/.agents/skills/find-skills" "$home_dir/.claude/skills/find-skills"
 }
 
 main "$@"
