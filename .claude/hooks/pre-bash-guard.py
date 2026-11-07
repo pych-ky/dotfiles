@@ -52,7 +52,7 @@ CLI_VALUE_OPTIONS = {
         "git": "--config --config-env --exec-path --git-dir --namespace --super-prefix --work-tree -C -c",
         "kubectl": "--as --as-group --cache-dir --certificate-authority --client-certificate --client-key --cluster --context --field-selector --kubeconfig --namespace --output --password --request-timeout --selector --server --token --user --username -l -n -o -s -v",
         "npm": "--cache --call --editor --location --message --otp --tag --workspace -L -c -m -w",
-        "op": "--account --config --encoding --format --session --vault",
+        "op": "--account --config --encoding --env-file --environment --format --session --vault",
         "pnpm": "--dir --filter --reporter -F",
         "security": "-C -D -P -a -c -d -f -j -l -o -p -s -t",
         "terraform": "-backup -chdir -lock-timeout -plugin-dir -replace -state -state-out -target -var -var-file",
@@ -212,9 +212,11 @@ def option_values(args, names):
     return values
 
 
-def has_option(args, names, short="", value_options=(), negated=()):
-    """後の否定形を反映したオプションの有効性"""
+def has_option(args, names, short="", value_options=(), negated=(), short_bool_values=False):
+    """オプションの有効性を判定し、表示フラグは最後の値を反映"""
+    # ファイル名 f の指定を見逃さないよう、f は表示・短縮フラグでのみ偽とみなす
     found = False
+    display = {}
     args = iter(args)
     for argument in args:
         if argument == "--":
@@ -232,11 +234,21 @@ def has_option(args, names, short="", value_options=(), negated=()):
         name, separator, value = argument.partition("=")
         if name in negated:
             found = False
-        elif name in names and (not separator or value.casefold() not in {"false", "0", "no", "off"}):
+            display.clear()
+        elif name in names:
+            if name in {"--help", "-h", "-help", "--version"}:
+                key = "help" if name != "--version" else "version"
+                display[key] = not separator or value.casefold() not in {"false", "0", "no", "off", "f"}
+            elif not separator or value.casefold() not in {"false", "0", "no", "off"}:
+                found = True
+        if short_bool_values and short and re.fullmatch(r"-[A-Za-z]+", name):
+            for offset, flag in enumerate(name[1:], 1):
+                enabled = offset < len(name) - 1 or not separator or value.casefold() not in {"false", "0", "no", "off", "f"}
+                if flag in short and enabled:
+                    found = True
+        elif short and re.fullmatch(r"-[A-Za-z]+", argument) and any(flag in argument[1:] for flag in short):
             found = True
-        if short and re.fullmatch(r"-[A-Za-z]+", argument) and any(flag in argument[1:] for flag in short):
-            found = True
-    return found
+    return found or any(display.values())
 
 
 def cli_words(command, args, extra_values=()):
@@ -681,7 +693,7 @@ def inspect_cli(command, args, cwd):
             if name.casefold() in {"proxycommand", "localcommand", "remotecommand"}:
                 scan(value, cwd)
     elif command in SECRET_SUBCOMMANDS:
-        if has_option(args, {"--help", "-h"}) or words[:1] == ["help"]:
+        if has_option(args, {"--help", "-h"}, value_options=CLI_VALUE_OPTIONS.get(command, ())) or words[:1] == ["help"]:
             return
         if command == "gcloud" and words[:1] in (["alpha"], ["beta"], ["preview"]):
             words = words[1:]
@@ -1754,7 +1766,7 @@ def unwrap(command, args, cwd, inherited_assignments):
             arg = args[index] = "-I" + arg[2:]
         if ASSIGNMENT.match(arg):
             inspect_assignment(arg, cwd)
-            if arg.startswith(("TF_CLI_ARGS=", "TF_CLI_ARGS_")):
+            if arg.startswith(("TF_CLI_ARGS=", "TF_CLI_ARGS_", "OP_BIOMETRIC_UNLOCK_ENABLED=")):
                 assignments.append(arg)
             index += 1
             continue
@@ -1781,10 +1793,13 @@ def unwrap(command, args, cwd, inherited_assignments):
                 if index >= len(args):
                     raise ParseError("wrapper option argument is missing")
                 value = args[index]
-            if command == "env" and option in {"-u", "--unset"}:
+            if command == "env" and option in {"-u", "--unset"} or command == "arch" and option == "-d":
                 inherited_assignments.pop(value, None)
+                assignments[:] = [assignment for assignment in assignments if not assignment.startswith(value + "=")]
             if command == "arch" and option == "-e":
                 inspect_assignment(value, cwd)
+                if value.startswith(("TF_CLI_ARGS=", "TF_CLI_ARGS_", "OP_BIOMETRIC_UNLOCK_ENABLED=")):
+                    assignments.append(value)
             if command == "xargs" and option in {"-I", "-J", "--replace"}:
                 if not value:
                     raise ParseError("empty xargs replacement")
@@ -1793,8 +1808,9 @@ def unwrap(command, args, cwd, inherited_assignments):
                 if "$" in value:
                     raise UnsupportedSyntax("dynamic working directory")
                 cwd = resolve_path(os.path.expanduser(value), cwd, os.path.abspath)
-        elif command == "env" and arg in {"-i", "--ignore-environment"}:
+        elif command == "env" and arg in {"-i", "--ignore-environment"} or command in {"arch", "exec"} and arg == "-c":
             inherited_assignments.clear()
+            assignments.clear()
         elif arg not in flags:
             raise UnsupportedSyntax("unsupported wrapper option")
         index += 1
@@ -2203,13 +2219,13 @@ def script_uses_stdin(path):
 
 
 def pop_assignments(argv, cwd):
-    """先頭の代入を検査・除去し、terraform 用の値を抽出"""
+    """先頭の代入を検査・除去し、検査に必要な値を抽出"""
     assignments = {}
     while argv and (match := ASSIGNMENT.match(argv[0])):
         assignment = argv.pop(0)
         inspect_assignment(assignment, cwd)
         name, value = match.groups()
-        if name == "TF_CLI_ARGS" or name.startswith("TF_CLI_ARGS_"):
+        if name in {"TF_CLI_ARGS", "OP_BIOMETRIC_UNLOCK_ENABLED"} or name.startswith("TF_CLI_ARGS_"):
             assignments[name] = value
     return assignments
 
@@ -2231,6 +2247,8 @@ def env_split_args(args):
 
 def inspect_wrapper(command, args, assignments, cwd, depth, stdin, external):
     """子コマンドと env の一括出力を検査"""
+    if command == "sudo":
+        assignments.pop("OP_BIOMETRIC_UNLOCK_ENABLED", None)
     child, child_cwd = unwrap(command, args, cwd, assignments)
     if command == "env" and not child and not has_option(args, {"--help", "--version"}):
         deny("環境変数の一括出力は許可していません。")
@@ -2419,6 +2437,33 @@ def inspect_interpreter(language, args, cwd, depth, stdin, external):
         raise unsupported
 
 
+def inspect_op(args, assignments):
+    """秘密値を返さないサインインを検査"""
+    values = CLI_VALUE_OPTIONS["op"]
+    flags = {"--cache", "--debug", "--iso-timestamps", "--no-color"}
+    if has_option(args, {"--help", "-h", "--version"}, value_options=values):
+        return True
+    index = 0
+    while index < len(args) and args[index].startswith("-"):
+        option, separator, _ = args[index].partition("=")
+        if option in {"--help", "-h", "--version"}:
+            index += 1
+        elif option in values:
+            index += 1 if separator else 2
+        elif option in flags:
+            index += 1
+        else:
+            return False
+    if index >= len(args):
+        return False
+    subcommand, options = args[index], args[index + 1:]
+    if subcommand == "signin":
+        if assignments.get("OP_BIOMETRIC_UNLOCK_ENABLED") != "true" or has_option(options, {"--raw", "--force"}, "f", value_options=values, short_bool_values=True):
+            deny(SECRET_OUTPUT_REASON)
+        return True
+    return False
+
+
 def inspect_argv(argv, cwd, depth, stdin=None, external=False):
     """単純コマンドを検査（stdin は静的入力、external は未検査入力の有無）"""
     if depth > 32:
@@ -2445,6 +2490,8 @@ def inspect_argv(argv, cwd, depth, stdin=None, external=False):
         args = env_split_args(args)
     if command in WRAPPER_OPTIONS:
         inspect_wrapper(command, args, assignments, cwd, depth, stdin, external)
+        return
+    if command == "op" and inspect_op(args, assignments):
         return
     if command in {"terraform", "terragrunt"}:
         args = terraform_args(command, args, assignments)

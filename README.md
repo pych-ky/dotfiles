@@ -75,6 +75,8 @@ mise upgrade
 
 ## 設定の管理
 
+勤務先固有の情報・設定は公開側に置かず、必要なものだけ `dotfiles-private` で管理する。
+
 ### AI ツール共通の文章ルール
 
 - [共通本文](etc/ai-instructions/japanese-writing.md) を各ツールの常時適用される指示へ反映する

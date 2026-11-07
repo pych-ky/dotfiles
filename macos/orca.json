@@ -60,6 +60,7 @@
   "skipDeleteWorktreeConfirm": true,
   "sourceControlGroupOrder": "staged-first",
   "tabAutoGenerateTitle": true,
+  "terminalScopeHistoryByWorktree": false,
   "voice": {
     "sttModel": "parakeet-tdt-0.6b-v3-int8"
   },
