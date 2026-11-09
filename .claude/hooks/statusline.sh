@@ -309,7 +309,6 @@ main() {
   [[ -n "$model_name" ]] || model_name="$(toml_scalar "$codex_config" model)"
 
   local reasoning="${input_effort:-$settings_effort}"
-  [[ -n "$reasoning" ]] || reasoning="$(toml_scalar "$codex_config" model_reasoning_effort)"
   case "$reasoning" in
   '' | null | none) reasoning=default ;;
   esac
