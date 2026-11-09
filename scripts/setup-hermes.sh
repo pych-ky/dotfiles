@@ -60,7 +60,7 @@ set_hermes_config("security.protected_instruction_files", "true")
 set_hermes_config("security.allow_private_urls", "true")
 set_hermes_config("checkpoints.enabled", "true")
 
-set_hermes_config("hooks.pre_tool_call", '[{"command":"~/.hermes/hooks/pre-tool-guard.py","timeout":10,"fail_closed":true}]')
+set_hermes_config("hooks.pre_tool_call", '[{"command":"~/.hermes/hooks/pre-tool-guard.sh","timeout":10,"fail_closed":true}]')
 set_hermes_config("hooks_auto_accept", "false")
 set_hermes_config("mcp.auto_reload_on_config_change", "false")
 set_hermes_config("curator.enabled", "false")
