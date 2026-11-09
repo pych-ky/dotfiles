@@ -22,7 +22,9 @@ script_dir() {
 
 scanner="$(script_dir)/pre-bash-guard.py"
 
-command -v python3 >/dev/null 2>&1 || {
+# 作業場所の mise 設定に依存せず Python を選択
+python="$(mise -C "$HOME" which python3 2>/dev/null)" || python=python3
+command -v "$python" >/dev/null 2>&1 || {
   printf 'pre-bash-guard.sh: python3 is required but not installed\n' >&2
   exit 2
 }
@@ -31,7 +33,7 @@ command -v python3 >/dev/null 2>&1 || {
   exit 2
 }
 
-python3 -I "$scanner" "$@" || {
+"$python" -I "$scanner" "$@" || {
   scanner_status=$?
   if ((scanner_status != 2)); then
     printf 'pre-bash-guard.sh: scanner failed with status %s\n' \

@@ -136,7 +136,7 @@ mise upgrade
 - 設定: `./scripts/setup-hermes.sh` で適用する。変更はこのスクリプトに反映して再実行する
 - 共通規約: `~/.hermes/SOUL.md` は `.config/agents/AGENTS.md` へのリンクとし、リンク元で一元管理する。SOUL が自動注入されないサブエージェントには `prefill-messages.json` から読込を指示する
 - 認証: `hermes auth add openai-codex --type oauth --browser` で ChatGPT にログインする。既存 Codex / Claude Code の認証を自動共有しない
-- 実行ガード: 初回起動時・変更時に `.hermes/hooks/pre-tool-guard.py` の実行を承認し、`hermes hooks doctor` で確認する。未承認の hook は実行されない
+- 実行ガード: 初回起動時・変更時に `.hermes/hooks/pre-tool-guard.sh` の実行を承認し、`hermes hooks doctor` で確認する。未承認の hook は実行されない
 - デスクトップ操作: 通常のターミナルで `./scripts/setup-hermes-computer-use.sh` を実行し、macOS のアクセシビリティ・画面収録を許可する。権限要求が `/Applications/CuaDriver.app` を参照するため、Hermes PM と同じ署名付きアプリをそこにも配置する。`hermes update` 後も再実行する
 
 - 独自の記憶・委譲機能を維持するため標準の実行基盤を使う

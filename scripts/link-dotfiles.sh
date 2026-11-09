@@ -464,6 +464,7 @@ main() {
     ".copilot/settings.json"
     ".copilot/statusline.sh"
     ".hermes/hooks/pre-tool-guard.py"
+    ".hermes/hooks/pre-tool-guard.sh"
     ".hermes/prefill-messages.json"
   )
 

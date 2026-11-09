@@ -195,7 +195,10 @@ scan_pre_commit() {
 
 # 不正バイトによる照合漏れと awk の NUL 以後の切り捨てを防止
 normalize_push_text() {
-  python3 -c '
+  local python
+  # 作業場所の mise 設定に依存せず Python を選択
+  python="$(mise -C "$HOME" which python3 2>/dev/null)" || python=python3
+  "$python" -c '
 import sys
 
 for line in sys.stdin.buffer:
