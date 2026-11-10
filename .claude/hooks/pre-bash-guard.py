@@ -738,6 +738,22 @@ def inspect_cli(command, args, cwd):
         inspect_packages(command, args, cli_words(command, args, {"--prefix", "--userconfig", "--globalconfig", "--registry", "--loglevel", "-C"}))
 
 
+# Hermes の認証保存先
+HERMES_CREDENTIAL_FILES = (
+    ".anthropic_oauth.json", "auth.json", "auth.lock", "auth/google_oauth.json",
+    "cache/bws_cache.enc.json", "cache/bws_cache.json", "config.yaml", "webhook_subscriptions.json",
+)
+HERMES_CREDENTIAL_DIRECTORIES = ("backups/config", "browser-profile", "browser-profiles", "browser_profiles", "mcp-tokens", "vault")
+HERMES_ROOTS = {os.path.expanduser("~/.hermes")}
+HERMES_CREDENTIAL_PATTERN = re.compile(
+    r"(?:profiles/[^/]+/)?(?:"
+    + "|".join(re.escape(name) + r"(?:\.[^/]*)?" for name in HERMES_CREDENTIAL_FILES)
+    + "|" + "|".join(re.escape(name) + r"(?:/.*)?" for name in HERMES_CREDENTIAL_DIRECTORIES)
+    + r"|state-snapshots/[^/]+/(?:auth\.json|config\.yaml)(?:\.[^/]*)?"
+    + r"|backups/pre-(?:update|migration)-[^/]+\.zip)"
+)
+
+
 # ホームからの相対パス
 CREDENTIAL_LOCATIONS = (
     ".aws/credentials", ".aws/config", ".aws/login", ".aws/sso", ".aws/cli",
@@ -747,6 +763,10 @@ CREDENTIAL_LOCATIONS = (
     ".config/helm/repositories.yaml", ".config/helm/registry/config.json",
     "Library/Preferences/helm/repositories.yaml", "Library/Preferences/helm/registry/config.json",
     ".kube/config", ".codex/auth.json", ".codex/.credentials.json", ".codex/shell_snapshots",
+    "Library/Application Support/orca/codex-runtime-home/home/auth.json",
+    "Library/Application Support/orca/codex-runtime-home/system-default-auth.json",
+    "Library/Application Support/orca/codex-runtime-home/system-default-runtime-logout.json",
+    "Library/Application Support/orca/codex-runtime-home/shared-runtime-auth-provenance.json",
     ".claude/.credentials.json", ".claude/shell-snapshots", ".claude/backups",
     ".claude.json", ".claude.json.backup", ".terraform.d/credentials.tfrc.json",
     ".terraformrc", ".vault-token", ".azure", ".cargo/credentials.toml",
@@ -755,7 +775,7 @@ CREDENTIAL_LOCATIONS = (
     "Library/Application Support/pypoetry/auth.toml", ".config/pip/pip.conf",
     ".pip/pip.conf", "Library/Application Support/pip/pip.conf",
     ".zsh_sessions", ".bash_sessions", "Library/Keychains",
-)
+) + tuple(".hermes/" + name for name in HERMES_CREDENTIAL_FILES + HERMES_CREDENTIAL_DIRECTORIES)
 # ホーム外でも保護するパス断片
 CREDENTIAL_FRAGMENTS = tuple(path.casefold() for path in CREDENTIAL_LOCATIONS) + (
     "gh/hosts.yml", "gcloud/application_default_credentials.json", "gcloud/credentials.db",
@@ -789,12 +809,31 @@ def path_spellings(value, cwd):
     home = os.path.expanduser("~")
     # HOME は置換文字列として再解釈せず挿入
     value = re.sub(r"\$(?:HOME\b|\{HOME\})", lambda _match: home, value)
+    value = re.sub(r"\$(?:CODEX_HOME\b|\{CODEX_HOME\})", lambda _match: os.path.join(home, ".codex"), value)
     value = os.path.expanduser(value)
     if cwd is None and not os.path.isabs(value):
         # cwd 不明でも既知の秘密名を検査
         return {"./" + os.path.normpath(value).casefold()}
     path = value if os.path.isabs(value) else os.path.join(cwd, value)
     return {os.path.normpath(path).casefold(), os.path.realpath(path).casefold()}
+
+
+def hermes_relative_paths(path, cwd):
+    """Hermes の既定・実行時ホームからの相対パスを返す"""
+    return (
+        path[len(root) + 1:]
+        for value in HERMES_ROOTS
+        for root in path_spellings(value, cwd)
+        if path.startswith(root + "/")
+    )
+
+
+def hermes_credential_path(path, cwd):
+    """正規化済みパスの Hermes 認証保存先・スナップショットを判定"""
+    return bool(
+        re.fullmatch(r"hermes-snap-[^/]+\.sh(?:\.tmp\.[^/]+)?", os.path.basename(path))
+        or any(HERMES_CREDENTIAL_PATTERN.fullmatch(relative) for relative in hermes_relative_paths(path, cwd))
+    )
 
 
 def credential_path(value, cwd):
@@ -807,6 +846,8 @@ def credential_path(value, cwd):
     if re.match(r"[A-Za-z][A-Za-z0-9+.-]*://", value) and not value.startswith(("file://", "fileb://")):
         return False
     for path in path_spellings(value, cwd):
+        if hermes_credential_path(path, cwd):
+            return True
         parts = path.split("/")
         name = parts[-1]
         if any(part.startswith(".env") or part in {"secrets", "credentials"} for part in parts):
@@ -821,6 +862,7 @@ def credential_path(value, cwd):
         if not public_key and name.endswith((".pem", ".der")) and re.search(r"(?:^|[-_.])(?:key|priv|private|privkey|privatekey)(?:[-_.]|$)", name):
             return True
         normalized = re.sub(r"(?<=/)\.codex-account-[^/]+(?=/)", ".codex", path)
+        normalized = re.sub(r"(?<=/library/application support/orca/)codex-accounts/[^/]+(?=/home/)", "codex-runtime-home", normalized)
         for fragment in CREDENTIAL_FRAGMENTS:
             if fragment == ".ssh" and public_key:
                 continue
@@ -835,6 +877,17 @@ def path_exposes_credentials(value, cwd):
         return True
     if re.search(r"(?:^|/)\.codex-account-[^/]+/?$", value, re.IGNORECASE):
         return True
+    for path in path_spellings(value, cwd):
+        if re.search(r"/library/application support/orca/codex-accounts(?:/[^/]+(?:/home)?)?$", path):
+            return True
+        for relative in hermes_relative_paths(path, cwd):
+            if re.fullmatch(r"profiles(?:/[^/]+)?", relative):
+                return True
+            relative = re.sub(r"^profiles/[^/]+/", "", relative)
+            if re.fullmatch(r"state-snapshots(?:/[^/]+)?", relative):
+                return True
+            if any(name.startswith(relative + "/") for name in HERMES_CREDENTIAL_FILES + HERMES_CREDENTIAL_DIRECTORIES):
+                return True
     home = os.path.expanduser("~")
     protected = [os.path.join(home, path).casefold() for path in CREDENTIAL_LOCATIONS]
     protected.append("/library/keychains")
