@@ -12,7 +12,7 @@ sys.dont_write_bytecode = True
 
 
 def load_guard(cwd):
-    """共通ガードを読み込み、Hermes の認証保存先を保護対象へ追加"""
+    """共通ガードを読み込み、既定・実行時の Hermes ホームを保護対象へ追加"""
     source = Path(__file__).resolve().parents[2] / ".claude/hooks/pre-bash-guard.py"
     spec = importlib.util.spec_from_file_location("hermes_pre_bash_guard", source)
     guard = importlib.util.module_from_spec(spec)
@@ -23,53 +23,24 @@ def load_guard(cwd):
     for root in {str(Path.home() / ".hermes"), os.environ.get("HERMES_HOME", "")}:
         if root:
             roots.update(guard.path_spellings(root, cwd))
-    files = (
-        ".anthropic_oauth.json", "auth.json", "auth.lock", "auth/google_oauth.json",
-        "cache/bws_cache.enc.json", "cache/bws_cache.json", "config.yaml", "webhook_subscriptions.json",
+    guard.HERMES_ROOTS.update(roots)
+    guard.CREDENTIAL_LOCATIONS += tuple(
+        f"{root}/{name}"
+        for root in roots
+        for name in guard.HERMES_CREDENTIAL_FILES + guard.HERMES_CREDENTIAL_DIRECTORIES
     )
-    directories = ("backups/config", "browser-profile", "browser-profiles", "browser_profiles", "mcp-tokens", "vault")
-    locations = tuple(f"{root}/{name}" for root in roots for name in files + directories)
-    guard.CREDENTIAL_LOCATIONS += locations
     original_credential_path = guard.credential_path
-    original_path_exposes_credentials = guard.path_exposes_credentials
-    protected = re.compile(
-        r"(?:profiles/[^/]+/)?(?:"
-        + "|".join(re.escape(name) + r"(?:\.[^/]*)?" for name in files)
-        + "|" + "|".join(re.escape(name) + r"(?:/.*)?" for name in directories)
-        + r"|state-snapshots/[^/]+/(?:auth\.json|config\.yaml)(?:\.[^/]*)?"
-        + r"|backups/pre-(?:update|migration)-[^/]+\.zip)"
-    )
 
     def credential_path(value, directory):
-        """認証保存先・バックアップとシェルスナップショットを保護"""
+        """scheme 付きの値も Hermes 認証保存先・スナップショットを検査"""
         if original_credential_path(value, directory):
             return True
         return bool(value) and any(
-            re.fullmatch(r"hermes-snap-[^/]+\.sh(?:\.tmp\.[^/]+)?", os.path.basename(path))
-            or any(path.startswith(root + "/") and protected.fullmatch(path[len(root) + 1:]) for root in roots)
+            guard.hermes_credential_path(path, directory)
             for path in guard.path_spellings(value, directory)
         )
 
-    def path_exposes_credentials(value, directory):
-        """名前付きプロファイル・スナップショットの再帰検索も検査"""
-        if original_path_exposes_credentials(value, directory):
-            return True
-        for path in guard.path_spellings(value, directory):
-            for root in roots:
-                if not path.startswith(root + "/"):
-                    continue
-                relative = path[len(root) + 1:]
-                if re.fullmatch(r"profiles(?:/[^/]+)?", relative):
-                    return True
-                relative = re.sub(r"^profiles/[^/]+/", "", relative)
-                if re.fullmatch(r"state-snapshots(?:/[^/]+)?", relative):
-                    return True
-                if any(name.startswith(relative + "/") for name in files + directories):
-                    return True
-        return False
-
     guard.credential_path = credential_path
-    guard.path_exposes_credentials = path_exposes_credentials
     return guard
 
 
