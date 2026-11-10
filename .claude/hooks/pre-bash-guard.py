@@ -810,6 +810,7 @@ def path_spellings(value, cwd):
     # HOME は置換文字列として再解釈せず挿入
     value = re.sub(r"\$(?:HOME\b|\{HOME\})", lambda _match: home, value)
     value = re.sub(r"\$(?:CODEX_HOME\b|\{CODEX_HOME\})", lambda _match: os.path.join(home, ".codex"), value)
+    value = re.sub(r"\$(?:HERMES_HOME\b|\{HERMES_HOME\})", lambda _match: os.path.join(home, ".hermes"), value)
     value = os.path.expanduser(value)
     if cwd is None and not os.path.isabs(value):
         # cwd 不明でも既知の秘密名を検査
