@@ -2,6 +2,7 @@
 """Bash コマンドの静的検査"""
 
 import ast
+import bisect
 import json
 import os
 import re
@@ -1366,7 +1367,16 @@ def inspect_paths(command, args, cwd, reads_stdin=False):
 SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
 SEPARATORS = {";", "&", "&&", "||", "|", "|&", "(", ")", "{", "}", "\n", ";;", ";&", ";;&"}
 REDIRECTIONS = {"<", ">", ">>", "<>", ">|", "<<", "<<-", "<<<", "<&", ">&", "&>", "&>>"}
-OPERATORS = sorted(SEPARATORS | REDIRECTIONS, key=len, reverse=True)
+# { と } は語の位置で判定するため、文字列一致の演算子から除く
+OPERATORS = sorted((SEPARATORS - {"{", "}"}) | REDIRECTIONS, key=len, reverse=True)
+# ブレース展開で作る語数・文字数の上限
+BRACE_WORDS = 4096
+BRACE_CHARS = 1 << 20
+# 引用の位置の印（引数に現れない文字）
+QUOTE_MARK = "\0"
+# 単純コマンドの先頭に置ける予約語（time の -p・-- を含む）と、代入引数を受け取る宣言コマンド
+LEADING_WORDS = {"if", "then", "elif", "else", "while", "until", "do", "!", "time", "-p", "--"}
+DECLARATION_COMMANDS = {"export", "readonly", "declare", "typeset", "local"}
 ASSIGNMENT = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)(?:\[[^]]*\])?\+?=(.*)$", re.S)
 PARAMETER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 # 代入を拒否する実行設定変数
@@ -1397,6 +1407,7 @@ class Word:
     parameters: set = field(default_factory=set)
     quoted: bool = False
     substitutions: list = field(default_factory=list)
+    expansions: list = field(default_factory=list)
 
 
 def ansi_c_quote(text, index):
@@ -1620,22 +1631,212 @@ def group_end(text, start, opening, closing, heredocs=False):
     raise ParseError("unterminated shell expansion")
 
 
-def shell_tokens(text, literal=False):
-    """引用・演算子を区別し、変数値・関数・実行結果は推論しない"""
-    tokens, pending = [], []
-    value, parameters, substitutions = [], set(), []
-    quote, quoted, started = None, False, False
-    index = 0
+def brace_sequence(chars):
+    """{x..y[..step]} の要素（範囲でなければ None）"""
+    if not all(active for _, active in chars):
+        return None
+    body = "".join(char for char, _ in chars)
+    match = re.fullmatch(r"(-?\d+)\.\.(-?\d+)(?:\.\.(-?\d+))?", body)
+    if match:
+        start, end, letters = int(match[1]), int(match[2]), False
+        # 0 始まりの端点は桁をそろえる
+        width = max(len(match[1]), len(match[2])) if any(re.match(r"-?0\d", value) for value in match.groups()[:2]) else 0
+    else:
+        match = re.fullmatch(r"([A-Za-z])\.\.([A-Za-z])(?:\.\.(-?\d+))?", body)
+        if not match:
+            # 英字の組以外の1文字の組は zsh だけが範囲に展開し、bash は文字のまま残す
+            if re.fullmatch(r".\.\..", body, re.S):
+                raise ParseError("ambiguous brace expansion")
+            return None
+        start, end, letters, width = ord(match[1]), ord(match[2]), True, 0
+    step = abs(int(match[3] or 1)) or 1
+    if abs(end - start) // step + 1 > BRACE_WORDS:
+        raise ParseError("brace expansion limit exceeded")
+    direction = 1 if end >= start else -1
+    return [chr(number) if letters else str(number).zfill(width) for number in range(start, end + direction, step * direction)]
+
+
+def brace_expand(chars):
+    """引用外の {a,b}・{x..y} を bash の規則と順に展開（chars は文字と展開可否の組、上限超過は ParseError）"""
+    # 通常の括弧の対応・親と、各深さの最後の区切り（, と直後が } でない ..）を1回の走査で求める
+    pairs, parents, separators, stack, root_separators, root_closes = {}, {}, {}, [], [], []
+    for index, (char, active) in enumerate(chars):
+        if not active:
+            continue
+        if char == "{":
+            parents[index] = stack[-1] if stack else None
+            stack.append(index)
+        elif char == "}":
+            if stack:
+                pairs[stack.pop()] = index
+            else:
+                root_closes.append(index)
+        elif char == "," or char == "." and chars[index + 1:index + 2] == [(".", True)] and chars[index + 2:index + 3] != [("}", True)]:
+            if stack:
+                separators[stack[-1]] = index
+            else:
+                root_separators.append(index)
+    # zsh は引用・エスケープを除いた中身でも数列・1文字の範囲を展開するため、その形は止める
+    for start, close in pairs.items():
+        if close - start <= 64 and not all(active for _, active in chars[start + 1:close]):
+            if brace_sequence([(char, True) for char, _ in chars[start + 1:close] if char != QUOTE_MARK]):
+                raise ParseError("ambiguous brace expansion")
+    # bash は区切りより前の同じ深さの } を飛ばすため、区切りのない { は外側の深さで対応する } を探す（親から順に決まる）
+    follows, closes = {}, {}
+    for start, parent in parents.items():
+        if start not in pairs:
+            continue
+        if parent is None:
+            after = bisect.bisect_right(root_separators, pairs[start])
+            following = bisect.bisect_right(root_closes, root_separators[after]) if after < len(root_separators) else len(root_closes)
+            follows[start] = root_closes[following] if following < len(root_closes) else None
+        elif parent not in pairs:
+            follows[start] = None
+        else:
+            follows[start] = pairs[parent] if separators.get(parent, -1) > pairs[start] else follows[parent]
+        closes[start] = pairs[start] if start in separators else follows[start]
+    work = 0
+
+    def expand(start, end, word_limit, char_limit):
+        """chars[start:end] を展開した語（語数・文字数は上限まで）"""
+        nonlocal work
+        words, run, index, head = [""], [], start, start
+        while index < end:
+            char, active = chars[index]
+            close = closes.get(index) if active and char == "{" else None
+            # 語頭の {} は展開しない
+            if close is not None and index == head and chars[index + 1] == ("}", True):
+                close = None
+            if close is None or close >= end:
+                run.append(char)
+                index += 1
+                continue
+            work += close - index
+            if work > BRACE_CHARS:
+                raise ParseError("brace expansion limit exceeded")
+            # 同じ深さの , で分け、それぞれを展開する
+            options, size, bounds, level = [], 0, [index], 0
+            for position in range(index + 1, close):
+                item, enabled = chars[position]
+                if enabled and item == "{":
+                    level += 1
+                elif enabled and item == "}" and level:
+                    level -= 1
+                elif enabled and item == "," and not level:
+                    bounds.append(position)
+            if len(bounds) > 1:
+                for left, right in zip(bounds, bounds[1:] + [close]):
+                    # 子には、今の語と組み合わせても上限に収まる残りだけを渡す
+                    part = expand(left + 1, right, word_limit // len(words) - len(options), char_limit // len(words) - size)
+                    options.extend(part)
+                    size += sum(map(len, part))
+            else:
+                # 数列の本体は短いため、長い区間は切り出さない
+                options = brace_sequence(chars[index + 1:close]) if close - index <= 64 else None
+                if options is None and (
+                    any(item == "," or item == "{" and enabled for item, enabled in chars[index + 1:close])
+                    or ("{", True) in chars[close + 1:end]
+                ):
+                    # .. で閉じたが展開できない括弧の中に引用内・置換内などの , か引用外の { を含む形と、後ろに引用外の { が続く形は、
+                    # bash 3.2 が括弧と後ろを文字のまま残し、bash 5.3・zsh は展開するため止める
+                    raise ParseError("ambiguous brace expansion")
+                # 展開できない { … } は文字のまま残し、後ろだけを展開する
+                options = options or ["".join(item for item, _ in chars[index:close + 1])]
+            if len(options) == 1:
+                # 候補が1つなら語を複製せずに続ける
+                run.append(options[0])
+                index = head = close + 1
+                continue
+            prefix = "".join(run)
+            run.clear()
+            # 組み合わせを作る前に語数・文字数を見積もる
+            size = len(options) * sum(map(len, words)) + len(words) * (len(options) * len(prefix) + sum(map(len, options)))
+            if len(words) * len(options) > word_limit or size > char_limit:
+                raise ParseError("brace expansion limit exceeded")
+            words = [word + prefix + option for word in words for option in options]
+            index = head = close + 1
+        suffix = "".join(run)
+        if len(words) > word_limit or sum(map(len, words)) + len(words) * len(suffix) > char_limit:
+            raise ParseError("brace expansion limit exceeded")
+        return [word + suffix for word in words]
+
+    return expand(0, len(chars), BRACE_WORDS, BRACE_CHARS)
+
+
+def shell_tokens(text, literal=False, braces=False):
+    """引用・演算子を区別し、変数値・関数・実行結果は推論しない（braces はブレース展開を解釈）"""
+    tokens, pending, keywords, redirected = [], [], set(), set()
+    value, parameters, substitutions, active, quotes = [], set(), [], set(), set()
+    quote, quoted, started, conditional = None, False, False, False
+    index, produced, produced_chars = 0, 0, 0
 
     def flush():
-        """語の確定・heredoc 本文の予約"""
-        nonlocal value, parameters, substitutions, quoted, started
+        """語の確定・ブレース展開・heredoc 本文の予約"""
+        nonlocal value, parameters, substitutions, active, quotes, quoted, started, produced, produced_chars, conditional
         if started:
             word = Word("".join(value), parameters, quoted, substitutions)
             if tokens and tokens[-1] in ("<<", "<<-"):
                 pending.append((len(tokens), word.value, tokens[-1] == "<<-", quoted))
+            elif braces and any(value[position] == "{" for position in active):
+                chars = [
+                    item
+                    for position, chunk in enumerate(value + [""])
+                    for item in [(QUOTE_MARK, False)] * (position in quotes) + [(char, position in active) for char in chunk]
+                ]
+                word.expansions = [(item.replace(QUOTE_MARK, ""), QUOTE_MARK in item) for item in brace_expand(chars)]
+                produced += len(word.expansions)
+                produced_chars += sum(len(item) for item, _ in word.expansions)
+                if produced > BRACE_WORDS or produced_chars > BRACE_CHARS:
+                    raise ParseError("brace expansion limit exceeded")
+            # 予約語として認識されうる位置の語と、その位置の [[ に対応する ]]
+            name = plain(word)
+            if name == "]]" and conditional or not argument_position():
+                keywords.add(len(tokens))
+                conditional = name == "[[" if name in ("[[", "]]") else conditional
             tokens.append(word)
-        value, parameters, substitutions, quoted, started = [], set(), [], False, False
+        value, parameters, substitutions, active, quotes, quoted, started = [], set(), [], set(), set(), False, False
+
+    def plain(token):
+        """引用のない語の値（それ以外は None）"""
+        return token.value if isinstance(token, Word) and not token.quoted else None
+
+    def argument_position():
+        """直前の字句から、次の語が bash・zsh のグループになりえない引数の位置か判定"""
+        # 区切り・コマンド名より前のリダイレクト先（zsh の >! 系を含む）と、予約語の位置の予約語・代入・]]・always・nocorrect・function [名前]・coproc [名前]・repeat 回数・zsh の短い for・select の名前の後は zsh がグループにしうる
+        previous, operator = tokens[-1] if tokens else None, len(tokens) - 2
+        if operator > 0 and plain(tokens[operator]) == "!":
+            operator -= 1
+        if not isinstance(previous, Word):
+            return False
+        if operator >= 0 and isinstance(tokens[operator], str) and tokens[operator] in REDIRECTIONS:
+            # コマンド名の後のリダイレクト先の後は引数の位置
+            return operator in redirected
+        value = plain(previous) if len(tokens) - 1 in keywords else None
+        leading = plain(tokens[-2]) if len(tokens) - 2 in keywords else None
+        # time の -p・-- の後の {} はグループにならない
+        return not (
+            value in LEADING_WORDS - {"-p", "--"}
+            or value in {"]]", "always", "nocorrect", "function", "coproc"}
+            or value and ASSIGNMENT.match(value)
+            or leading in {"function", "coproc", "repeat", "for", "select"}
+        )
+
+    def command_start():
+        """区切りの後の語から、次の語が bash のコマンド位置か判定"""
+        # 予約語だけが並ぶ位置（遡るのは末尾の予約語だけ）
+        position = len(tokens)
+        while position and plain(tokens[position - 1]) in LEADING_WORDS:
+            position -= 1
+        if not position or not isinstance(tokens[position - 1], Word):
+            return not position or tokens[position - 1] in SEPARATORS
+        # function 名前・coproc [名前] の後（末尾の3語までを見る）
+        count = 0
+        while count < min(3, len(tokens)) and isinstance(tokens[-count - 1], Word):
+            count += 1
+        if count == 3 or count < len(tokens) and tokens[-count - 1] not in SEPARATORS:
+            return False
+        unit = [plain(token) for token in tokens[-count:]]
+        return unit[:1] == ["function"] and count == 2 or unit[:1] == ["coproc"]
 
     while index < len(text):
         char = text[index]
@@ -1647,6 +1848,7 @@ def shell_tokens(text, literal=False):
             index += 1
             continue
         if not literal and quote is None and text.startswith("$'", index):
+            quotes.add(len(value))
             decoded, index = ansi_c_quote(text, index + 2)
             value.append(decoded)
             quoted = started = True
@@ -1670,6 +1872,7 @@ def shell_tokens(text, literal=False):
                 quote = None
             elif quote is None:
                 quote = char
+                quotes.add(len(value))
             else:
                 value.append(char)
             quoted = started = True
@@ -1682,7 +1885,8 @@ def shell_tokens(text, literal=False):
             if end >= len(text):
                 raise ParseError("unterminated command substitution")
             substitutions.append(text[index + 1:end])
-            value.append("$()")
+            # 本文の , は bash 3.2 のブレース展開の判定に使うため印に残す
+            value.append("$(,)" if "," in text[index + 1:end] else "$()")
             started = True
             index = end + 1
             continue
@@ -1696,7 +1900,7 @@ def shell_tokens(text, literal=False):
                 parameters.update(PARAMETER.findall(body))
             else:
                 substitutions.append(body)
-            value.append("$()")
+            value.append("$(,)" if "," in body else "$()")
             started = True
             index = end + 1
             continue
@@ -1735,9 +1939,32 @@ def shell_tokens(text, literal=False):
                 flush()
                 index += 1
                 continue
+            if char in "{}":
+                following = text[index + 1:index + 2]
+                if braces:
+                    # bash の { } はコマンド位置の単独の語だけが予約語
+                    reserved = not started and (not following or following in " \t\r\n;&|()<>") and command_start()
+                elif char == "{" and following == "}" and (started or argument_position()):
+                    # 引数の位置の {}（find・xargs の置き場所）は語にし、ほかは zsh の空のグループも含めて区切る
+                    value.append("{}")
+                    started = True
+                    index += 2
+                    continue
+                else:
+                    reserved = True
+                if reserved:
+                    flush()
+                    tokens.append(char)
+                    index += 1
+                    continue
             operator = next((op for op in OPERATORS if text.startswith(op, index)), None)
             if operator:
+                # 引数の位置のリダイレクトを記録する（直前に付いた fd 番号はその語の前で判定）
+                glued = started and "".join(value).isdigit()
+                placed = glued and argument_position()
                 flush()
+                if operator in REDIRECTIONS and (placed or not glued and argument_position()):
+                    redirected.add(len(tokens))
                 tokens.append(operator)
                 index += len(operator)
                 if operator == "\n":
@@ -1753,6 +1980,8 @@ def shell_tokens(text, literal=False):
                         tokens[token_index] = Word(body, names, is_quoted, inner)
                     pending.clear()
                 continue
+            # 引用外の文字だけがブレース展開の構文になる
+            active.add(len(value))
         value.append(char)
         started = True
         index += 1
@@ -2629,7 +2858,7 @@ def changed_directory(argv, cwd):
     while argv and argv[0] in {"builtin", "command"}:
         argv, _ = unwrap(argv[0], argv[1:], cwd, {})
     directory_variables = {"HOME", "CDPATH", "OLDPWD", "PWD"}
-    if argv and argv[0] in {"export", "readonly", "declare", "typeset", "local"}:
+    if argv and argv[0] in DECLARATION_COMMANDS:
         assignments.extend(argv[1:])
     if (
         any(
@@ -2664,14 +2893,26 @@ def changed_directory(argv, cwd):
     return path if path is None or os.path.isdir(path) else cwd
 
 
+# ブレース展開を解釈する検査の途中か（入れ子の検査で重ねて起動しない）
+brace_pass = False
+
+
 def scan(text, cwd, depth=0, input_text=None, input_external=False):
     """cwd を追跡しながらシェルコードを検査"""
+    global brace_pass
     initial_cwd = cwd
     if depth > 32:
         raise ParseError("nested command limit exceeded")
     if UNKNOWN_ARGUMENT in text:
         raise UnsupportedSyntax("dynamic shell code")
-    tokens, nested = shell_tokens(text)
+    # { } を区切る検査（引数の位置の {} だけは語）に加え、ブレース展開後の引数列でも検査
+    if not brace_pass and ("{" in text or "}" in text):
+        brace_pass = True
+        try:
+            scan(text, cwd, depth, input_text, input_external)
+        finally:
+            brace_pass = False
+    tokens, nested = shell_tokens(text, braces=brace_pass)
     spelling = [token.value if isinstance(token, Word) and not token.quoted else token for token in tokens]
     bomb = [":", "(", ")", "{", ":", "|", ":", "&", "}"]
     if any(spelling[index:index + len(bomb)] == bomb for index in range(len(spelling))):
@@ -2708,8 +2949,8 @@ def scan(text, cwd, depth=0, input_text=None, input_external=False):
         # &&・| 直後の改行はコマンド列を継続
         if token == "\n" and not unit and continued:
             continue
-        argv, words, stdin, external = [], [], input_text, piped or input_external
-        index = 0
+        argv, kept, words, stdin, external = [], [], [], input_text, piped or input_external
+        index, command = 0, None
         while index < len(unit):
             item = unit[index]
             fd = None
@@ -2725,7 +2966,8 @@ def scan(text, cwd, depth=0, input_text=None, input_external=False):
                 words.append(operand)
                 input_fd = fd == 0 or fd is None and item.startswith("<")
                 if item in {"<", "<>"}:
-                    if credential_path(operand.value, cwd):
+                    # zsh はブレース展開した複数のファイルを読み込む
+                    if any(credential_path(value, cwd) for value, _ in operand.expansions or [(operand.value, True)]):
                         deny("認証情報ファイルを標準入力へ読み込むことは許可していません。")
                     if input_fd:
                         external = True
@@ -2734,16 +2976,29 @@ def scan(text, cwd, depth=0, input_text=None, input_external=False):
                         stdin, external = operand.value, False
                 elif item in {"<&", ">&"} and input_fd and operand.value != "-":
                     external = True
-                elif item in {">", ">>", ">|"} and re.match(r"^/dev/(?:disk|rdisk|sd|nvme)", operand.value):
+                elif item in {">", ">>", ">|"} and any(re.match(r"^/dev/(?:disk|rdisk|sd|nvme)", value) for value, _ in operand.expansions or [(operand.value, True)]):
                     deny("ディスクデバイスへの書き込みは許可していません。")
             elif isinstance(item, Word):
-                argv.append(item.value)
+                values = item.expansions or [(item.value, True)]
+                if item.expansions and ASSIGNMENT.match(item.value):
+                    # 先頭の代入語は展開せず、zsh は宣言コマンドの代入も展開しないため展開前の値も検査
+                    if command is None:
+                        values = [(item.value, True)]
+                    elif command in DECLARATION_COMMANDS:
+                        values = [(item.value, True), *values]
+                # bash は引用のない候補が空になると除き、zsh は残す
+                added = [value for value, quoted in values if value or quoted]
+                argv.extend(added)
+                if command is None:
+                    command = next((value for value in added if value not in LEADING_WORDS and not ASSIGNMENT.match(value)), None)
+                kept.extend(value for value, _ in values)
                 words.append(item)
             else:
                 raise ParseError("unsupported shell operator")
             index += 1
         while argv and argv[0] in {"if", "then", "elif", "else", "while", "until", "do", "!"}:
             argv.pop(0)
+            kept.pop(0)
         function_header = (
             token == "(" and len(argv) == 1
             and tokens[token_index + 1:token_index + 2] == [")"]
@@ -2758,7 +3013,8 @@ def scan(text, cwd, depth=0, input_text=None, input_external=False):
             deny("秘密値を持つ環境変数の明示展開は許可していません。")
         if argv and not function_header and argv[0] not in {"for", "select", "case", "in", "esac", "fi", "done", "function"}:
             try:
-                inspect_argv(argv.copy(), cwd, depth, stdin, external)
+                for variant in [argv] if kept == argv else [argv, kept]:
+                    inspect_argv(variant.copy(), cwd, depth, stdin, external)
                 if not piped and token not in {"|", "|&", "&"}:
                     cwd = changed_directory(argv, cwd)
             except UnsupportedSyntax:
