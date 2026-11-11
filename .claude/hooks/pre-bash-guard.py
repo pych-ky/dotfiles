@@ -872,8 +872,8 @@ def credential_path(value, cwd):
     return False
 
 
-def path_exposes_credentials(value, cwd):
-    """認証情報・保管先の親ディレクトリを判定"""
+def path_exposes_credentials(value, cwd, search=False):
+    """認証情報・保管先の親ディレクトリを判定（search は保管先以外の同名ディレクトリとホーム以上を除く）"""
     if credential_path(value, cwd):
         return True
     if re.search(r"(?:^|/)\.codex-account-[^/]+/?$", value, re.IGNORECASE):
@@ -898,12 +898,12 @@ def path_exposes_credentials(value, cwd):
         for parts in [fragment.split("/")]
         for index in range(1, len(parts))
     }
-    if any(path.endswith("/" + directory) for path in path_spellings(value, cwd) for directory in directories):
+    if not search and any(path.endswith("/" + directory) for path in path_spellings(value, cwd) for directory in directories):
         return True
     return any(
         target.startswith(path.rstrip("/") + "/")
         for path in path_spellings(value, cwd)
-        if os.path.isabs(path)
+        if os.path.isabs(path) and not (search and (home.casefold() + "/").startswith(path.rstrip("/") + "/"))
         for target in protected
     )
 
@@ -985,10 +985,10 @@ def git_metadata_only(operation, args):
     return names_only or (metadata and not patch)
 
 
-def check_path(value, cwd, recursive=False):
+def check_path(value, cwd, recursive=False, search=False):
     """認証情報のパスを拒否（recursive は保管先の親も対象）"""
-    predicate = path_exposes_credentials if recursive else credential_path
-    if predicate(value, cwd):
+    exposed = path_exposes_credentials(value, cwd, search) if recursive else credential_path(value, cwd)
+    if exposed:
         deny("認証情報ファイルの直接読み取り・持ち出しは許可していません。")
 
 
@@ -999,18 +999,34 @@ def check_path_values(values, options, cwd):
             check_path(value, cwd)
 
 
-def inspect_grep_paths(args, cwd):
-    """grep・rg の検索対象ファイルを検査"""
-    operands, values = path_arguments(args, {
+def inspect_grep_paths(command, args, cwd, reads_stdin):
+    """grep・rg の検索対象を検査（再帰検索と grep は保管先の親も対象）"""
+    value_options = {
         "-e", "--regexp", "-f", "--file", "-g", "--glob", "--iglob", "-t", "--type",
-        "-T", "--type-not", "-A", "-B", "-C", "-m", "--max-count", "--context",
-        "--color", "--colors", "--encoding", "--exclude", "--exclude-dir", "--include",
+        "--type-not", "-A", "-B", "-C", "-m", "--max-count",
+        "--colors", "--encoding", "--exclude", "--exclude-dir", "--include",
         "--ignore-file", "--exclude-from", "--replace", "--type-add", "--type-clear", "--max-depth",
-    })
+    }
+    # rg は -r・-d・-T 等が値を取り、grep は実装差のある -T・--color・--context を値なしとする（-d・-D は走査方法）
+    value_options |= {"-r", "-d", "-E", "-j", "-M", "-T", "--color", "--context"} if command == "rg" else {"-d", "--directories", "-D", "--devices"}
+    operands, values = path_arguments(args, value_options)
     check_path_values(values, {"-f", "--file", "--ignore-file", "--exclude-from"}, cwd)
     if not values.keys() & {"-e", "--regexp", "-f", "--file"}:
         operands = operands[1:]
-    return operands, cwd
+    if command == "rg":
+        recursive = not has_option(args, {"--files", "--type-list"}, value_options=value_options)
+    else:
+        # ugrep は -NUM・--depth でも再帰する
+        recursive = has_option(args, {"--recursive", "--dereference-recursive", "--depth"}, "rR", value_options) or (
+            "recurse" in values.get("-d", []) + values.get("--directories", [])
+        ) or any(re.fullmatch(r"-\d+", arg) for arg in args)
+    informational = has_option(args, {"--help", "--version", "-V"} | ({"-h"} if command == "rg" else set()), value_options=value_options)
+    # 値の誤認や ugrep の暗黙の再帰に備え、再帰検索と位置引数のない grep は cwd も検査（ヘルプ表示と、標準入力を読む rg・非再帰 grep を除く）
+    if not informational and ((recursive and not (command == "rg" and reads_stdin)) or (command != "rg" and not operands and not reads_stdin)):
+        operands = [*operands, "."]
+    # ugrep は -r なしでもディレクトリ直下を読むため、grep は常に保管先の親も対象
+    for operand in operands:
+        check_path(operand, cwd, recursive=recursive or command != "rg", search=True)
 
 
 def inspect_filter_paths(command, args, cwd):
@@ -1146,7 +1162,8 @@ def inspect_git_paths(args, cwd):
     if operation not in {"show", "diff", "diff-files", "diff-index", "diff-tree", "difftool", "log", "reflog", "grep", "archive", "cat-file", "blame", "annotate", "format-patch", "fast-export", "checkout-index", "whatchanged"}:
         return
     if operation == "grep":
-        inspect_paths("grep", args, cwd)
+        # git grep は位置引数がなければ作業ディレクトリ全体を検索する
+        inspect_paths("grep", ["--recursive", *args], cwd)
         return
     return operands, cwd
 
@@ -1305,12 +1322,16 @@ def inspect_container_paths(args, cwd):
         check_path(value.partition("=")[2], cwd, recursive=True)
 
 
-def inspect_paths(command, args, cwd):
+# ファイル本文を読まないコマンド
+NAME_ONLY_COMMANDS = {"echo", "printf", "test", "[", "[[", "ls", "stat", "touch", "mkdir", "chmod", "chown", "chgrp", "rm", "rmdir", "mv", "ln"}
+
+
+def inspect_paths(command, args, cwd, reads_stdin=False):
     """読み取り・送信するファイルの認証情報を検査"""
-    if command in {"echo", "printf", "test", "[", "[[", "ls", "stat", "touch", "mkdir", "chmod", "chown", "chgrp", "rm", "rmdir", "mv", "ln"}:
+    if command in NAME_ONLY_COMMANDS:
         return
     if command in {"grep", "egrep", "fgrep", "rg"}:
-        result = inspect_grep_paths(args, cwd)
+        result = inspect_grep_paths(command, args, cwd, reads_stdin)
     elif command in {"sed", "gsed", "awk", "gawk", "mawk", "nawk", "jq", "yq"}:
         result = inspect_filter_paths(command, args, cwd)
     elif command in {"cat", "head", "tail", "less", "more", "nl", "wc", "sort", "uniq", "cut", "paste", "od", "xxd", "hexdump", "strings", "base64", "base32", "md5", "md5sum", "sha1sum", "sha256sum", "shasum", "cksum", "file", "diff", "cmp", "comm"}:
@@ -2419,16 +2440,40 @@ def inspect_osascript(args, stdin):
             deny("AppleScript からのシェル起動は許可していません。")
 
 
+FIND_VALUE_OPTIONS = set("""
+    -D -name -iname -path -ipath -wholename -iwholename -regex -iregex -lname -ilname
+    -type -xtype -user -group -uid -gid -perm -size -mtime -mmin -atime -amin -ctime -cmin
+    -Btime -Bmin -used -newer -anewer -cnewer -Bnewer -samefile -inum -links -fstype
+    -maxdepth -mindepth -printf -fprint -fprint0 -fls -fprintf -regextype -context -flags
+""".split())
+
+
 def inspect_find(args, cwd, depth):
-    """-exec 系の子コマンドを検査"""
-    for index, arg in enumerate(args):
+    """-exec 系の子コマンドと、本文を読む場合の起点パスを検査"""
+    # bfs は式の後ろの起点も受け付けるため、子コマンドと述語の値以外の語と、値の誤認に備えて cwd を起点とする
+    roots, children, index = ["."], [], 0
+    while index < len(args):
+        arg = args[index]
+        index += 1
         if arg in {"-exec", "-execdir", "-ok", "-okdir"}:
-            end = index + 1
+            end = index
             while end < len(args) and args[end] not in {";", "+"}:
                 end += 1
             if end == len(args):
                 raise ParseError("unterminated find executor")
-            inspect_argv(args[index + 1:end], cwd, depth + 1)
+            children.append((arg, args[index:end]))
+            index = end + 1
+        elif arg in FIND_VALUE_OPTIONS or re.fullmatch(r"-newer[aBcmt]{2}", arg):
+            index += 2 if arg == "-fprintf" else 1
+        elif not arg.startswith(("-", "(", ")", "!", ",")):
+            roots.append(arg)
+    for executor, child in children:
+        # -execdir・-okdir は一致したディレクトリで実行するため、{} なしでも相対パスで読める
+        reads_matches = executor in {"-execdir", "-okdir"} or any("{}" in word for word in child)
+        if child and os.path.basename(child[0]).casefold() not in NAME_ONLY_COMMANDS and reads_matches:
+            for root in roots:
+                check_path(root, cwd, recursive=True, search=True)
+        inspect_argv(child, cwd, depth + 1)
 
 
 def inspect_submodule_foreach(args, cwd, depth):
@@ -2550,7 +2595,7 @@ def inspect_argv(argv, cwd, depth, stdin=None, external=False):
     if command in {"terraform", "terragrunt"}:
         args = terraform_args(command, args, assignments)
     inspect_cli(command, args, cwd)
-    inspect_paths(command, args, cwd)
+    inspect_paths(command, args, cwd, stdin is not None or external)
     if command in {"terraform", "terragrunt"} and "console" in cli_words(command, args) and stdin is not None:
         inspect_code("terraform", stdin, cwd, depth + 1)
     if command == "rm" and has_option(args, {"--recursive"}, "rR"):
