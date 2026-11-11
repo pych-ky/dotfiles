@@ -37,7 +37,7 @@ sudo が必要な設定:
   Codex: /etc/codex/config.toml へリンク（既存ファイル・別リンクとは競合）
   Claude: /Library/Application Support/ClaudeCode/managed-settings.json へコピー
 Claude managed 設定は dotfiles 設置分のみ更新し、外部変更は保持。
-~/.claude/settings.json は Playwright の Edge 接続先だけ更新。
+~/.claude/settings.json は Playwright MCP の設定だけ更新。
 コピーの理由・設定の使い分けは README.md を参照。
 
 オプション:
@@ -273,12 +273,13 @@ link_codex_system_config() {
   report_link "$target" "$source"
 }
 
-# Claude の Playwright 接続先を Edge に設定
+# Claude のユーザー設定へ Playwright MCP の設定を反映
 configure_claude_browser() {
   local source="$repo_dir/etc/claude-code/settings.json"
   local user_settings="$HOME/.claude/settings.json"
-  local endpoint input_file="$user_settings" temporary_settings physical_repo_dir
-  endpoint="$(jq -er '.env.PLAYWRIGHT_MCP_CDP_ENDPOINT' "$source")" || return
+  local playwright_env input_file="$user_settings" temporary_settings physical_repo_dir
+  playwright_env="$(jq -ce '.env | with_entries(select(.key | startswith("PLAYWRIGHT_MCP_"))) |
+    select(length > 0)' "$source")" || return
 
   if [[ -L "$user_settings" && (-f "$user_settings" || ! -e "$user_settings") ]]; then
     physical_repo_dir="$(cd "$repo_dir" && pwd -P)" || return
@@ -286,7 +287,7 @@ configure_claude_browser() {
     "$physical_repo_dir"/*)
       input_file=/dev/null
       if ((dry_run)); then
-        printf 'info: would replace obsolete link with Playwright Edge settings: %s\n' "$user_settings"
+        printf 'info: would replace obsolete link with Playwright MCP settings: %s\n' "$user_settings"
         return 0
       fi
       ;;
@@ -304,21 +305,22 @@ configure_claude_browser() {
       printf 'error: Claude user settings must contain one JSON object with an optional env object: %s\n' "$user_settings" >&2
       return 1
     fi
-    if jq -e --arg endpoint "$endpoint" \
-      '.env.PLAYWRIGHT_MCP_CDP_ENDPOINT == $endpoint' "$input_file" >/dev/null; then
+    if jq -e --argjson playwright "$playwright_env" \
+      '.env as $env | all($playwright | to_entries[]; $env[.key] == .value)' \
+      "$input_file" >/dev/null; then
       return 0
     fi
   fi
   if ((dry_run)); then
-    printf 'info: would configure Playwright Edge connection: %s\n' "$user_settings"
+    printf 'info: would configure Playwright MCP settings: %s\n' "$user_settings"
     return 0
   fi
 
   mkdir -p "$(dirname "$user_settings")" || return
   [[ -f "$input_file" ]] || input_file=/dev/null
   temporary_settings="$(mktemp "$user_settings.XXXXXX")" || return
-  if ! jq -s --arg endpoint "$endpoint" \
-    '(if length == 0 then {} else .[0] end) | .env.PLAYWRIGHT_MCP_CDP_ENDPOINT = $endpoint' \
+  if ! jq -s --argjson playwright "$playwright_env" \
+    '(if length == 0 then {} else .[0] end) | .env += $playwright' \
     "$input_file" >"$temporary_settings"; then
     rm -f -- "$temporary_settings"
     return 1
@@ -327,7 +329,7 @@ configure_claude_browser() {
     rm -f -- "$temporary_settings"
     return 1
   fi
-  printf 'changed: configured Playwright Edge connection: %s\n' "$user_settings"
+  printf 'changed: configured Playwright MCP settings: %s\n' "$user_settings"
 }
 
 # dotfiles 由来の managed 設定だけ更新

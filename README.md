@@ -106,7 +106,7 @@ mise upgrade
 
 - 端末・Orca ペイン: `claude` 関数の `--settings` で共通設定を使用。素の起動は `command claude`
 - IDE 拡張・Desktop: `/Library/Application Support/ClaudeCode/managed-settings.json` に配置するが、組織配布が優先。dotfiles 設置分のみ更新し、外部からの変更は保持
-- `~/.claude/settings.json`: Git 管理外のユーザー設定（Orca フック・プラグイン・`/model`）。セットアップは Playwright の Edge 接続先だけ反映
+- `~/.claude/settings.json`: Git 管理外のユーザー設定（Orca フック・プラグイン・`/model`）。セットアップは Playwright MCP の設定だけ反映
 
 - プロジェクトの `.claude/settings.local.json` は保持する
 - Orca は設定を同期するため専用ファイルを dotfiles へリンクせず、共通設定を重複させない
@@ -118,7 +118,7 @@ mise upgrade
 - `./scripts/setup-codex.sh` で通常アプリ・Orca runtime のモデル保存値を `etc/codex/config.toml` の既定値へ揃える
 
 - 対話シェル: `--profile cli`。シェル関数を経由しない通常 CLI には `--no-daemon --profile cli` を付ける
-- Orca: `--profile orca`。起動引数の Sol / Ultra により、セッション中のモデル切替は新規起動に持ち越さない
+- Orca: `--profile orca`。起動引数の Sol / Xhigh により、セッション中のモデル切替は新規起動に持ち越さない
 - プロファイル保存先: 起動時の `CODEX_HOME` 配下の同名 `.config.toml`
 - 共通の既定モデル: Codex 画面・Chrome / Edge 拡張は `~/.codex/config.toml` を共有。Orca の通常の `config.toml` も同ファイルと同期するため、Orca 専用設定には使わない
 

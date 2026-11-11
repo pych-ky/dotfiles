@@ -56,7 +56,6 @@ brew "herdr"
 
 ### クラウド / IaC / ポリシー / Kubernetes
 
-brew "azure-cli"
 cask "gcloud-cli"
 brew "helm"
 brew "opa"
