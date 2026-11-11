@@ -5,10 +5,10 @@
 
 ## コア設定
 
-model        = "gpt-6.1-sol"
+model        = "gpt-6.1-terra"
 review_model = "gpt-6.1-sol"
 
-model_reasoning_effort  = "ultra"
+model_reasoning_effort  = "xhigh"
 model_reasoning_summary = "auto"
 hide_agent_reasoning    = true  # codex exec の出力のみ
 
