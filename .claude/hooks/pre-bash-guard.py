@@ -757,7 +757,7 @@ HERMES_CREDENTIAL_PATTERN = re.compile(
 
 # ホームからの相対パス
 CREDENTIAL_LOCATIONS = (
-    ".aws/credentials", ".aws/config", ".aws/login", ".aws/sso", ".aws/cli",
+    ".aws/credentials", ".aws/login", ".aws/sso", ".aws/cli",
     ".ssh", ".gnupg", ".docker/config.json", ".config/gh/hosts.yml",
     ".config/gcloud", ".config/containers/auth.json", ".local/share/uv/credentials",
     ".ocm.json", ".config/ocm/ocm.json", "Library/Application Support/ocm/ocm.json",
@@ -789,7 +789,7 @@ CREDENTIAL_NAMES = set("""
 """.split())
 CREDENTIAL_SUFFIXES = (".p12", ".pfx", ".p8", ".ppk", ".key", ".keystore", ".jks", ".kdbx")
 CREDENTIAL_PATH_VARIABLES = set("""
-    AWS_CONFIG_FILE AWS_SHARED_CREDENTIALS_FILE KUBECONFIG GH_CONFIG_DIR
+    AWS_SHARED_CREDENTIALS_FILE KUBECONFIG GH_CONFIG_DIR
     GOOGLE_APPLICATION_CREDENTIALS GOOGLE_CREDENTIALS CLOUDSDK_CONFIG
     DOCKER_CONFIG REGISTRY_AUTH_FILE TF_CLI_CONFIG_FILE OCM_CONFIG
     HELM_REPOSITORY_CONFIG HELM_REGISTRY_CONFIG PGPASSFILE PGSERVICEFILE
