@@ -748,9 +748,9 @@ HERMES_CREDENTIAL_DIRECTORIES = ("backups/config", "browser-profile", "browser-p
 HERMES_ROOTS = {os.path.expanduser("~/.hermes")}
 HERMES_CREDENTIAL_PATTERN = re.compile(
     r"(?:profiles/[^/]+/)?(?:"
-    + "|".join(re.escape(name) + r"(?:\.[^/]*)?" for name in HERMES_CREDENTIAL_FILES)
+    + "|".join(re.escape(name) + r"[^/]*" for name in HERMES_CREDENTIAL_FILES)
     + "|" + "|".join(re.escape(name) + r"(?:/.*)?" for name in HERMES_CREDENTIAL_DIRECTORIES)
-    + r"|state-snapshots/[^/]+/(?:auth\.json|config\.yaml)(?:\.[^/]*)?"
+    + r"|state-snapshots/[^/]+/(?:auth\.json|config\.yaml)[^/]*"
     + r"|backups/pre-(?:update|migration)-[^/]+\.zip)"
 )
 
@@ -782,6 +782,12 @@ CREDENTIAL_FRAGMENTS = tuple(path.casefold() for path in CREDENTIAL_LOCATIONS) +
     "gh/hosts.yml", "gcloud/application_default_credentials.json", "gcloud/credentials.db",
     "gcloud/access_tokens.db", "ocm/ocm.json", "helm/repositories.yaml",
     "helm/registry/config.json", "uv/credentials", "cargo/credentials.toml", "composer/auth.json",
+)
+# バックアップなどの派生名も保護するパス断片
+CREDENTIAL_PREFIX_FRAGMENTS = (
+    ".aws/credentials", ".kube/config", "gh/hosts.yml", "gcloud/application_default_credentials.json",
+    "gcloud/credentials.db", "gcloud/access_tokens.db", "ocm/ocm.json", "helm/repositories.yaml",
+    "helm/registry/config.json", "uv/credentials",
 )
 CREDENTIAL_NAMES = set("""
     .git-credentials .netrc .pgpass .pg_service.conf pg_service.conf
@@ -856,12 +862,12 @@ def credential_path(value, cwd):
             return True
         if name in CREDENTIAL_NAMES or ".tfstate" in name or name.endswith(CREDENTIAL_SUFFIXES):
             return True
-        if name.endswith(".json") and re.search(r"(?:^|[-_.])(?:service[-_]account|client[-_]secret)(?:[-_.]|$)", name):
+        if name.endswith(".json") and re.search(r"service[-_]account|client[-_]secret|application_default_credentials", name):
             return True
         if not name.endswith(".pub") and name.startswith(("id_rsa", "id_dsa", "id_ecdsa", "id_ed25519")):
             return True
         public_key = name.endswith((".pub", ".crt", ".cer")) or bool(re.search(r"(?:^|[-_.])public(?:[-_.]|$)", name))
-        if not public_key and name.endswith((".pem", ".der")) and re.search(r"(?:^|[-_.])(?:key|priv|private|privkey|privatekey)(?:[-_.]|$)", name):
+        if not public_key and name.endswith((".pem", ".der")) and re.search(r"(?:^|[-_.])(?:key|priv|private)(?:[-_.]|$)|priv(?:ate)?[-_]?key", name):
             return True
         normalized = re.sub(r"(?<=/)\.codex-account-[^/]+(?=/)", ".codex", path)
         normalized = re.sub(r"(?<=/library/application support/orca/)codex-accounts/[^/]+(?=/home/)", "codex-runtime-home", normalized)
@@ -870,6 +876,8 @@ def credential_path(value, cwd):
                 continue
             if "/" + fragment + "/" in normalized + "/":
                 return True
+        if any("/" + fragment in normalized for fragment in CREDENTIAL_PREFIX_FRAGMENTS):
+            return True
     return False
 
 
