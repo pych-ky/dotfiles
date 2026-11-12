@@ -88,6 +88,7 @@ cask "stablyai/orca/orca"
 
 ### コミュニケーション / コラボレーション
 
+cask "granola"
 cask "notion"
 # cask "slack"
 
