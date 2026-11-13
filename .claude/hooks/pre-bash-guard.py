@@ -3,6 +3,7 @@
 
 import ast
 import bisect
+import getopt
 import json
 import os
 import re
@@ -47,11 +48,11 @@ CLI_VALUE_OPTIONS = {
         "aws": "--ca-bundle --cli-binary-format --cli-connect-timeout --cli-error-format --cli-input-json --cli-input-yaml --cli-read-timeout --color --endpoint-url --output --profile --query --region",
         "az": "--name --output --query --resource-group --subscription --vault-name -g -n -o",
         "docker": "--config --context --filter --format --host --log-level --tlscacert --tlscert --tlskey -H -f",
-        "gcloud": "--account --configuration --format --impersonate-service-account --project",
+        "gcloud": "--access-token-file --account --assert --authority-selector --authorization-token-file --billing-project --configuration --credential-file-override --flags-file --flatten --format --http-timeout --impersonate-service-account --project --trace-token --universe-domain --verbosity",
         "gh": "--config --host --hostname --repo -R",
         "ghtkn": "--config --log-level -c",
-        "git": "--config --config-env --exec-path --git-dir --namespace --super-prefix --work-tree -C -c",
-        "kubectl": "--as --as-group --cache-dir --certificate-authority --client-certificate --client-key --cluster --context --field-selector --kubeconfig --namespace --output --password --request-timeout --selector --server --token --user --username -l -n -o -s -v",
+        "git": "--attr-source --config --config-env --exec-path --git-dir --namespace --shallow-file --super-prefix --work-tree -C -c",
+        "kubectl": "--as --as-group --as-uid --as-user-extra --cache-dir --certificate-authority --client-certificate --client-key --cluster --context --field-selector --kubeconfig --kuberc --log-flush-frequency --loglevel --namespace --output --password --profile --profile-output --request-timeout --selector --server --template --tls-server-name --token --user --username --v --vmodule -l -n -o -s -v",
         "npm": "--cache --call --editor --location --message --otp --tag --workspace -L -c -m -w",
         "op": "--account --config --encoding --env-file --environment --format --session --vault",
         "pnpm": "--dir --filter --reporter -F",
@@ -78,8 +79,19 @@ PACKAGE_CONFIG_ALIASES = {
 }
 
 SECRET_SUBCOMMANDS = {
-    "az": {"account get-access-token", "acr credential show", "ad app credential reset", "ad sp credential reset", "keyvault secret download", "keyvault secret show", "storage account generate-sas", "storage account keys list", "storage account keys renew"},
-    "gcloud": {"auth application-default print-access-token", "auth print-access-token", "auth print-identity-token", "iam service-accounts keys create", "secrets versions access", "sql generate-login-token"},
+    "az": {
+        "account get-access-token", "acr credential show", "ad app credential reset", "ad sp credential reset", "keyvault secret download",
+        "keyvault secret show", "storage account generate-sas", "storage account keys list", "storage account keys renew",
+        "storage account show-connection-string", "storage blob generate-sas", "storage container generate-sas", "storage file generate-sas",
+        "storage fs directory generate-sas", "storage fs file generate-sas", "storage fs generate-sas", "storage queue generate-sas",
+        "storage share generate-sas", "storage table generate-sas",
+    },
+    "gcloud": {
+        "auth application-default print-access-token", "auth describe", "auth docker-helper", "auth git-helper", "auth print-access-token",
+        "auth print-identity-token", "auth print-refresh-token", "config config-helper", "iam service-accounts keys create",
+        "iam service-accounts sign-jwt", "kms asymmetric-decrypt", "kms decapsulate", "kms decrypt", "kms raw-decrypt",
+        "secrets versions access", "sql generate-login-token", "storage hmac create", "storage sign-url",
+    },
     "ghtkn": {"exec", "get", "git-credential"},
     "op": {"connect token create", "document get", "inject", "item get", "plugin run", "read", "run", "service-account create", "signin"},
     "uv": {"auth helper", "auth token"},
@@ -371,9 +383,11 @@ def inspect_git(args, words, cwd):
         scan(value, cwd)
     if any(argument.startswith("--exec-path=") for argument in args):
         deny(EXEC_OVERRIDE_REASON)
-    if has_option(args, {"--help", "-h"}):
+    if has_option(args, {"--help", "-h"}, value_options=CLI_VALUE_OPTIONS["git"]):
         return
     if matches_subcommand(words, {"credential fill"}) or (words and words[0].startswith("credential-")):
+        deny(SECRET_OUTPUT_REASON)
+    if words[:1] == ["var"] and has_option(args, set(), "l", CLI_VALUE_OPTIONS["git"]):
         deny(SECRET_OUTPUT_REASON)
     if words[:1] == ["config"]:
         config_words = cli_words("git", args, {"--file", "-f", "--blob", "--type", "-t", "--default", "--comment", "--value", "--url"})[1:]
@@ -532,7 +546,8 @@ def inspect_terraform(args, words, cwd):
 
 def inspect_kubernetes(command, args, words):
     """Secret・トークン・kubeconfig の出力を検査"""
-    if has_option(args, {"--help", "-h"}):
+    value_options = CLI_VALUE_OPTIONS[command]
+    if has_option(args, {"--help", "-h"}, value_options=value_options):
         return
     if matches_subcommand(words, {"create token", "serviceaccounts new-token", "serviceaccounts create-kubeconfig"}):
         deny(SECRET_OUTPUT_REASON)
@@ -540,7 +555,7 @@ def inspect_kubernetes(command, args, words):
         resources = words[1].casefold().split(",")
         if any(resource.split("/", 1)[0].split(".", 1)[0] in {"secret", "secrets"} for resource in resources):
             deny(SECRET_OUTPUT_REASON)
-    if words[:2] == ["config", "view"] and has_option(args, {"--raw"}):
+    if words[:2] == ["config", "view"] and has_option(args, {"--raw", "--flatten"}, value_options=value_options):
         deny(SECRET_OUTPUT_REASON)
     if words[:1] == ["get"] and any(re.search(r"/secrets(?:[/?]|$)", value) for value in option_values(args, {"--raw"})):
         deny(SECRET_OUTPUT_REASON)
@@ -548,6 +563,36 @@ def inspect_kubernetes(command, args, words):
         deny(SECRET_OUTPUT_REASON)
     if command == "oc" and words[:2] == ["registry", "login"] and has_option(args, {"--to", "--registry-config", "-a"}):
         deny(SECRET_OUTPUT_REASON)
+
+
+def inspect_gsutil(args):
+    """大域オプションを gsutil と同じ getopt 定義で読み、署名 URL・HMAC キーの発行と認証情報を含むデバッグ出力を検査"""
+    try:
+        options, words = getopt.getopt(args, "dDvo:?h:i:u:mq", [
+            "debug", "detailedDebug", "version", "option", "help", "header", "impersonate-service-account=",
+            "multithreaded", "quiet", "testexceptiontraces", "trace-token=", "perf-trace-token=",
+        ])
+    except getopt.GetoptError:
+        return
+    flags = {name for name, _ in options}
+    if flags & {"-?", "--help"}:
+        return
+    # デバッグ指定はサブコマンドの help への切り替えより先に設定値を出す
+    if flags & {"-d", "-D", "--debug", "--detailedDebug"}:
+        deny(SECRET_OUTPUT_REASON)
+    # -v・--version はコマンドを version に置き換える
+    if flags & {"-v", "--version"} or "--help" in words:
+        return
+    if words[:1] in (["signurl"], ["signedurl"], ["queryauth"]):
+        deny(SECRET_OUTPUT_REASON)
+    if words[:1] == ["hmac"]:
+        # hmac は自身のオプションを読んだあとで操作名を取り出す
+        try:
+            action = getopt.getopt(words[1:], "ae:lp:s:u:")[1][:1]
+        except getopt.GetoptError:
+            return
+        if action == ["create"]:
+            deny(SECRET_OUTPUT_REASON)
 
 
 def safe_container_format(value):
@@ -665,6 +710,9 @@ def inspect_packages(command, args, words):
 
 def inspect_cli(command, args, cwd):
     """秘密出力・実行設定の差し替え・破壊操作を検査"""
+    if command in {"kubectl", "oc"}:
+        # pflag はオプション名の _ を - とみなす
+        args = [re.sub(r"^--[^=]+", lambda match: match.group().replace("_", "-"), argument) for argument in args]
     words = cli_words(command, args)
     if command.startswith(("docker-credential-", "git-credential-")):
         deny(SECRET_OUTPUT_REASON)
@@ -680,6 +728,8 @@ def inspect_cli(command, args, cwd):
         inspect_terraform(args, words, cwd)
     elif command in {"kubectl", "oc"}:
         inspect_kubernetes(command, args, words)
+    elif command == "gsutil":
+        inspect_gsutil(args)
     elif command == "docker":
         inspect_container(args, words)
     elif command in {"printenv", "set", "export", "declare", "typeset"}:
