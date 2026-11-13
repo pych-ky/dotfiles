@@ -782,6 +782,7 @@ CREDENTIAL_FRAGMENTS = tuple(path.casefold() for path in CREDENTIAL_LOCATIONS) +
     "gh/hosts.yml", "gcloud/application_default_credentials.json", "gcloud/credentials.db",
     "gcloud/access_tokens.db", "ocm/ocm.json", "helm/repositories.yaml",
     "helm/registry/config.json", "uv/credentials", "cargo/credentials.toml", "composer/auth.json",
+    "containers/auth.json", "pypoetry/auth.toml",
 )
 # バックアップなどの派生名も保護するパス断片
 CREDENTIAL_PREFIX_FRAGMENTS = (
