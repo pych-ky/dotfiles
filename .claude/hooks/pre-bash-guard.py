@@ -63,7 +63,7 @@ CLI_VALUE_OPTIONS = {
         "vault": "-address -ca-cert -field -format -mount -namespace",
     }.items()
 }
-CLI_VALUE_OPTIONS["oc"] = CLI_VALUE_OPTIONS["kubectl"]
+CLI_VALUE_OPTIONS["oc"] = CLI_VALUE_OPTIONS["kubectl"] | {"--keys", "--to"}
 # nopt の String 値は、先頭が - なら次のオプション扱い
 CLI_STRING_OPTIONS = {
     "npm": {"--call", "--editor", "--message", "--tag", "-c", "-m"},
@@ -503,6 +503,9 @@ def inspect_git(args, words, cwd):
             deny(SECRET_OUTPUT_REASON)
         if not reads and not removes and any(git_exec_key(key) for key in operands):
             deny(EXEC_OVERRIDE_REASON)
+        # global・system の hooksPath を外すと、全リポジトリで秘密検査のフックが止まる
+        if removes and (has_option(options, {"--global", "--system"}) or option_values(options, {"--file", "-f"})) and operands and operands[0].casefold() in {"core.hookspath", "core"}:
+            deny(EXEC_OVERRIDE_REASON)
         if not reads and not removes and len(operands) > 1:
             key, value = operands[:2]
             if key.casefold() in GIT_COMMAND_KEYS:
@@ -602,7 +605,11 @@ def inspect_aws(args, words):
 
 def inspect_gh(args, words, cwd):
     """トークン出力・API・子コマンドを検査"""
-    if has_option(args, {"--help", "-h"}) or words[:1] == ["help"]:
+    # auth・config の -h はホスト名の指定
+    hostname = words[:1] in (["auth"], ["config"])
+    if hostname:
+        words = cli_words("gh", args, {"-h"})
+    if has_option(args, {"--help"} if hostname else {"--help", "-h"}) or words[:1] == ["help"]:
         return
     if matches_subcommand(words, {"auth token", "auth git-credential"}):
         deny(SECRET_OUTPUT_REASON)
@@ -644,9 +651,11 @@ def inspect_kubernetes(command, args, words):
     value_options = CLI_VALUE_OPTIONS[command]
     if has_option(args, {"--help", "-h"}, value_options=value_options):
         return
-    if matches_subcommand(words, {"create token", "serviceaccounts new-token", "serviceaccounts create-kubeconfig"}):
+    if words[:1] == ["sa"]:
+        words = ["serviceaccounts", *words[1:]]
+    if matches_subcommand(words, {"create token", "serviceaccounts new-token", "serviceaccounts get-token", "serviceaccounts create-kubeconfig"}):
         deny(SECRET_OUTPUT_REASON)
-    if words[:1] in (["get"], ["describe"]) and len(words) > 1:
+    if words[:1] in (["get"], ["describe"], ["extract"]) and len(words) > 1:
         resources = words[1].casefold().split(",")
         if any(resource.split("/", 1)[0].split(".", 1)[0] in {"secret", "secrets"} for resource in resources):
             deny(SECRET_OUTPUT_REASON)
@@ -867,8 +876,14 @@ def inspect_cli(command, args, cwd):
         deny(EXEC_OVERRIDE_REASON)
     elif command == "rsync" and has_option(args, {"--password-file"}):
         deny(SECRET_OUTPUT_REASON)
-    elif command == "diskutil" and words and words[0].casefold() in {"erasedisk", "erasevolume", "partitiondisk", "zerodisk", "randomdisk", "secureerase"}:
-        deny(DESTRUCTIVE_REASON)
+    elif command == "diskutil" and words:
+        # quiet は出力を抑える前置き、ap は apfs の略記
+        verbs = [word.casefold() for word in (words[1:] if words[0] == "quiet" else words)]
+        if verbs and (
+            verbs[0] in {"erasedisk", "erasevolume", "partitiondisk", "zerodisk", "randomdisk", "secureerase", "reformat"}
+            or verbs[0] in {"apfs", "ap"} and len(verbs) > 1 and verbs[1] in {"erasevolume", "deletecontainer", "deletevolume", "deletevolumegroup"}
+        ):
+            deny(DESTRUCTIVE_REASON)
     elif command.startswith("mkfs") or command in {"newfs", "newfs_apfs", "newfs_hfs"}:
         if not has_option(args, {"--help", "--version", "-h"}):
             deny(DESTRUCTIVE_REASON)
