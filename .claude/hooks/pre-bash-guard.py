@@ -360,10 +360,104 @@ def git_alias_directory(args, cwd):
     return directory
 
 
+def git_split_cmdline(text):
+    """alias の値を git と同じ規則で分割（閉じない引用・末尾の \\ は None）"""
+    words, word, quote, index = [], "", None, 0
+    while index < len(text):
+        char = text[index]
+        if not quote and char in " \t\n\r":
+            words.append(word)
+            word = ""
+            while index + 1 < len(text) and text[index + 1] in " \t\n\r":
+                index += 1
+        elif not quote and char in "'\"":
+            quote = char
+        elif char == quote:
+            quote = None
+        else:
+            if char == "\\" and quote != "'":
+                index += 1
+                if index == len(text):
+                    return None
+                char = text[index]
+            word += char
+        index += 1
+    return None if quote else words + [word]
+
+
+def git_alias_expansions(args):
+    """-c で定義した alias を git と同じ順に1段ずつ展開した引数の列"""
+    stages, seen = [], set()
+    while (index := git_command_context(args, None)[0]) < len(args):
+        name, value = args[index], None
+        for setting in option_values(args[:index], {"-c", "--config"}):
+            key, separator, content = setting.partition("=")
+            section, _, rest = key.partition(".")
+            subsection, dot, variable = rest.rpartition(".")
+            # [alias "名前"] の command だけは名前の大文字・小文字を区別し、ほかはキーの残り全体が名前
+            if separator and section.casefold() == "alias" and (
+                subsection == name if dot and variable.casefold() == "command" else rest.casefold() == name.casefold()
+            ):
+                value = content
+        words = None if value is None or value.startswith("!") else git_split_cmdline(value)
+        # git は循環した alias と分割できない値を展開しない
+        if words is None or name in seen:
+            break
+        seen.add(name)
+        args = args[:index] + words + args[index + 1:]
+        stages.append(args)
+        # 段数は入れ子のコマンドと同じ上限にし、検査時間を抑える
+        if len(stages) > 32:
+            raise ParseError("alias expansion limit exceeded")
+    return stages
+
+
+def git_config_arguments(args, verbs):
+    """git config のオプションと語（名前より後ろはオプションの形でも語）"""
+    index = git_command_context(args, None)[0] + 1
+    options, words = [], []
+    while index < len(args):
+        argument = args[index]
+        if argument == "--":
+            return options, words + args[index + 1:]
+        if not argument.startswith("-") or argument == "-":
+            words.append(argument)
+            # 操作名のあとはオプションを読み、名前のあとは読まない
+            if len(words) > 1 or argument not in verbs:
+                return options, words + args[index + 1:]
+        else:
+            options.append(argument)
+            # 分けて書いた値は = でつなぎ、値の --unset などを操作とみなさない
+            if argument in {"--file", "-f", "--blob", "--type", "-t", "--default", "--comment", "--value", "--url"} and index + 1 < len(args):
+                index += 1
+                options[-1] += "=" + args[index]
+        index += 1
+    return options, words
+
+
+# 検査を通った alias の値・検査位置・ブレース展開の段階
+inspected_git_aliases = set()
+
+
+def inspect_git_alias(value, args, cwd):
+    """alias の値を、! はシェルコード、それ以外は git の引数として検査"""
+    key = (value, git_alias_directory(args, cwd) if value.startswith("!") else cwd, brace_pass)
+    # 展開の各段で同じ定義を検査し直すと、入れ子の alias で検査時間が指数的に増える
+    if key in inspected_git_aliases:
+        return
+    if value.startswith("!"):
+        scan(value[1:], key[1])
+    elif (words := git_split_cmdline(value)) is not None:
+        inspect_argv(["git", *words], cwd, 0)
+    inspected_git_aliases.add(key)
+
+
 def inspect_git(args, words, cwd):
     """実行設定の差し替え・秘密出力・破壊操作を検査"""
     for setting in option_values(args, {"--config-env"}):
-        if git_exec_key(setting.split("=", 1)[0]):
+        key = setting.split("=", 1)[0]
+        # 環境変数から読む alias は展開先を検査できない
+        if git_exec_key(key) or key.casefold().startswith("alias."):
             deny(EXEC_OVERRIDE_REASON)
     for setting in option_values(args, {"-c", "--config"}):
         key, _, value = setting.partition("=")
@@ -377,8 +471,9 @@ def inspect_git(args, words, cwd):
             deny(EXEC_OVERRIDE_REASON)
         if key.casefold() in GIT_COMMAND_KEYS and value:
             scan(value, cwd)
-        elif key.casefold().startswith("alias.") and value.startswith("!"):
-            scan(value[1:], git_alias_directory(args, cwd))
+        # -c の設定は子の git にも引き継がれるため、使われ方によらず検査する
+        elif key.casefold().startswith("alias."):
+            inspect_git_alias(value, args, cwd)
     for value in option_values(args, {"--receive-pack", "--upload-pack", "--exec"}):
         scan(value, cwd)
     if any(argument.startswith("--exec-path=") for argument in args):
@@ -390,20 +485,20 @@ def inspect_git(args, words, cwd):
     if words[:1] == ["var"] and has_option(args, set(), "l", CLI_VALUE_OPTIONS["git"]):
         deny(SECRET_OUTPUT_REASON)
     if words[:1] == ["config"]:
-        config_words = cli_words("git", args, {"--file", "-f", "--blob", "--type", "-t", "--default", "--comment", "--value", "--url"})[1:]
         verbs = {"list", "get", "set", "unset", "edit", "rename-section", "remove-section"}
+        options, config_words = git_config_arguments(args, verbs)
         verb = config_words[0] if config_words and config_words[0] in verbs else ""
         operands = config_words[1:] if verb else config_words
-        mutates = verb in {"set", "unset", "edit", "rename-section", "remove-section"} or has_option(args, {"--add", "--unset", "--unset-all", "--replace-all", "--rename-section", "--remove-section", "--edit", "-e"})
-        removes = verb in {"unset", "remove-section"} or has_option(args, {"--unset", "--unset-all", "--remove-section"})
-        reads = not mutates and (verb in {"list", "get"} or has_option(args, {"--list", "--get", "--get-all", "--get-regexp", "--get-urlmatch"}, "l") or not verb and len(operands) == 1)
-        names_only = has_option(args, {"--name-only"}) and not has_option(args, {"--no-name-only"})
-        regex_read = has_option(args, {"--get-regexp"}) or verb == "get" and has_option(args, {"--regexp"})
-        if not names_only and (verb == "list" or has_option(args, {"--list"}, "l") or reads and regex_read):
+        mutates = verb in {"set", "unset", "edit", "rename-section", "remove-section"} or has_option(options, {"--add", "--unset", "--unset-all", "--replace-all", "--rename-section", "--remove-section", "--edit", "-e"})
+        removes = verb in {"unset", "remove-section"} or has_option(options, {"--unset", "--unset-all", "--remove-section"})
+        reads = not mutates and (verb in {"list", "get"} or has_option(options, {"--list", "--get", "--get-all", "--get-regexp", "--get-urlmatch"}, "l") or not verb and len(operands) == 1)
+        names_only = has_option(options, {"--name-only"}) and not has_option(options, {"--no-name-only"})
+        regex_read = has_option(options, {"--get-regexp"}) or verb == "get" and has_option(options, {"--regexp"})
+        if not names_only and (verb == "list" or has_option(options, {"--list"}, "l") or reads and regex_read):
             deny(SECRET_OUTPUT_REASON)
         if reads and not names_only and any(secret_name(key) or "extraheader" in key.casefold() for key in operands):
             deny(SECRET_OUTPUT_REASON)
-        url_read = has_option(args, {"--get-urlmatch"}) or verb == "get" and bool(option_values(args, {"--url"}))
+        url_read = has_option(options, {"--get-urlmatch"}) or verb == "get" and bool(option_values(options, {"--url"}))
         if reads and not names_only and url_read and operands and "." not in operands[0]:
             deny(SECRET_OUTPUT_REASON)
         if not reads and not removes and any(git_exec_key(key) for key in operands):
@@ -412,8 +507,8 @@ def inspect_git(args, words, cwd):
             key, value = operands[:2]
             if key.casefold() in GIT_COMMAND_KEYS:
                 scan(value, cwd)
-            elif key.casefold().startswith("alias.") and value.startswith("!"):
-                scan(value[1:], git_alias_directory(args, cwd))
+            elif key.casefold().startswith("alias."):
+                inspect_git_alias(value, args, cwd)
     if not words:
         return
     command = words[0]
@@ -2904,6 +2999,13 @@ def inspect_argv(argv, cwd, depth, stdin=None, external=False):
         inspect_submodule_foreach(args, cwd, depth)
     elif command in {"npx", "npm", "pnpm", "yarn", "mise", "flock", "script"}:
         inspect_runner(command, args, cwd, depth)
+    if command == "git":
+        # git は展開中に組み込みコマンドへ達した段を実行するため、各段を検査する
+        for stage in git_alias_expansions(args):
+            inspect_cli(command, stage, cwd)
+            inspect_paths(command, stage, cwd, stdin is not None or external)
+            if "foreach" in stage:
+                inspect_submodule_foreach(stage, cwd, depth)
     language = re.sub(r"\d+(?:\.\d+)*$", "", command)
     if language in INTERPRETER_OPTIONS:
         inspect_interpreter(language, args, cwd, depth, stdin, external)
