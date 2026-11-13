@@ -1,3243 +1,385 @@
 #!/usr/bin/env python3
 """Bash コマンドの静的検査"""
 
-import ast
-import bisect
-import getopt
 import json
 import os
 import re
 import sys
-from dataclasses import dataclass, field
-from urllib.parse import unquote, urlsplit
 
 
 class Denied(Exception):
     """deny として返す危険操作"""
 
 
-class ParseError(Exception):
-    """解析不能（終了コード 2）"""
-
-
-class UnsupportedSyntax(Exception):
-    """通常の権限判定へ委ねる未対応構文"""
-
-
-def deny(reason):
-    """理由付きで拒否"""
-    raise Denied(reason)
-
-
-SECRET_OUTPUT_REASON = "資格情報や秘密値を直接出力・取得する操作は許可していません。"
-EXEC_OVERRIDE_REASON = "保護機構や認証処理を迂回する実行設定は許可していません。"
+CREDENTIAL_REASON = "認証情報ファイルの直接読み取り・持ち出しは許可していません。"
 DESTRUCTIVE_REASON = "強制的な変更破棄、検証の迂回、ディスクの破壊は許可していません。"
-SAFE_ENV_NAMES = set("""
-    PATH HOME PWD OLDPWD USER LOGNAME SHELL TERM
-    LANG LC_ALL LC_CTYPE TZ TMPDIR TMP TEMP EDITOR
-    VISUAL PAGER MANPAGER COLORTERM TERM_PROGRAM SHLVL
-    AWS_PROFILE AWS_DEFAULT_PROFILE AWS_REGION AWS_DEFAULT_REGION
-    AWS_CONFIG_FILE AWS_SHARED_CREDENTIALS_FILE KUBECONFIG
-    GH_CONFIG_DIR XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME
-    CODEX_HOME VIRTUAL_ENV CONDA_DEFAULT_ENV PYTHONPATH NODE_ENV
-""".split())
 
-CLI_VALUE_OPTIONS = {
-    command: set(options.split())
-    for command, options in {
-        "aws": "--ca-bundle --cli-binary-format --cli-connect-timeout --cli-error-format --cli-input-json --cli-input-yaml --cli-read-timeout --color --endpoint-url --output --profile --query --region",
-        "az": "--name --output --query --resource-group --subscription --vault-name -g -n -o",
-        "docker": "--config --context --filter --format --host --log-level --tlscacert --tlscert --tlskey -H -f",
-        "gcloud": "--access-token-file --account --assert --authority-selector --authorization-token-file --billing-project --configuration --credential-file-override --flags-file --flatten --format --http-timeout --impersonate-service-account --project --trace-token --universe-domain --verbosity",
-        "gh": "--config --host --hostname --repo -R",
-        "ghtkn": "--config --log-level -c",
-        "git": "--attr-source --config --config-env --exec-path --git-dir --namespace --shallow-file --super-prefix --work-tree -C -c",
-        "kubectl": "--as --as-group --as-uid --as-user-extra --cache-dir --certificate-authority --client-certificate --client-key --cluster --context --field-selector --kubeconfig --kuberc --log-flush-frequency --loglevel --namespace --output --password --profile --profile-output --request-timeout --selector --server --template --tls-server-name --token --user --username --v --vmodule -l -n -o -s -v",
-        "npm": "--cache --call --editor --location --message --otp --tag --workspace -L -c -m -w",
-        "op": "--account --config --encoding --env-file --environment --format --session --vault",
-        "pnpm": "--dir --filter --reporter -F",
-        "security": "-C -D -P -a -c -d -f -j -l -o -p -s -t",
-        "terraform": "-backup -chdir -lock-timeout -plugin-dir -replace -state -state-out -target -var -var-file",
-        "terragrunt": "--config --log-level --terragrunt-config --terragrunt-tfpath --terragrunt-working-dir --tf-path --working-dir",
-        "uv": "--cache-dir --color --config-file --directory --project",
-        "vault": "-address -ca-cert -field -format -mount -namespace",
-    }.items()
-}
-CLI_VALUE_OPTIONS["oc"] = CLI_VALUE_OPTIONS["kubectl"] | {"--keys", "--to"}
-# nopt の String 値は、先頭が - なら次のオプション扱い
-CLI_STRING_OPTIONS = {
-    "npm": {"--call", "--editor", "--message", "--tag", "-c", "-m"},
-    "pnpm": {"--dir", "--reporter", "-C"},
-}
-COMPOSE_VALUE_OPTIONS = set("""
-    --ansi --env-file -f --file --parallel --profile
-    --progress --project-directory -p --project-name
-""".split())
-PACKAGE_CONFIG_ALIASES = {
-    "npm": {"c": "config", "con": "config", "conf": "config", "confi": "config", "g": "config get", "ge": "config get", "get": "config get"},
-    "pnpm": {"c": "config", "get": "config get"},
-}
-
-SECRET_SUBCOMMANDS = {
-    "az": {
-        "account get-access-token", "acr credential show", "ad app credential reset", "ad sp credential reset", "keyvault secret download",
-        "keyvault secret show", "storage account generate-sas", "storage account keys list", "storage account keys renew",
-        "storage account show-connection-string", "storage blob generate-sas", "storage container generate-sas", "storage file generate-sas",
-        "storage fs directory generate-sas", "storage fs file generate-sas", "storage fs generate-sas", "storage queue generate-sas",
-        "storage share generate-sas", "storage table generate-sas",
-    },
-    "gcloud": {
-        "auth application-default print-access-token", "auth describe", "auth docker-helper", "auth git-helper", "auth print-access-token",
-        "auth print-identity-token", "auth print-refresh-token", "config config-helper", "iam service-accounts keys create",
-        "iam service-accounts sign-jwt", "kms asymmetric-decrypt", "kms decapsulate", "kms decrypt", "kms raw-decrypt",
-        "secrets versions access", "sql generate-login-token", "storage hmac create", "storage sign-url",
-    },
-    "ghtkn": {"exec", "get", "git-credential"},
-    "op": {"connect token create", "document get", "inject", "item get", "plugin run", "read", "run", "service-account create", "signin"},
-    "uv": {"auth helper", "auth token"},
-    "vault": {"kv get", "operator generate-root", "operator init", "print token", "read", "token create", "token lookup", "unwrap", "write"},
-}
-AWS_SECRET_OPERATIONS = {
-    service: set(operations.split())
-    for service, operations in {
-        "acm": "export-certificate get-acme-external-account-binding-credentials",
-        "amplify": "create-app create-branch delete-app delete-branch get-app get-branch list-apps list-branches update-app update-branch",
-        "amplifybackend": "create-token get-token",
-        "amplifyuibuilder": "exchange-code-for-token refresh-token",
-        "apigateway": "create-api-key get-api-key get-api-keys update-api-key",
-        "appstream": "create-app-block-builder-streaming-url create-image-builder-streaming-url create-streaming-url",
-        "appsync": "create-api-key list-api-keys update-api-key",
-        "athena": "create-presigned-notebook-url get-session-endpoint",
-        "bedrock-agentcore": "get-resource-api-key get-resource-oauth2-token get-resource-payment-token get-workload-access-token get-workload-access-token-for-jwt get-workload-access-token-for-user-id",
-        "chime": "create-bot get-bot list-bots regenerate-security-token update-bot",
-        "chime-sdk-meetings": "batch-create-attendee create-attendee create-meeting-with-attendees get-attendee list-attendees update-attendee-capabilities",
-        "cloudfront": "sign",
-        "codeartifact": "get-authorization-token",
-        "codebuild": "start-sandbox-connection",
-        "codecatalyst": "create-access-token start-dev-environment-session",
-        "codepipeline": "get-job-details get-third-party-job-details poll-for-jobs",
-        "cognito-identity": "get-credentials-for-identity get-open-id-token get-open-id-token-for-developer-identity",
-        "cognito-idp": "add-user-pool-client-secret admin-initiate-auth admin-respond-to-auth-challenge associate-software-token create-user-pool-client describe-user-pool-client get-tokens-from-refresh-token initiate-auth respond-to-auth-challenge update-user-pool-client",
-        "configure": "export-credentials",
-        "connect": "create-auth-code get-federation-token start-web-rtc-contact",
-        "connectparticipant": "create-participant-connection",
-        "customer-profiles": "get-upload-job-path",
-        "datazone": "get-environment-credentials",
-        "deadline": "assume-fleet-role-for-read assume-fleet-role-for-worker assume-queue-role-for-read assume-queue-role-for-user assume-queue-role-for-worker",
-        "devicefarm": "create-test-grid-url",
-        "dsql": "generate-db-connect-admin-auth-token generate-db-connect-auth-token",
-        "ec2": "create-key-pair get-password-data",
-        "ecr": "get-authorization-token get-login-password",
-        "ecr-public": "get-authorization-token get-login-password",
-        "eks": "get-token",
-        "eks-auth": "assume-role-for-pod-identity",
-        "emr": "get-cluster-session-credentials get-on-cluster-app-ui-presigned-url get-persistent-app-ui-presigned-url get-session-endpoint",
-        "emr-containers": "get-managed-endpoint-session-credentials",
-        "emr-serverless": "get-session-endpoint",
-        "finspace-data": "get-external-data-view-access-details get-programmatic-access-credentials reset-user-password",
-        "gamelift": "create-build get-compute-access get-compute-auth-token get-instance-access get-player-connection-details request-upload-credentials",
-        "glue": "get-session-endpoint",
-        "grafana": "create-workspace-api-key create-workspace-service-account-token",
-        "history": "list show",
-        "iam": "create-access-key create-service-specific-credential reset-service-specific-credential",
-        "iot": "create-keys-and-certificate create-provisioning-claim",
-        "iotsecuretunneling": "open-tunnel rotate-tunnel-access-token",
-        "ivs": "batch-get-stream-key create-channel create-stream-key get-stream-key",
-        "ivs-realtime": "create-ingest-configuration create-participant-token create-stage get-ingest-configuration update-ingest-configuration",
-        "ivschat": "create-chat-token",
-        "kms": "decrypt derive-shared-secret generate-data-key generate-data-key-pair",
-        "lakeformation": "assume-decorated-role-with-saml get-temporary-data-location-credentials get-temporary-glue-partition-credentials get-temporary-glue-table-credentials",
-        "lambda-microvms": "create-microvm-auth-token create-microvm-shell-auth-token",
-        "license-manager": "create-token get-access-token",
-        "lightsail": "create-bucket-access-key create-container-service-registry-login create-key-pair download-default-key-pair get-bucket-access-keys get-instance-access-details get-relational-database-master-user-password",
-        "mediapackage": "configure-logs create-channel describe-channel list-channels rotate-channel-credentials rotate-ingest-endpoint-credentials update-channel",
-        "mwaa": "create-cli-token create-web-login-token",
-        "pca-connector-scep": "create-challenge get-challenge-password",
-        "pcs": "register-compute-node-group-instance",
-        "quicksight": "generate-embed-url-for-anonymous-user generate-embed-url-for-registered-user generate-embed-url-for-registered-user-with-identity get-dashboard-embed-url get-session-embed-url",
-        "rds": "generate-db-auth-token",
-        "redshift": "get-cluster-credentials get-cluster-credentials-with-iam get-identity-center-auth-token",
-        "redshift-serverless": "get-credentials get-identity-center-auth-token",
-        "route53domains": "retrieve-domain-auth-code transfer-domain-to-another-aws-account",
-        "route53globalresolver": "create-access-token get-access-token",
-        "s3": "presign",
-        "s3api": "create-session",
-        "s3control": "get-data-access",
-        "sagemaker": "create-partner-app-presigned-url create-presigned-domain-url create-presigned-mlflow-app-url create-presigned-mlflow-tracking-server-url create-presigned-notebook-instance-url start-session",
-        "secretsmanager": "batch-get-secret-value get-secret-value",
-        "signin": "create-oauth2-token create-oauth2-token-with-iam",
-        "ssm": "create-activation get-access-token resume-session",
-        "sso": "get-role-credentials",
-        "sso-oidc": "create-token create-token-with-iam register-client",
-        "storagegateway": "describe-chap-credentials",
-        "sts": "assume-role assume-role-with-saml assume-role-with-web-identity assume-root get-delegated-access-token get-federation-token get-session-token get-web-identity-token",
-        "wafv2": "create-api-key list-api-keys",
-        "wickr": "create-data-retention-bot-challenge get-oidc-info get-opentdf-config register-oidc-config register-opentdf-config",
-        "workmail": "assume-impersonation-role",
-        "workspaces-thin-client": "create-environment get-environment list-environments update-environment",
-    }.items()
-}
-# 指定を拒否する git 設定
-GIT_EXEC_KEYS = {
-    "core.hookspath", "core.askpass", "credential.helper",
-    "uploadpack.packobjectshook",
-}
-# 値をシェルコードとして検査する git 設定
-GIT_COMMAND_KEYS = {
-    "core.pager", "core.editor", "core.sshcommand", "core.gitproxy",
-    "core.fsmonitor", "sequence.editor", "diff.external", "gpg.program",
-    "gpg.openpgp.program",
-}
-# --format で許す非秘密フィールド
-CONTAINER_SAFE_FIELDS = set("""
-    id ids name names image imageid status state
-    running paused restarting dead exitcode pid ports
-    size sizewritable sizerootfs created createdat startedat
-    finishedat repository tag digest repotags repodigests
-    architecture os ostype serverversion version apiversion
-    memory memtotal ncpu containers containersrunning
-    containerspaused containersstopped images driver platform
-""".split())
-
-
-def option_values(args, names):
-    """分離・=・短縮結合形式のオプション値"""
-    values = []
-    index = 0
-    while index < len(args):
-        argument = args[index]
-        if argument == "--":
-            break
-        if argument in names:
-            if index + 1 < len(args):
-                values.append(args[index + 1])
-                index += 1
-        else:
-            name, separator, value = argument.partition("=")
-            if separator and name in names:
-                values.append(value)
-            else:
-                for name in names:
-                    if len(name) == 2 and name.startswith("-") and argument.startswith(name) and len(argument) > 2:
-                        values.append(argument[2:])
-                        break
-        index += 1
-    return values
-
-
-def has_option(args, names, short="", value_options=(), negated=(), short_bool_values=False):
-    """オプションの有効性を判定し、表示フラグは最後の値を反映"""
-    # ファイル名 f の指定を見逃さないよう、f は表示・短縮フラグでのみ偽とみなす
-    found = False
-    display = {}
-    args = iter(args)
-    for argument in args:
-        if argument == "--":
-            break
-        if argument in value_options:
-            next(args, None)
-            continue
-        if value_options and argument.startswith("-") and not argument.startswith("--"):
-            for offset, flag in enumerate(argument[1:], 1):
-                if "-" + flag in value_options:
-                    if offset == len(argument) - 1:
-                        next(args, None)
-                    argument = argument[:offset]
-                    break
-        name, separator, value = argument.partition("=")
-        if name in negated:
-            found = False
-            display.clear()
-        elif name in names:
-            if name in {"--help", "-h", "-help", "--version"}:
-                key = "help" if name != "--version" else "version"
-                display[key] = not separator or value.casefold() not in {"false", "0", "no", "off", "f"}
-            elif not separator or value.casefold() not in {"false", "0", "no", "off"}:
-                found = True
-        if short_bool_values and short and re.fullmatch(r"-[A-Za-z]+", name):
-            for offset, flag in enumerate(name[1:], 1):
-                enabled = offset < len(name) - 1 or not separator or value.casefold() not in {"false", "0", "no", "off", "f"}
-                if flag in short and enabled:
-                    found = True
-        elif short and re.fullmatch(r"-[A-Za-z]+", argument) and any(flag in argument[1:] for flag in short):
-            found = True
-    return found or any(display.values())
-
-
-def cli_words(command, args, extra_values=()):
-    """オプション・値を除く引数列"""
-    values = CLI_VALUE_OPTIONS.get(command, set()) | set(extra_values)
-    words = []
-    index = 0
-    while index < len(args):
-        argument = args[index]
-        if argument == "--":
-            words.extend(args[index + 1:])
-            break
-        current_values = values
-        if command == "docker" and words == ["compose"]:
-            current_values = values | COMPOSE_VALUE_OPTIONS
-        if argument in current_values:
-            optional = argument in CLI_STRING_OPTIONS.get(command, ()) and index + 1 < len(args) and re.match(r"-{1,2}[^-]", args[index + 1])
-            index += 1 if optional else 2
-            continue
-        if not argument.startswith("-") or argument == "-":
-            words.append(argument)
-        index += 1
-    return words
-
-
-def matches_subcommand(words, forms):
-    """空白区切りの形式との前方一致"""
-    return any(words[:len(parts)] == parts for parts in map(str.split, forms))
-
-
-def secret_name(name):
-    """変数名・設定キーの秘密語を判定"""
-    normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name).upper()
-    normalized = re.sub(r"[^A-Z0-9]+", "_", normalized)
-    if normalized in SAFE_ENV_NAMES:
-        return False
-    words = set(normalized.split("_"))
-    secret_words = {"TOKEN", "TOKENS", "SECRET", "SECRETS", "PASSWORD", "PASSWD", "APIKEY", "ACCESSKEY", "CREDENTIAL", "CREDENTIALS", "AUTHORIZATION", "PROXY"}
-    return normalized == "SSH_AUTH_SOCK" or bool(words & secret_words) or any(
-        marker in "_" + normalized + "_"
-        for marker in ("_API_KEY_", "_ACCESS_KEY_", "_PRIVATE_KEY_")
+# 各行は「コマンド 引数…」の正規表現で、各語に全体一致する引数がこの順に現れれば拒否する（間に他の引数があってもよい）
+SECRET_OUTPUTS = r"""
+    aws codeartifact get-authorization-token
+    aws configure export-credentials
+    aws configure get|set (?i:.*(?:secret|token|password).*)
+    aws ecr|ecr-public get-login-password|get-authorization-token
+    aws eks get-token
+    aws iam create-access-key
+    aws kms decrypt
+    aws rds generate-db-auth-token
+    aws s3 presign
+    aws secretsmanager get-secret-value|batch-get-secret-value
+    aws ssm get-parameter.* --with-decryption
+    aws sso get-role-credentials
+    aws sts assume-.*|get-.*-token
+    (?:docker|git)-credential-.+
+    gcloud auth print-access-token|print-identity-token|print-refresh-token
+    gcloud secrets versions access
+    gh auth status --show-token|-t
+    gh auth token|git-credential
+    ghtkn exec|get|git-credential
+    git credential fill
+    git credential-.+
+    kubectl|oc config view --raw|--flatten
+    kubectl|oc create token
+    kubectl|oc get|describe|extract (?:.*,)?secrets?(?:[./,].*)?
+    oc whoami --show-token|-t
+    op item|document get
+    op read|inject|run
+    op signin --raw|--force|-f
+    security dump-keychain
+    security find-generic-password|find-internet-password -[A-Za-z]*[gw][A-Za-z]*
+    terraform|terragrunt output [^-].*|-json|-raw|--json|--raw
+    terraform|terragrunt show -json|--json
+    terraform|terragrunt state pull|show
+    uv auth token
+"""
+DESTRUCTIVE_OPERATIONS = r"""
+    dd of=/dev/(?:r?disk|sd|nvme).*
+    diskutil (?i:apfs|ap) (?i:deletecontainer|deletevolume|deletevolumegroup)
+    diskutil (?i:erasedisk|erasevolume|partitiondisk|zerodisk|randomdisk|secureerase|reformat)
+    git checkout|switch --force|--discard-changes|-[A-Za-z]*f[A-Za-z]*
+    git clean --force|-[A-Za-z]*f[A-Za-z]*
+    git commit -[A-Za-z]*n[A-Za-z]*
+    git commit|merge|rebase|push --no-verify
+    git push --force|--mirror|--prune|-[A-Za-z]*f[A-Za-z]*|\+.+
+    git reset --hard
+    git stash clear
+    mkfs.*|newfs.*
+"""
+EXEC_OVERRIDES = r"""
+    git -c|--config (?i:core\.hookspath|core\.askpass|credential\.(?:.+\.)?helper)=.*
+    git config (?i:core\.hookspath|core\.askpass|credential\.(?:.+\.)?helper) [^-].*
+    git config --unset|--unset-all|unset (?i:core\.hookspath)
+"""
+RULES = [
+    (reason, line.split())
+    for table, reason in (
+        (SECRET_OUTPUTS, "資格情報や秘密値を直接出力・取得する操作は許可していません。"),
+        (DESTRUCTIVE_OPERATIONS, DESTRUCTIVE_REASON),
+        (EXEC_OVERRIDES, "保護機構や認証処理を迂回する実行設定は許可していません。"),
     )
+    for line in table.strip().splitlines()
+]
 
-
-def git_exec_key(key):
-    """実行・認証・取得先を差し替える git 設定を判定"""
-    key = key.casefold()
-    return key in GIT_EXEC_KEYS or key == "include.path" or key.startswith("includeif.") or any(
-        key.startswith(prefix) and key.endswith(suffix)
-        for prefix, suffix in (("credential.", ".helper"), ("credential.", ".askpass"), ("protocol.", ".allow"), ("url.", ".insteadof"), ("url.", ".pushinsteadof"), ("filter.", ".clean"), ("filter.", ".smudge"), ("filter.", ".process"))
+# 認証情報の保管先（小文字化した絶対パスのどの階層にあっても一致）
+CREDENTIAL_PATH = re.compile(r"""/(?:
+    \.env[^/]* | secrets | credentials
+  | \.ssh(?!/[^/]*\.(?:pub|crt|cer)$) | \.gnupg | library/keychains
+  | \.aws(?:$|/(?:credentials[^/]*|login|sso|cli)) | \.azure | \.config/gcloud
+  | gcloud/(?:application_default_credentials\.json|credentials\.db|access_tokens\.db)[^/]*
+  | \.kube/config[^/]* | gh/hosts\.yml[^/]* | \.docker/config\.json | (?:containers|\.?composer)/auth\.json
+  | \.ocm\.json | ocm/ocm\.json[^/]* | helm/(?:repositories\.yaml|registry/config\.json)[^/]*
+  | \.terraform\.d/credentials\.tfrc\.json | \.terraformrc | [^/]*\.tfstate[^/]* | \.vault-token
+  | \.?cargo/credentials\.toml | pypoetry/auth\.toml | \.bundle/config | pip\.conf
+  | \.git-credentials | \.netrc | \.pgpass | \.?pg_service\.conf | \.pypirc | \.curlrc | \.wgetrc
+  | \.(?:zsh|bash)_(?:history|sessions) | fish_history
+  | \.claude/(?:\.credentials\.json|shell-snapshots|backups) | \.claude\.json(?:\.backup)?
+  | \.codex(?:-account-[^/]+)?/(?:auth\.json|\.credentials\.json|shell_snapshots)
+  | orca/codex-(?:runtime-home|accounts/[^/]+)
+    /(?:home/auth|system-default-auth|system-default-runtime-logout|shared-runtime-auth-provenance)\.json
+  | \.hermes/(?:profiles/[^/]+/)?(?:
+        (?:\.anthropic_oauth\.json|auth\.json|auth\.lock|auth/google_oauth\.json
+          |cache/bws_cache(?:\.enc)?\.json|config\.yaml|webhook_subscriptions\.json)[^/]*
+      | backups | browser[-_]profiles? | mcp-tokens | state-snapshots | vault
     )
-
-
-def resolve_path(path, cwd, normalize=os.path.normpath):
-    """cwd 基準でパスを正規化し、基準不明の相対パスは None"""
-    if not os.path.isabs(path):
-        if cwd is None:
-            return None
-        path = os.path.join(cwd, path)
-    return normalize(path)
-
-
-def git_command_context(args, cwd):
-    """グローバルオプション終端と -C 適用後の cwd"""
-    global_options = CLI_VALUE_OPTIONS["git"]
-    index = 0
-    while index < len(args) and args[index].startswith("-"):
-        argument = args[index]
-        index += 2 if argument in global_options else 1
-    for directory in option_values(args[:index], {"-C"}):
-        if "$" in directory or UNKNOWN_ARGUMENT in directory:
-            cwd = None
-            continue
-        cwd = resolve_path(os.path.expanduser(directory), cwd, os.path.realpath)
-    return index, cwd
-
-
-def git_alias_directory(args, cwd):
-    """shell alias の実行位置"""
-    index, cwd = git_command_context(args, cwd)
-    work_trees = option_values(args[:index], {"--work-tree"})
-    if "--bare" in args[:index]:
-        return cwd
-    # shell alias の実行位置はリポジトリ直下
-    directory = os.path.realpath(cwd) if cwd is not None else None
-    if directory is not None and not option_values(args[:index], {"--git-dir"}):
-        while not os.path.exists(os.path.join(directory, ".git")):
-            parent = os.path.dirname(directory)
-            if parent == directory:
-                return cwd
-            directory = parent
-    if work_trees:
-        if "$" in work_trees[-1] or UNKNOWN_ARGUMENT in work_trees[-1]:
-            return None
-        return resolve_path(os.path.expanduser(work_trees[-1]), cwd, os.path.realpath)
-    return directory
-
-
-def git_split_cmdline(text):
-    """alias の値を git と同じ規則で分割（閉じない引用・末尾の \\ は None）"""
-    words, word, quote, index = [], "", None, 0
-    while index < len(text):
-        char = text[index]
-        if not quote and char in " \t\n\r":
-            words.append(word)
-            word = ""
-            while index + 1 < len(text) and text[index + 1] in " \t\n\r":
-                index += 1
-        elif not quote and char in "'\"":
-            quote = char
-        elif char == quote:
-            quote = None
-        else:
-            if char == "\\" and quote != "'":
-                index += 1
-                if index == len(text):
-                    return None
-                char = text[index]
-            word += char
-        index += 1
-    return None if quote else words + [word]
-
-
-def git_alias_expansions(args):
-    """-c で定義した alias を git と同じ順に1段ずつ展開した引数の列"""
-    stages, seen = [], set()
-    while (index := git_command_context(args, None)[0]) < len(args):
-        name, value = args[index], None
-        for setting in option_values(args[:index], {"-c", "--config"}):
-            key, separator, content = setting.partition("=")
-            section, _, rest = key.partition(".")
-            subsection, dot, variable = rest.rpartition(".")
-            # [alias "名前"] の command だけは名前の大文字・小文字を区別し、ほかはキーの残り全体が名前
-            if separator and section.casefold() == "alias" and (
-                subsection == name if dot and variable.casefold() == "command" else rest.casefold() == name.casefold()
-            ):
-                value = content
-        words = None if value is None or value.startswith("!") else git_split_cmdline(value)
-        # git は循環した alias と分割できない値を展開しない
-        if words is None or name in seen:
-            break
-        seen.add(name)
-        args = args[:index] + words + args[index + 1:]
-        stages.append(args)
-        # 段数は入れ子のコマンドと同じ上限にし、検査時間を抑える
-        if len(stages) > 32:
-            raise ParseError("alias expansion limit exceeded")
-    return stages
-
-
-def git_config_arguments(args, verbs):
-    """git config のオプションと語（名前より後ろはオプションの形でも語）"""
-    index = git_command_context(args, None)[0] + 1
-    options, words = [], []
-    while index < len(args):
-        argument = args[index]
-        if argument == "--":
-            return options, words + args[index + 1:]
-        if not argument.startswith("-") or argument == "-":
-            words.append(argument)
-            # 操作名のあとはオプションを読み、名前のあとは読まない
-            if len(words) > 1 or argument not in verbs:
-                return options, words + args[index + 1:]
-        else:
-            options.append(argument)
-            # 分けて書いた値は = でつなぎ、値の --unset などを操作とみなさない
-            if argument in {"--file", "-f", "--blob", "--type", "-t", "--default", "--comment", "--value", "--url"} and index + 1 < len(args):
-                index += 1
-                options[-1] += "=" + args[index]
-        index += 1
-    return options, words
-
-
-# 検査を通った alias の値・検査位置・ブレース展開の段階
-inspected_git_aliases = set()
-
-
-def inspect_git_alias(value, args, cwd):
-    """alias の値を、! はシェルコード、それ以外は git の引数として検査"""
-    key = (value, git_alias_directory(args, cwd) if value.startswith("!") else cwd, brace_pass)
-    # 展開の各段で同じ定義を検査し直すと、入れ子の alias で検査時間が指数的に増える
-    if key in inspected_git_aliases:
-        return
-    if value.startswith("!"):
-        scan(value[1:], key[1])
-    elif (words := git_split_cmdline(value)) is not None:
-        inspect_argv(["git", *words], cwd, 0)
-    inspected_git_aliases.add(key)
-
-
-def inspect_git(args, words, cwd):
-    """実行設定の差し替え・秘密出力・破壊操作を検査"""
-    for setting in option_values(args, {"--config-env"}):
-        key = setting.split("=", 1)[0]
-        # 環境変数から読む alias は展開先を検査できない
-        if git_exec_key(key) or key.casefold().startswith("alias."):
-            deny(EXEC_OVERRIDE_REASON)
-    for setting in option_values(args, {"-c", "--config"}):
-        key, _, value = setting.partition("=")
-        if key.casefold() in {"core.pager", "pager"} and value in {"", "cat"}:
-            continue
-        if key.casefold() == "core.fsmonitor" and value.casefold() == "false":
-            continue
-        if key.casefold() == "ssh.variant" and value in {"ssh", "plink", "putty", "tortoiseplink", "simple", "auto"}:
-            continue
-        if git_exec_key(key):
-            deny(EXEC_OVERRIDE_REASON)
-        if key.casefold() in GIT_COMMAND_KEYS and value:
-            scan(value, cwd)
-        # -c の設定は子の git にも引き継がれるため、使われ方によらず検査する
-        elif key.casefold().startswith("alias."):
-            inspect_git_alias(value, args, cwd)
-    for value in option_values(args, {"--receive-pack", "--upload-pack", "--exec"}):
-        scan(value, cwd)
-    if any(argument.startswith("--exec-path=") for argument in args):
-        deny(EXEC_OVERRIDE_REASON)
-    if has_option(args, {"--help", "-h"}, value_options=CLI_VALUE_OPTIONS["git"]):
-        return
-    if matches_subcommand(words, {"credential fill"}) or (words and words[0].startswith("credential-")):
-        deny(SECRET_OUTPUT_REASON)
-    if words[:1] == ["var"] and has_option(args, set(), "l", CLI_VALUE_OPTIONS["git"]):
-        deny(SECRET_OUTPUT_REASON)
-    if words[:1] == ["config"]:
-        verbs = {"list", "get", "set", "unset", "edit", "rename-section", "remove-section"}
-        options, config_words = git_config_arguments(args, verbs)
-        verb = config_words[0] if config_words and config_words[0] in verbs else ""
-        operands = config_words[1:] if verb else config_words
-        mutates = verb in {"set", "unset", "edit", "rename-section", "remove-section"} or has_option(options, {"--add", "--unset", "--unset-all", "--replace-all", "--rename-section", "--remove-section", "--edit", "-e"})
-        removes = verb in {"unset", "remove-section"} or has_option(options, {"--unset", "--unset-all", "--remove-section"})
-        reads = not mutates and (verb in {"list", "get"} or has_option(options, {"--list", "--get", "--get-all", "--get-regexp", "--get-urlmatch"}, "l") or not verb and len(operands) == 1)
-        names_only = has_option(options, {"--name-only"}) and not has_option(options, {"--no-name-only"})
-        regex_read = has_option(options, {"--get-regexp"}) or verb == "get" and has_option(options, {"--regexp"})
-        if not names_only and (verb == "list" or has_option(options, {"--list"}, "l") or reads and regex_read):
-            deny(SECRET_OUTPUT_REASON)
-        if reads and not names_only and any(secret_name(key) or "extraheader" in key.casefold() for key in operands):
-            deny(SECRET_OUTPUT_REASON)
-        url_read = has_option(options, {"--get-urlmatch"}) or verb == "get" and bool(option_values(options, {"--url"}))
-        if reads and not names_only and url_read and operands and "." not in operands[0]:
-            deny(SECRET_OUTPUT_REASON)
-        if not reads and not removes and any(git_exec_key(key) for key in operands):
-            deny(EXEC_OVERRIDE_REASON)
-        # global・system の hooksPath を外すと、全リポジトリで秘密検査のフックが止まる
-        if removes and (has_option(options, {"--global", "--system"}) or option_values(options, {"--file", "-f"})) and operands and operands[0].casefold() in {"core.hookspath", "core"}:
-            deny(EXEC_OVERRIDE_REASON)
-        if not reads and not removes and len(operands) > 1:
-            key, value = operands[:2]
-            if key.casefold() in GIT_COMMAND_KEYS:
-                scan(value, cwd)
-            elif key.casefold().startswith("alias."):
-                inspect_git_alias(value, args, cwd)
-    if not words:
-        return
-    command = words[0]
-    # commit の -n は --no-verify、push・clean の -n は --dry-run
-    if command in {"push", "clean", "commit"}:
-        value_options = CLI_VALUE_OPTIONS["git"] | {
-            "commit": {"-m", "--message", "-F", "--file", "--author", "--date", "--reedit-message", "--reuse-message", "--fixup", "--squash", "--trailer", "-t", "--template", "--cleanup", "--pathspec-from-file", "-U", "--unified", "--inter-hunk-context"},
-            "clean": {"-e", "--exclude"},
-            "push": {"--repo", "--receive-pack", "--exec", "-o", "--push-option", "--recurse-submodules"},
-        }[command]
-        if has_option(args, {"--dry-run"}, "n" if command != "commit" else "", value_options, negated={"--no-dry-run"}):
-            return
-    if command == "reflog" and has_option(args, {"--dry-run"}, "n", CLI_VALUE_OPTIONS["git"], negated={"--no-dry-run"}):
-        return
-    if command == "push" and (has_option(args, {"--force", "--mirror", "--prune"}, "f") or any(word.startswith("+") for word in words[1:])):
-        deny(DESTRUCTIVE_REASON)
-    if command == "reset" and has_option(args, {"--hard"}):
-        deny(DESTRUCTIVE_REASON)
-    if command == "clean" and has_option(args, {"--force"}, "f"):
-        deny(DESTRUCTIVE_REASON)
-    if command in {"commit", "merge", "rebase", "push"} and has_option(args, {"--no-verify"}, "n" if command == "commit" else ""):
-        deny(DESTRUCTIVE_REASON)
-    if command in {"checkout", "switch"} and has_option(args, {"--force", "--discard-changes"}, "f"):
-        deny(DESTRUCTIVE_REASON)
-    if matches_subcommand(words, {"filter-branch", "stash clear", "reflog expire", "reflog delete"}):
-        deny(DESTRUCTIVE_REASON)
-
-
-def inspect_security(args, words):
-    """キーチェーンの秘密出力を検査"""
-    # 対話モードは標準入力から任意のサブコマンドを受け取る
-    if has_option(args, set(), "i"):
-        deny(SECRET_OUTPUT_REASON)
-    if has_option(args, {"--help", "-h"}) or words[:1] == ["help"]:
-        return
-    if not words:
-        deny(SECRET_OUTPUT_REASON)
-    command = words[0]
-    if command in {"dump-keychain", "export-smartcard"}:
-        deny(SECRET_OUTPUT_REASON)
-    if command in {"find-generic-password", "find-internet-password"} and has_option(args, set(), "wg"):
-        deny(SECRET_OUTPUT_REASON)
-    if command == "export":
-        types = option_values(args, {"-t"})
-        if not types or any(value not in {"certs", "pubKeys"} for value in types):
-            deny(SECRET_OUTPUT_REASON)
-
-
-def inspect_aws(args, words):
-    """AWS の秘密取得を検査"""
-    if has_option(args, {"--version"}):
-        return
-    # オプション値の help をヘルプ要求と誤認しない
-    help_words = []
-    index = 0
-    while index < len(args):
-        argument = args[index]
-        name, separator, _ = argument.partition("=")
-        if name in CLI_VALUE_OPTIONS["aws"]:
-            index += 1 if separator else 2
-            continue
-        if argument not in {"--debug", "--no-verify-ssl", "--no-paginate", "--no-sign-request", "--no-cli-pager"}:
-            help_words.append(argument)
-        index += 1
-    if 1 <= len(help_words) <= 3 and help_words[-1] == "help" and all(not word.startswith("-") for word in help_words):
-        return
-    if has_option(args, {"--debug"}):
-        deny(SECRET_OUTPUT_REASON)
-    if len(words) < 2:
-        return
-    service, operation = words[:2]
-    # --generate-cli-skeleton は標準 API にだけ適用
-    custom = {("configure", "export-credentials"), ("cloudfront", "sign"), ("codecommit", "credential-helper"), ("ecr", "get-login-password"), ("ecr-public", "get-login-password"), ("eks", "get-token"), ("rds", "generate-db-auth-token"), ("s3", "presign")}
-    if (service, operation) not in custom and service not in {"history", "dsql"} and has_option(args, {"--generate-cli-skeleton"}):
-        return
-    if service == "apigateway" and operation in {"get-api-key", "get-api-keys"} and not has_option(args, {"--include-value", "--include-values"}):
-        return
-    if operation in AWS_SECRET_OPERATIONS.get(service, set()):
-        deny(SECRET_OUTPUT_REASON)
-    if service == "ssm" and operation in {"get-parameter", "get-parameters", "get-parameters-by-path", "get-parameter-history"}:
-        if has_option(args, {"--with-decryption"}):
-            deny(SECRET_OUTPUT_REASON)
-    if service == "configure" and operation in {"get", "set"} and len(words) > 2 and secret_name(words[2]):
-        deny(SECRET_OUTPUT_REASON)
-    if matches_subcommand(words, {"codecommit credential-helper get"}):
-        deny(SECRET_OUTPUT_REASON)
-    # login --dry-run はトークンを表示する
-    if service == "codeartifact" and operation == "login" and has_option(args, {"--dry-run"}):
-        deny(SECRET_OUTPUT_REASON)
-
-
-def inspect_gh(args, words, cwd):
-    """トークン出力・API・子コマンドを検査"""
-    # auth・config の -h はホスト名の指定
-    hostname = words[:1] in (["auth"], ["config"])
-    if hostname:
-        words = cli_words("gh", args, {"-h"})
-    if has_option(args, {"--help"} if hostname else {"--help", "-h"}) or words[:1] == ["help"]:
-        return
-    if matches_subcommand(words, {"auth token", "auth git-credential"}):
-        deny(SECRET_OUTPUT_REASON)
-    if words[:2] == ["auth", "status"] and has_option(args, {"--show-token"}, "t"):
-        deny(SECRET_OUTPUT_REASON)
-    if words[:2] == ["config", "get"] and any(secret_name(word) for word in words[2:]):
-        deny(SECRET_OUTPUT_REASON)
-    if matches_subcommand(words, {"repo clone", "codespace ssh"}) and "--" in args:
-        child = args[args.index("--") + 1:]
-        inspect_argv((["git", "clone"] if words[:2] == ["repo", "clone"] else ["ssh"]) + child, cwd, 1)
-    if words[:1] == ["api"]:
-        endpoints = cli_words("gh", args, {"-X", "--method", "-H", "--header", "-f", "-F", "--field", "--raw-field", "--input", "--jq", "-q", "--template", "-t", "--cache", "--preview"})[1:]
-        for endpoint in endpoints:
-            path = "/" + unquote(urlsplit(endpoint).path).strip("/")
-            if re.search(r"/(?:registration-token|remove-token|generate-jitconfig|access_tokens|oauth/token)(?:/|$)", path):
-                deny(SECRET_OUTPUT_REASON)
-            if re.search(r"/(?:app-manifests/[^/]+/conversions|applications/[^/]+/token(?:/scoped)?)$", path):
-                deny(SECRET_OUTPUT_REASON)
-
-
-def inspect_terraform(args, words, cwd):
-    """state・output の出力とコマンド差し替えを検査"""
-    for value in option_values(args, {"--tf-path", "--terragrunt-tfpath", "--shell", "--terragrunt-iam-assume-role-command"}):
-        scan(value, cwd)
-    if has_option(args, {"--help", "-help", "-h"}):
-        return
-    while words and words[0] in {"run", "run-all", "stack"}:
-        words = words[1:]
-    if matches_subcommand(words, {"state pull", "state show"}):
-        deny(SECRET_OUTPUT_REASON)
-    if words[:1] == ["show"] and has_option(args, {"-json", "--json"}):
-        deny(SECRET_OUTPUT_REASON)
-    if words[:1] == ["output"] and (len(words) > 1 or has_option(args, {"-raw", "-json", "--raw", "--json"})):
-        deny(SECRET_OUTPUT_REASON)
-
-
-def inspect_kubernetes(command, args, words):
-    """Secret・トークン・kubeconfig の出力を検査"""
-    value_options = CLI_VALUE_OPTIONS[command]
-    if has_option(args, {"--help", "-h"}, value_options=value_options):
-        return
-    if words[:1] == ["sa"]:
-        words = ["serviceaccounts", *words[1:]]
-    if matches_subcommand(words, {"create token", "serviceaccounts new-token", "serviceaccounts get-token", "serviceaccounts create-kubeconfig"}):
-        deny(SECRET_OUTPUT_REASON)
-    if words[:1] in (["get"], ["describe"], ["extract"]) and len(words) > 1:
-        resources = words[1].casefold().split(",")
-        if any(resource.split("/", 1)[0].split(".", 1)[0] in {"secret", "secrets"} for resource in resources):
-            deny(SECRET_OUTPUT_REASON)
-    if words[:2] == ["config", "view"] and has_option(args, {"--raw", "--flatten"}, value_options=value_options):
-        deny(SECRET_OUTPUT_REASON)
-    if words[:1] == ["get"] and any(re.search(r"/secrets(?:[/?]|$)", value) for value in option_values(args, {"--raw"})):
-        deny(SECRET_OUTPUT_REASON)
-    if command == "oc" and words[:1] == ["whoami"] and has_option(args, {"--show-token"}, "t"):
-        deny(SECRET_OUTPUT_REASON)
-    if command == "oc" and words[:2] == ["registry", "login"] and has_option(args, {"--to", "--registry-config", "-a"}):
-        deny(SECRET_OUTPUT_REASON)
-
-
-def inspect_gsutil(args):
-    """大域オプションを gsutil と同じ getopt 定義で読み、署名 URL・HMAC キーの発行と認証情報を含むデバッグ出力を検査"""
-    try:
-        options, words = getopt.getopt(args, "dDvo:?h:i:u:mq", [
-            "debug", "detailedDebug", "version", "option", "help", "header", "impersonate-service-account=",
-            "multithreaded", "quiet", "testexceptiontraces", "trace-token=", "perf-trace-token=",
-        ])
-    except getopt.GetoptError:
-        return
-    flags = {name for name, _ in options}
-    if flags & {"-?", "--help"}:
-        return
-    # デバッグ指定はサブコマンドの help への切り替えより先に設定値を出す
-    if flags & {"-d", "-D", "--debug", "--detailedDebug"}:
-        deny(SECRET_OUTPUT_REASON)
-    # -v・--version はコマンドを version に置き換える
-    if flags & {"-v", "--version"} or "--help" in words:
-        return
-    if words[:1] in (["signurl"], ["signedurl"], ["queryauth"]):
-        deny(SECRET_OUTPUT_REASON)
-    if words[:1] == ["hmac"]:
-        # hmac は自身のオプションを読んだあとで操作名を取り出す
-        try:
-            action = getopt.getopt(words[1:], "ae:lp:s:u:")[1][:1]
-        except getopt.GetoptError:
-            return
-        if action == ["create"]:
-            deny(SECRET_OUTPUT_REASON)
-
-
-def safe_container_format(value):
-    """テンプレートの参照フィールドを検査"""
-    references = re.findall(r"\{\{([^{}]*)\}\}", value)
-    if not references:
-        return False
-    for reference in references:
-        reference = reference.strip()
-        if reference == ".Config.Image":
-            continue
-        if not re.fullmatch(r"\.[A-Za-z][A-Za-z0-9.]*", reference):
-            return False
-        if any(field.casefold() not in CONTAINER_SAFE_FIELDS for field in reference[1:].split(".")):
-            return False
-    return True
-
-
-def inspect_container(args, words):
-    """設定・環境変数の出力と特権実行を検査"""
-    if has_option(args, {"--help"}):
-        return
-    formats = option_values(args, {"--format", "-f"})
-    safe_format = bool(formats) and all(safe_container_format(value) for value in formats)
-    if matches_subcommand(words, {"inspect", "container inspect", "image inspect", "service inspect", "info", "system info", "history", "image history"}) and not safe_format:
-        deny(SECRET_OUTPUT_REASON)
-    if matches_subcommand(words, {"context export", "stack config", "pass get", "pass run"}):
-        deny(SECRET_OUTPUT_REASON)
-    if matches_subcommand(words, {"compose config", "compose convert"}):
-        if has_option(args, {"--environment"}) or not has_option(args, {"--services", "--volumes", "--profiles", "--images", "--networks", "--hash", "--quiet"}, "q"):
-            deny(SECRET_OUTPUT_REASON)
-    if matches_subcommand(words, {"ps", "container ls", "container ps", "compose ps"}):
-        if has_option(args, {"--no-trunc"}) and not safe_format:
-            deny(SECRET_OUTPUT_REASON)
-        if formats and not all(value.casefold() in {"table", "pretty"} or safe_container_format(value) for value in formats):
-            deny(SECRET_OUTPUT_REASON)
-    if matches_subcommand(words, {"top", "container top", "compose top"}):
-        # top の既定出力はプロセス引数を含む
-        if not option_values(args, {"-o"}):
-            deny(SECRET_OUTPUT_REASON)
-        inspect_process("ps", args)
-    if has_option(args, {"--privileged", "--use-api-socket"}):
-        deny(EXEC_OVERRIDE_REASON)
-
-
-def inspect_environment(command, args, words):
-    """環境・シェル変数の一括出力と秘密値の表示を検査"""
-    if command == "printenv":
-        if has_option(args, {"--help", "--version"}):
-            return
-        if not words or any(secret_name(word) for word in words):
-            deny(SECRET_OUTPUT_REASON)
-    if command == "set" and not args:
-        deny(SECRET_OUTPUT_REASON)
-    if command in {"export", "declare", "typeset"}:
-        if not words or has_option(args, set(), "p"):
-            deny(SECRET_OUTPUT_REASON)
-        if command != "export" and any("=" not in word and secret_name(word) for word in words):
-            deny(SECRET_OUTPUT_REASON)
-
-
-def inspect_process(command, args):
-    """プロセスの引数・環境変数の表示を検査"""
-    if command == "ps":
-        if has_option(args, {"--help"}) or args == ["-L"]:
-            return
-        bsd = args[0] if args and re.fullmatch(r"[A-Za-z]+", args[0]) else ""
-        if "e" in bsd or has_option(args, set(), "E"):
-            deny(SECRET_OUTPUT_REASON)
-        formats = option_values(args, {"-o", "--format"})
-        if has_option(args, {"-O"}):
-            deny(SECRET_OUTPUT_REASON)
-        if formats:
-            if any(field.split("=", 1)[0].casefold() in {"args", "cmd", "command", "env", "environ"} for value in formats for field in re.split(r"[\s,]+", value)):
-                deny(SECRET_OUTPUT_REASON)
-        elif "c" not in bsd and not has_option(args, set(), "c"):
-            deny(SECRET_OUTPUT_REASON)
-    elif command == "pgrep":
-        if has_option(args, {"--list-full"}, "a") or has_option(args, set(), "f") and has_option(args, set(), "l"):
-            deny(SECRET_OUTPUT_REASON)
-    elif command == "launchctl":
-        words = cli_words(command, args)
-        if matches_subcommand(words, {"export", "print", "print-cache", "dumpstate"}):
-            deny(SECRET_OUTPUT_REASON)
-        if words[:1] == ["getenv"] and (len(words) < 2 or secret_name(words[1])):
-            deny(SECRET_OUTPUT_REASON)
-    elif command == "sysctl":
-        if any(word.casefold().startswith("kern.procargs") for word in args):
-            deny(SECRET_OUTPUT_REASON)
-
-
-def inspect_packages(command, args, words):
-    """パッケージ設定の秘密出力を検査"""
-    if has_option(args, {"--help", "--version", "-h"}):
-        return
-    if command in {"pip", "pip3"}:
-        if matches_subcommand(words, {"config list", "config debug"}):
-            deny(SECRET_OUTPUT_REASON)
-        if words[:2] == ["config", "get"] and any(word.rsplit(".", 1)[-1].casefold() in {"index-url", "extra-index-url", "proxy"} for word in words[2:]):
-            deny(SECRET_OUTPUT_REASON)
-    if command in {"npm", "pnpm"}:
-        # pnpm 11 の pm・with <version|current> は後続コマンドを実行
-        if command == "pnpm":
-            if words[:1] == ["pm"]:
-                words = words[1:]
-            if words[:1] == ["with"]:
-                words = words[2:]
-        if words and words[0] in PACKAGE_CONFIG_ALIASES[command]:
-            words = PACKAGE_CONFIG_ALIASES[command][words[0]].split() + words[1:]
-        if command == "npm" and (matches_subcommand(words, {"config list", "config ls"}) or words in (["config", "get"], ["config"])):
-            deny(SECRET_OUTPUT_REASON)
-        if words[:2] == ["config", "get"] and any(secret_name(word) or "_auth" in word.casefold() for word in words[2:]):
-            deny(SECRET_OUTPUT_REASON)
-
-
-def inspect_cli(command, args, cwd):
-    """秘密出力・実行設定の差し替え・破壊操作を検査"""
-    if command in {"kubectl", "oc"}:
-        # pflag はオプション名の _ を - とみなす
-        args = [re.sub(r"^--[^=]+", lambda match: match.group().replace("_", "-"), argument) for argument in args]
-    words = cli_words(command, args)
-    if command.startswith(("docker-credential-", "git-credential-")):
-        deny(SECRET_OUTPUT_REASON)
-    if command == "security":
-        inspect_security(args, words)
-    elif command == "git":
-        inspect_git(args, words, cwd)
-    elif command == "aws":
-        inspect_aws(args, words)
-    elif command == "gh":
-        inspect_gh(args, words, cwd)
-    elif command in {"terraform", "terragrunt"}:
-        inspect_terraform(args, words, cwd)
-    elif command in {"kubectl", "oc"}:
-        inspect_kubernetes(command, args, words)
-    elif command == "gsutil":
-        inspect_gsutil(args)
-    elif command == "docker":
-        inspect_container(args, words)
-    elif command in {"printenv", "set", "export", "declare", "typeset"}:
-        inspect_environment(command, args, words)
-    elif command in {"ps", "pgrep", "launchctl", "sysctl"}:
-        inspect_process(command, args)
-    elif command in {"ssh", "scp", "sftp"}:
-        for setting in option_values(args, {"-o"}):
-            if "=" not in setting:
-                setting = setting.replace(" ", "=", 1)
-            name, _, value = setting.partition("=")
-            if name.casefold() in {"proxycommand", "localcommand", "remotecommand"}:
-                scan(value, cwd)
-    elif command in SECRET_SUBCOMMANDS:
-        if has_option(args, {"--help", "-h"}, value_options=CLI_VALUE_OPTIONS.get(command, ())) or words[:1] == ["help"]:
-            return
-        if command == "gcloud" and words[:1] in (["alpha"], ["beta"], ["preview"]):
-            words = words[1:]
-        if matches_subcommand(words, SECRET_SUBCOMMANDS[command]):
-            deny(SECRET_OUTPUT_REASON)
-        if command == "vault" and words[:1] == ["login"]:
-            if not has_option(args, {"-no-print"}) or has_option(args, {"-token-only"}):
-                deny(SECRET_OUTPUT_REASON)
-        if command == "az" and words[:2] == ["acr", "login"] and has_option(args, {"--expose-token"}):
-            deny(SECRET_OUTPUT_REASON)
-    elif command in {"rosa", "ocm"}:
-        if not has_option(args, {"--help", "-h"}):
-            if matches_subcommand(words, {"token", "create admin"}) or has_option(args, {"--token", "--show-token"}):
-                deny(SECRET_OUTPUT_REASON)
-            if words[:1] == ["config"] and (len(words) == 1 or any(secret_name(word) for word in words[1:])):
-                deny(SECRET_OUTPUT_REASON)
-    elif command == "fc":
-        deny(SECRET_OUTPUT_REASON)
-    elif command == "history":
-        if not args or args == ["--"] or has_option(args, set(), "anrw") or re.fullmatch(r"-?\d+", args[0]):
-            deny(SECRET_OUTPUT_REASON)
-        if has_option(args, set(), "p") and any("!" in word or word.startswith("^") for word in words):
-            deny(SECRET_OUTPUT_REASON)
-    elif command == "hash" and has_option(args, {"-p"}):
-        deny(EXEC_OVERRIDE_REASON)
-    elif command == "rsync" and has_option(args, {"--password-file"}):
-        deny(SECRET_OUTPUT_REASON)
-    elif command == "diskutil" and words:
-        # quiet は出力を抑える前置き、ap は apfs の略記
-        verbs = [word.casefold() for word in (words[1:] if words[0] == "quiet" else words)]
-        if verbs and (
-            verbs[0] in {"erasedisk", "erasevolume", "partitiondisk", "zerodisk", "randomdisk", "secureerase", "reformat"}
-            or verbs[0] in {"apfs", "ap"} and len(verbs) > 1 and verbs[1] in {"erasevolume", "deletecontainer", "deletevolume", "deletevolumegroup"}
-        ):
-            deny(DESTRUCTIVE_REASON)
-    elif command.startswith("mkfs") or command in {"newfs", "newfs_apfs", "newfs_hfs"}:
-        if not has_option(args, {"--help", "--version", "-h"}):
-            deny(DESTRUCTIVE_REASON)
-    elif command == "wipefs" and has_option(args, {"--all", "--offset"}, "ao"):
-        deny(DESTRUCTIVE_REASON)
-    elif command == "fdisk" and has_option(args, set(), "eiu"):
-        deny(DESTRUCTIVE_REASON)
-    elif command == "dd" and any(argument.startswith(("of=/dev/disk", "of=/dev/rdisk", "of=/dev/sd", "of=/dev/nvme")) for argument in args):
-        deny(DESTRUCTIVE_REASON)
-    if re.fullmatch(r"pip(?:[._-]?\d+(?:[._-]\d+)*)?", command):
-        inspect_packages("pip", args, cli_words(command, args, {"--python", "--proxy", "--timeout", "--retries", "--cert", "--client-cert", "--cache-dir", "--log"}))
-    elif command in {"npm", "pnpm"}:
-        inspect_packages(command, args, cli_words(command, args, {"--prefix", "--userconfig", "--globalconfig", "--registry", "--loglevel", "-C"}))
-
-
-# Hermes の認証保存先
-HERMES_CREDENTIAL_FILES = (
-    ".anthropic_oauth.json", "auth.json", "auth.lock", "auth/google_oauth.json",
-    "cache/bws_cache.enc.json", "cache/bws_cache.json", "config.yaml", "webhook_subscriptions.json",
+  | hermes-snap-[^/]+\.sh(?:\.tmp\.[^/]+)?
+  | id_(?:rsa|dsa|ecdsa|ed25519)(?![^/]*\.pub$)[^/]*
+  | [^/]*\.(?:p12|pfx|p8|ppk|key|keystore|jks|kdbx)
+  | [^/]*(?:service[-_]account|client[-_]secret|application_default_credentials)[^/]*\.json
+  | (?![^/]*public)(?:[^/]*priv[^/]*|(?:[^/]*[-_.])?key)\.(?:pem|der)
+)(?=/|$)""", re.X)
+SECRET_WORDS = re.compile(
+    r"(?:^|_)(?:TOKENS?|SECRETS?|PASSWORD|PASSWD|CREDENTIALS?|API_?KEY|ACCESS_?KEY|PRIVATE_?KEY)(?:_|$)"
 )
-HERMES_CREDENTIAL_DIRECTORIES = ("backups/config", "browser-profile", "browser-profiles", "browser_profiles", "mcp-tokens", "vault")
-HERMES_ROOTS = {os.path.expanduser("~/.hermes")}
-HERMES_CREDENTIAL_PATTERN = re.compile(
-    r"(?:profiles/[^/]+/)?(?:"
-    + "|".join(re.escape(name) + r"[^/]*" for name in HERMES_CREDENTIAL_FILES)
-    + "|" + "|".join(re.escape(name) + r"(?:/.*)?" for name in HERMES_CREDENTIAL_DIRECTORIES)
-    + r"|state-snapshots/[^/]+/(?:auth\.json|config\.yaml)[^/]*"
-    + r"|backups/pre-(?:update|migration)-[^/]+\.zip)"
-)
+HOME_VARIABLES = {"HOME": "~", "CODEX_HOME": "~/.codex", "HERMES_HOME": "~/.hermes"}
 
-
-# ホームからの相対パス
-CREDENTIAL_LOCATIONS = (
-    ".aws/credentials", ".aws/login", ".aws/sso", ".aws/cli",
-    ".ssh", ".gnupg", ".docker/config.json", ".config/gh/hosts.yml",
-    ".config/gcloud", ".config/containers/auth.json", ".local/share/uv/credentials",
-    ".ocm.json", ".config/ocm/ocm.json", "Library/Application Support/ocm/ocm.json",
-    ".config/helm/repositories.yaml", ".config/helm/registry/config.json",
-    "Library/Preferences/helm/repositories.yaml", "Library/Preferences/helm/registry/config.json",
-    ".kube/config", ".codex/auth.json", ".codex/.credentials.json", ".codex/shell_snapshots",
-    "Library/Application Support/orca/codex-runtime-home/home/auth.json",
-    "Library/Application Support/orca/codex-runtime-home/system-default-auth.json",
-    "Library/Application Support/orca/codex-runtime-home/system-default-runtime-logout.json",
-    "Library/Application Support/orca/codex-runtime-home/shared-runtime-auth-provenance.json",
-    ".claude/.credentials.json", ".claude/shell-snapshots", ".claude/backups",
-    ".claude.json", ".claude.json.backup", ".terraform.d/credentials.tfrc.json",
-    ".terraformrc", ".vault-token", ".azure", ".cargo/credentials.toml",
-    ".cargo/credentials", ".curlrc", ".wgetrc", ".bundle/config",
-    ".config/composer/auth.json", ".composer/auth.json", ".config/pypoetry/auth.toml",
-    "Library/Application Support/pypoetry/auth.toml", ".config/pip/pip.conf",
-    ".pip/pip.conf", "Library/Application Support/pip/pip.conf",
-    ".zsh_sessions", ".bash_sessions", "Library/Keychains",
-) + tuple(".hermes/" + name for name in HERMES_CREDENTIAL_FILES + HERMES_CREDENTIAL_DIRECTORIES)
-# ホーム外でも保護するパス断片
-CREDENTIAL_FRAGMENTS = tuple(path.casefold() for path in CREDENTIAL_LOCATIONS) + (
-    "gh/hosts.yml", "gcloud/application_default_credentials.json", "gcloud/credentials.db",
-    "gcloud/access_tokens.db", "ocm/ocm.json", "helm/repositories.yaml",
-    "helm/registry/config.json", "uv/credentials", "cargo/credentials.toml", "composer/auth.json",
-    "containers/auth.json", "pypoetry/auth.toml",
-)
-# バックアップなどの派生名も保護するパス断片
-CREDENTIAL_PREFIX_FRAGMENTS = (
-    ".aws/credentials", ".kube/config", "gh/hosts.yml", "gcloud/application_default_credentials.json",
-    "gcloud/credentials.db", "gcloud/access_tokens.db", "ocm/ocm.json", "helm/repositories.yaml",
-    "helm/registry/config.json", "uv/credentials",
-)
-CREDENTIAL_NAMES = set("""
-    .git-credentials .netrc .pgpass .pg_service.conf pg_service.conf
-    .pypirc .zsh_history .bash_history fish_history pip.conf
+# 本文を出力・複製・送信するコマンド
+PATTERN_FIRST = {"awk", "egrep", "fgrep", "gawk", "grep", "gsed", "jq", "mawk", "nawk", "rg", "sed", "yq"}
+COPIERS = {"cp", "rsync", "scp"}
+READERS = PATTERN_FIRST | COPIERS | set("""
+    base32 base64 cat comm curl cut dd diff head hexdump less
+    more nl od paste sort strings tail tar uniq xxd
 """.split())
-CREDENTIAL_SUFFIXES = (".p12", ".pfx", ".p8", ".ppk", ".key", ".keystore", ".jks", ".kdbx")
-CREDENTIAL_PATH_VARIABLES = set("""
-    AWS_SHARED_CREDENTIALS_FILE KUBECONFIG GH_CONFIG_DIR
-    GOOGLE_APPLICATION_CREDENTIALS GOOGLE_CREDENTIALS CLOUDSDK_CONFIG
-    DOCKER_CONFIG REGISTRY_AUTH_FILE TF_CLI_CONFIG_FILE OCM_CONFIG
-    HELM_REPOSITORY_CONFIG HELM_REGISTRY_CONFIG PGPASSFILE PGSERVICEFILE
-    PIP_CONFIG_FILE NETRC
-    AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE AWS_LOGIN_CACHE_DIRECTORY
-    AWS_WEB_IDENTITY_TOKEN_FILE AZURE_CONFIG_DIR BUNDLE_USER_CONFIG
-    CARGO_HOME COMPOSER_HOME DOCKER_CERT_PATH GNUPGHOME
-    HELM_CONFIG_HOME PGSSLKEY PGSYSCONFDIR UV_CREDENTIALS_DIR WGETRC
-""".split())
+# 引数を子コマンドとして起動するコマンドと、-- の後ろを子コマンドとして起動するコマンド
+RUNNERS = set("arch builtin caffeinate command coproc env exec nice nohup sudo time timeout xargs".split())
+DELEGATORS = {"docker", "kubectl", "mise", "npm", "npx", "oc", "pnpm", "yarn"}
+SHELLS = {"bash", "dash", "ksh", "sh", "zsh"}
+KEYWORDS = {"!", "do", "elif", "else", "if", "then", "until", "while", "{"}
 
-
-def path_spellings(value, cwd):
-    """本文を読まず、ホーム表記・symlink を解決"""
-    if UNKNOWN_ARGUMENT in value:
-        return set()
-    if value.startswith(("file://", "fileb://")):
-        value = unquote(urlsplit(value).path)
-    home = os.path.expanduser("~")
-    # HOME は置換文字列として再解釈せず挿入
-    value = re.sub(r"\$(?:HOME\b|\{HOME\})", lambda _match: home, value)
-    value = re.sub(r"\$(?:CODEX_HOME\b|\{CODEX_HOME\})", lambda _match: os.path.join(home, ".codex"), value)
-    value = re.sub(r"\$(?:HERMES_HOME\b|\{HERMES_HOME\})", lambda _match: os.path.join(home, ".hermes"), value)
-    value = os.path.expanduser(value)
-    if cwd is None and not os.path.isabs(value):
-        # cwd 不明でも既知の秘密名を検査
-        return {"./" + os.path.normpath(value).casefold()}
-    path = value if os.path.isabs(value) else os.path.join(cwd, value)
-    return {os.path.normpath(path).casefold(), os.path.realpath(path).casefold()}
-
-
-def hermes_relative_paths(path, cwd):
-    """Hermes の既定・実行時ホームからの相対パスを返す"""
-    return (
-        path[len(root) + 1:]
-        for value in HERMES_ROOTS
-        for root in path_spellings(value, cwd)
-        if path.startswith(root + "/")
+ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\+?=")
+# ${NAME:+…} は値を出力しない
+EXPANSION = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)(?![A-Za-z0-9_])(?!:?\+)")
+HEREDOC = re.compile(
+    r"((?<!<)<<-?[ \t]*(['\"]?)([^\s'\"<>|&;()]+)\2)([^\n]*)\n(.*?)^[ \t]*\3[ \t]*$", re.S | re.M
+)
+TOKEN = re.compile(r"""
+    (?P<blank>[ \t\r]+)
+  | (?P<continuation>\\\n)
+  | (?P<comment>(?<![^\s;&|()<>])\#[^\n]*)
+  | (?P<single>'[^']*')
+  | (?P<escape>\\.)
+  | (?P<operator>
+        (?:(?<![^\s;&|()<>])\d+(?=[<>]))?(?:<<<|<<-?|[<>]&|&>>?|>>|>\||<>|[<>])
+      | \|\||&&|;;|[;&|()\n]
     )
+  | (?P<plain>`[^`]*`|.)
+""", re.X | re.S)
 
 
-def hermes_credential_path(path, cwd):
-    """正規化済みパスの Hermes 認証保存先・スナップショットを判定"""
-    return bool(
-        re.fullmatch(r"hermes-snap-[^/]+\.sh(?:\.tmp\.[^/]+)?", os.path.basename(path))
-        or any(HERMES_CREDENTIAL_PATTERN.fullmatch(relative) for relative in hermes_relative_paths(path, cwd))
-    )
+def expand(value):
+    """~ とホームを指す変数を展開"""
+    return os.path.expanduser(re.sub(
+        r"\$(?:(\w+)|\{(\w+)\})",
+        lambda match: HOME_VARIABLES.get(match[1] or match[2], match[0]),
+        value,
+    ))
 
 
 def credential_path(value, cwd):
-    """認証情報を指すパス・変数参照を判定"""
-    if not value or value == "-":
+    """認証情報を指すパスか判定（本文は読まず、symlink の解決先も対象）"""
+    if not value:
         return False
-    variables = re.findall(r"\$(?:\{([A-Za-z_][A-Za-z_0-9]*)[^}]*\}|([A-Za-z_][A-Za-z_0-9]*))", value)
-    if any((braced or plain).upper() in CREDENTIAL_PATH_VARIABLES for braced, plain in variables):
-        return True
-    if re.match(r"[A-Za-z][A-Za-z0-9+.-]*://", value) and not value.startswith(("file://", "fileb://")):
-        return False
-    for path in path_spellings(value, cwd):
-        if hermes_credential_path(path, cwd):
-            return True
-        parts = path.split("/")
-        name = parts[-1]
-        if any(part.startswith(".env") or part in {"secrets", "credentials"} for part in parts):
-            return True
-        if name in CREDENTIAL_NAMES or ".tfstate" in name or name.endswith(CREDENTIAL_SUFFIXES):
-            return True
-        if name.endswith(".json") and re.search(r"service[-_]account|client[-_]secret|application_default_credentials", name):
-            return True
-        if not name.endswith(".pub") and name.startswith(("id_rsa", "id_dsa", "id_ecdsa", "id_ed25519")):
-            return True
-        public_key = name.endswith((".pub", ".crt", ".cer")) or bool(re.search(r"(?:^|[-_.])public(?:[-_.]|$)", name))
-        if not public_key and name.endswith((".pem", ".der")) and re.search(r"(?:^|[-_.])(?:key|priv|private)(?:[-_.]|$)|priv(?:ate)?[-_]?key", name):
-            return True
-        normalized = re.sub(r"(?<=/)\.codex-account-[^/]+(?=/)", ".codex", path)
-        normalized = re.sub(r"(?<=/library/application support/orca/)codex-accounts/[^/]+(?=/home/)", "codex-runtime-home", normalized)
-        for fragment in CREDENTIAL_FRAGMENTS:
-            if fragment == ".ssh" and public_key:
-                continue
-            if "/" + fragment + "/" in normalized + "/":
-                return True
-        if any("/" + fragment in normalized for fragment in CREDENTIAL_PREFIX_FRAGMENTS):
-            return True
-    return False
-
-
-def path_exposes_credentials(value, cwd, search=False):
-    """認証情報・保管先の親ディレクトリを判定（search は保管先以外の同名ディレクトリとホーム以上を除く）"""
-    if credential_path(value, cwd):
-        return True
-    if re.search(r"(?:^|/)\.codex-account-[^/]+/?$", value, re.IGNORECASE):
-        return True
-    for path in path_spellings(value, cwd):
-        if re.search(r"/library/application support/orca/codex-accounts(?:/[^/]+(?:/home)?)?$", path):
-            return True
-        for relative in hermes_relative_paths(path, cwd):
-            if re.fullmatch(r"profiles(?:/[^/]+)?", relative):
-                return True
-            relative = re.sub(r"^profiles/[^/]+/", "", relative)
-            if re.fullmatch(r"state-snapshots(?:/[^/]+)?", relative):
-                return True
-            if any(name.startswith(relative + "/") for name in HERMES_CREDENTIAL_FILES + HERMES_CREDENTIAL_DIRECTORIES):
-                return True
-    home = os.path.expanduser("~")
-    protected = [os.path.join(home, path).casefold() for path in CREDENTIAL_LOCATIONS]
-    protected.append("/library/keychains")
-    directories = {
-        "/".join(parts[:index])
-        for fragment in CREDENTIAL_FRAGMENTS
-        for parts in [fragment.split("/")]
-        for index in range(1, len(parts))
-    }
-    if not search and any(path.endswith("/" + directory) for path in path_spellings(value, cwd) for directory in directories):
-        return True
+    path = os.path.join(cwd, expand(value))
     return any(
-        target.startswith(path.rstrip("/") + "/")
-        for path in path_spellings(value, cwd)
-        if os.path.isabs(path) and not (search and (home.casefold() + "/").startswith(path.rstrip("/") + "/"))
-        for target in protected
+        CREDENTIAL_PATH.search(spelling.casefold())
+        for spelling in (os.path.normpath(path), os.path.realpath(path))
     )
 
 
-def path_arguments(args, value_options=()):
-    """位置引数と既知のオプション値を分離"""
-    operands, values = [], {}
-    index = 0
-    while index < len(args):
-        argument = args[index]
-        index += 1
-        if argument == "--":
-            operands.extend(args[index:])
-            break
-        if not argument.startswith("-") or argument == "-":
-            operands.append(argument)
-            continue
-        option, separator, value = argument.partition("=")
-        if option not in value_options and not argument.startswith("--"):
-            for offset, letter in enumerate(argument[1:], 1):
-                if "-" + letter in value_options:
-                    option = "-" + letter
-                    value = argument[offset + 1:]
-                    separator = bool(value)
-                    break
-        if option not in value_options:
-            continue
-        if not separator:
-            if index == len(args):
-                deny("ファイル入力オプションの値がありません。")
-            value = args[index]
-            index += 1
-        values.setdefault(option, []).append(value)
-    return operands, values
-
-
-GIT_CONTENT_OPTIONS = set("""
-    --output -o --pathspec-from-file
-    -G -S --word-diff-regex --grep --author --committer
-    --date --since --until --after --before --encoding
-    --max-count -n --skip -L -O --contents
-    --stat-width --stat-name-width --stat-graph-width --stat-count
-""".split())
-
-
-def git_metadata_only(operation, args):
-    """パッチを出さないメタデータ表示を判定"""
-    metadata, patch, names_only = operation in {"log", "reflog"}, False, False
-    index = 0
-    while index < len(args) and args[index] != "--":
-        argument = args[index]
-        option, separator, _value = argument.partition("=")
-        index += 1
-        if option in GIT_CONTENT_OPTIONS:
-            if option in {"-L", "--word-diff-regex"}:
-                patch = True
-            if option.startswith("--stat-"):
-                metadata = True
-            index += not separator
-        elif option in {"--name-only", "--name-status", "--quiet"}:
-            names_only = True
-        # 統計とパッチは併存し、no-patch は先行パッチを解除
-        elif option in {"--stat", "--numstat", "--shortstat", "--summary", "--raw", "--dirstat", "--dirstat-by-file", "--compact-summary"}:
-            metadata = True
-        elif option == "--no-patch":
-            metadata, patch = True, False
-        elif option in {"--patch", "--patch-with-stat", "--patch-with-raw", "--word-diff", "--color-words", "--check", "--cc", "--dd", "--remerge-diff", "--binary", "--unified", "--function-context"}:
-            patch = True
-        elif argument.startswith("-") and not argument.startswith("--"):
-            for flag in argument[1:]:
-                if "-" + flag in GIT_CONTENT_OPTIONS:
-                    if flag == "L":
-                        patch = True
-                    break
-                elif flag == "s":
-                    metadata, patch = True, False
-                elif flag in "puUcWL":
-                    patch = True
-    return names_only or (metadata and not patch)
-
-
-def check_path(value, cwd, recursive=False, search=False):
-    """認証情報のパスを拒否（recursive は保管先の親も対象）"""
-    exposed = path_exposes_credentials(value, cwd, search) if recursive else credential_path(value, cwd)
-    if exposed:
-        deny("認証情報ファイルの直接読み取り・持ち出しは許可していません。")
-
-
-def check_path_values(values, options, cwd):
-    """オプション値のパスを検査"""
-    for option in options:
-        for value in values.get(option, []):
-            check_path(value, cwd)
-
-
-def inspect_grep_paths(command, args, cwd, reads_stdin):
-    """grep・rg の検索対象を検査（再帰検索と grep は保管先の親も対象）"""
-    value_options = {
-        "-e", "--regexp", "-f", "--file", "-g", "--glob", "--iglob", "-t", "--type",
-        "--type-not", "-A", "-B", "-C", "-m", "--max-count",
-        "--colors", "--encoding", "--exclude", "--exclude-dir", "--include",
-        "--ignore-file", "--exclude-from", "--replace", "--type-add", "--type-clear", "--max-depth",
-    }
-    # rg は -r・-d・-T 等が値を取り、grep は実装差のある -T・--color・--context を値なしとする（-d・-D は走査方法）
-    value_options |= {"-r", "-d", "-E", "-j", "-M", "-T", "--color", "--context"} if command == "rg" else {"-d", "--directories", "-D", "--devices"}
-    operands, values = path_arguments(args, value_options)
-    check_path_values(values, {"-f", "--file", "--ignore-file", "--exclude-from"}, cwd)
-    if not values.keys() & {"-e", "--regexp", "-f", "--file"}:
-        operands = operands[1:]
-    if command == "rg":
-        recursive = not has_option(args, {"--files", "--type-list"}, value_options=value_options)
-    else:
-        # ugrep は -NUM・--depth でも再帰する
-        recursive = has_option(args, {"--recursive", "--dereference-recursive", "--depth"}, "rR", value_options) or (
-            "recurse" in values.get("-d", []) + values.get("--directories", [])
-        ) or any(re.fullmatch(r"-\d+", arg) for arg in args)
-    informational = has_option(args, {"--help", "--version", "-V"} | ({"-h"} if command == "rg" else set()), value_options=value_options)
-    # 値の誤認や ugrep の暗黙の再帰に備え、再帰検索と位置引数のない grep は cwd も検査（ヘルプ表示と、標準入力を読む rg・非再帰 grep を除く）
-    if not informational and ((recursive and not (command == "rg" and reads_stdin)) or (command != "rg" and not operands and not reads_stdin)):
-        operands = [*operands, "."]
-    # ugrep は -r なしでもディレクトリ直下を読むため、grep は常に保管先の親も対象
-    for operand in operands:
-        check_path(operand, cwd, recursive=recursive or command != "rg", search=True)
-
-
-def inspect_filter_paths(command, args, cwd):
-    """フィルターの入力ファイルを検査"""
-    program_options = {"-e", "--expression", "-f", "--file"}
-    if command in {"awk", "gawk", "mawk", "nawk"}:
-        program_options |= {"-F", "-v"}
-    # BSD sed の -i '' は空の拡張子
-    if command in {"sed", "gsed"}:
-        args = [argument for index, argument in enumerate(args) if not (index and args[index - 1] == "-i" and argument == "")]
-    if command in {"jq", "yq"}:
-        program_options = {"-f", "--from-file", "--indent"}
-        remaining = []
-        index = 0
-        while index < len(args):
-            argument = args[index]
-            if argument in {"--arg", "--argjson", "--slurpfile", "--rawfile"}:
-                if index + 2 >= len(args):
-                    deny("ファイル入力オプションの値がありません。")
-                if argument in {"--slurpfile", "--rawfile"}:
-                    check_path(args[index + 2], cwd)
-                index += 3
-            else:
-                remaining.append(argument)
-                index += 1
-        args = remaining
-    operands, values = path_arguments(args, program_options)
-    check_path_values(values, {"-f", "--file", "--from-file"}, cwd)
-    if not values.keys() & {"-e", "--expression", "-f", "--file", "--from-file"}:
-        operands = operands[1:]
-    if command in {"awk", "gawk", "mawk", "nawk"}:
-        operands = [operand for operand in operands if not re.match(r"[A-Za-z_][A-Za-z_0-9]*=", operand)]
-    return operands, cwd
-
-
-def inspect_reader_paths(command, args, cwd):
-    """ファイル読取コマンドの入力を検査"""
-    reader_options = {
-        "cmp": "--bytes --ignore-initial -i -n",
-        "cut": "--bytes --characters --delimiter --fields -b -c -d -f",
-        "diff": "--exclude --exclude-from --label -F -I -L -X -x",
-        "file": "--exclude --files-from --magic-file -e -f -m",
-        "head": "--bytes --lines -c -n",
-        "hexdump": "-e -f -n -s",
-        "less": "-P -T -j -p -t -x -z",
-        "md5": "-s",
-        "more": "-n",
-        "nl": "-b -d -f -h -i -l -n -s -v -w",
-        "od": "-A -N -j -t -w",
-        "paste": "--delimiters -d",
-        "shasum": "--algorithm -a",
-        "sort": "--buffer-size --field-separator --files0-from --key --output --random-source --temporary-directory -S -T -k -o -t",
-        "strings": "-e -n -t",
-        "tail": "--bytes --lines --sleep-interval -c -n -s",
-        "uniq": "-f -s -w",
-        "wc": "--files0-from",
-        "xxd": "-c -g -l -o -s",
-    }
-    if command in {"base64", "base32"}:
-        operands, values = path_arguments(args, {"-i", "--input", "-o", "--output", "-w", "--wrap"})
-        check_path_values(values, {"-i", "--input"}, cwd)
-    else:
-        operands, values = path_arguments(args, set(reader_options.get(command, "").split()))
-    check_path_values(values, {"--files0-from", "--random-source"}, cwd)
-    if command in {"hexdump", "file"}:
-        check_path_values(values, {"-f", "--files-from", "-m", "--magic-file"}, cwd)
-    if command == "diff":
-        check_path_values(values, {"-X", "--exclude-from"}, cwd)
-    # 第2位置引数は出力先
-    if command in {"uniq", "xxd"}:
-        operands = operands[:1]
-    return operands, cwd
-
-
-def inspect_copy_paths(command, args, cwd):
-    """コピー元の認証情報・保管先の親を検査"""
-    copy_options = {
-        "cp": "--suffix --target-directory -S -t",
-        "rsync": "--exclude --exclude-from --files-from --include --include-from --password-file --rsh -e",
-        "scp": "-D -F -J -P -S -c -i -l -o",
-    }
-    operands, values = path_arguments(args, set(copy_options[command].split()))
-    check_path_values(values, {"--exclude-from", "--include-from", "--files-from", "--password-file"}, cwd)
-    sources = operands if values.keys() & {"-t", "--target-directory"} else operands[:-1]
-    for source in sources:
-        if command in {"scp", "rsync"} and ":" in source:
-            source = source.split(":", 1)[1]
-        check_path(source, cwd, recursive=True)
-
-
-def inspect_dd_paths(args, cwd):
-    """dd の入力ファイルを検査"""
-    for argument in args:
-        if argument.startswith("if="):
-            check_path(argument[3:], cwd)
-
-
-def inspect_git_paths(args, cwd):
-    """git の読取対象ファイルを検査"""
-    index, cwd = git_command_context(args, cwd)
-    if index >= len(args):
-        return
-    operation, args = args[index], args[index + 1:]
-    file_options = {"--pathspec-from-file"}
-    if operation in {"commit", "tag", "merge", "notes", "fmt-merge-msg"}:
-        file_options |= {"-F", "--file"}
-    if operation == "commit":
-        file_options |= {"-t", "--template"}
-    value_options = set(file_options)
-    if operation in {"show", "diff", "diff-files", "diff-index", "diff-tree", "difftool", "log", "reflog", "format-patch", "whatchanged"}:
-        value_options |= GIT_CONTENT_OPTIONS
-    elif operation in {"blame", "annotate"}:
-        file_options |= {"--contents", "-S", "--ignore-revs-file"}
-        value_options |= file_options | {"-L", "--ignore-rev", "--date"}
-    elif operation in {"commit", "tag", "merge", "notes", "fmt-merge-msg"}:
-        value_options |= {"-m", "--message", "-u", "--ref"}
-    if operation == "archive":
-        value_options |= {"--format", "--prefix", "--remote", "--exec", "--add-file", "--add-virtual-file"}
-        file_options.add("--add-file")
-    operands, values = path_arguments(args, value_options)
-    check_path_values(values, file_options | {"--contents", "-O"}, cwd)
-    if operation == "log":
-        for selection in values.get("-L", []):
-            if ":" in selection:
-                check_path(selection.rsplit(":", 1)[1], cwd)
-    if operation in {"show", "cat-file"}:
-        for operand in operands:
-            if ":" in operand:
-                path = re.sub(r"^:[0-3]:", ":", operand).split(":", 1)[1]
-                check_path(path, cwd)
-    if operation in {"show", "diff", "diff-files", "diff-index", "diff-tree", "log", "reflog"} and git_metadata_only(operation, args):
-        return
-    if operation not in {"show", "diff", "diff-files", "diff-index", "diff-tree", "difftool", "log", "reflog", "grep", "archive", "cat-file", "blame", "annotate", "format-patch", "fast-export", "checkout-index", "whatchanged"}:
-        return
-    if operation == "grep":
-        # git grep は位置引数がなければ作業ディレクトリ全体を検索する
-        inspect_paths("grep", ["--recursive", *args], cwd)
-        return
-    return operands, cwd
-
-
-def inspect_openssl_paths(args, cwd):
-    """openssl の入力ファイルを検査"""
-    input_options = {"-in", "-inkey", "-key", "-cert", "-CAfile", "-CApath", "-config", "-extfile", "-signkey", "-untrusted", "-chain", "-certfile"}
-    # 接続用の鍵・証明書は出力しない
-    if args[:1] in (["s_client"], ["s_server"]):
-        input_options -= {"-key", "-cert", "-CAfile", "-CApath"}
-    _operands, values = path_arguments(args, input_options | {"-out", "-keyout", "-writerand"})
-    check_path_values(values, input_options, cwd)
-
-
-def inspect_tar_paths(args, cwd):
-    """作成元・読み込むアーカイブ・入力リストを検査"""
-    normalized = list(args)
-    # 旧形式では先頭の - を省略できる
-    if normalized and not normalized[0].startswith("-"):
-        normalized[0] = "-" + normalized[0]
-    operands, values = path_arguments(normalized, {"-f", "--file", "-C", "--directory", "-T", "--files-from", "-X", "--exclude-from", "--exclude", "--transform"})
-    creating = any(argument == "--create" or (argument.startswith("-") and not argument.startswith("--") and any(flag in argument[1:] for flag in "cru")) for argument in normalized)
-    check_path_values(values, {"-T", "--files-from", "-X", "--exclude-from"}, cwd)
-    if not creating:
-        check_path_values(values, {"-f", "--file"}, cwd)
-        return
-    for directory in values.get("-C", []) + values.get("--directory", []):
-        cwd = resolve_path(directory, cwd)
-    for operand in operands:
-        check_path(operand, cwd, recursive=True)
-
-
-def gh_file_options(args, direct_options, indirect_options, ignored_options):
-    """サブコマンドごとのファイル指定の短縮形を補正"""
-    direct_options, indirect_options = set(direct_options), set(indirect_options)
-    ignored_options = ignored_options | {
-        "-a", "--add", "-b", "--body", "-d", "--desc", "-f", "--filename",
-        "-t", "--title", "-n", "--notes", "--notes-start-tag", "--target",
-        "--discussion-category", "--type", "-s", "--source", "-T",
-    }
-    words, _values = path_arguments(args, direct_options | indirect_options | ignored_options)
-    pair = tuple(words[:2])
-    if pair in {
-        ("issue", "comment"), ("issue", "create"), ("issue", "edit"),
-        ("pr", "comment"), ("pr", "create"), ("pr", "edit"), ("pr", "merge"),
-        ("pr", "review"), ("pr", "revert"), ("release", "create"), ("release", "edit"),
-    }:
-        direct_options.add("-F")
-        indirect_options.discard("-F")
-    if pair == ("pr", "create"):
-        direct_options |= {"-T", "--template"}
-    elif pair in {("repo", "create"), ("repo", "new")}:
-        direct_options |= {"-s", "--source"}
-    elif pair == ("gist", "edit"):
-        direct_options |= {"-a", "--add"}
-    elif pair in {("secret", "set"), ("variable", "set")}:
-        direct_options.add("-f")
-    elif pair == ("attestation", "verify"):
-        direct_options.add("-b")
-    return direct_options, indirect_options, ignored_options, pair
-
-
-def inspect_transfer_paths(command, args, cwd):
-    """送信・読み込むファイルを検査"""
-    direct_options, indirect_options, ignored_options = (
-        set(options.split())
-        for options in {
-            "curl": (
-                "--config --upload-file -K -T",
-                "--data --data-binary --data-urlencode --form --header --json --proxy-header -F -H -d",
-                "--cacert --capath --cert --data-raw --form-string --key --netrc-file --output --proxy --proxy-cert --proxy-key --request --user -E -X -o -u -x",
-            ),
-            "gh": (
-                "--body-file --bundle --env-file --input --notes-file",
-                "--field -F",
-                "--header --hostname --jq --method --raw-field --repo --template -H -R -X -f",
-            ),
-            "wget": (
-                "--body-file --config --input-file --post-file -i",
-                "",
-                "--ca-certificate --certificate --load-cookies --output-document --output-file --private-key -O -o",
-            ),
-        }[command]
-    )
-    pair = ()
-    if command == "gh":
-        direct_options, indirect_options, ignored_options, pair = gh_file_options(args, direct_options, indirect_options, ignored_options)
-    operands, values = path_arguments(args, direct_options | indirect_options | ignored_options | {"--url"})
-    check_path_values(values, direct_options, cwd)
-    for option in indirect_options:
-        for value in values.get(option, []):
-            source = None
-            if option in {"-F", "--form", "--field"}:
-                for marker in ("=@", "=<"):
-                    if marker in value:
-                        source = value.split(marker, 1)[1].split(";", 1)[0]
-            elif value.startswith("@"):
-                source = value[1:]
-            elif option == "--data-urlencode" and "@" in value and "=" not in value.split("@", 1)[0]:
-                source = value.split("@", 1)[1]
-            if source is not None:
-                for path in source.split(","):
-                    check_path(path.removeprefix("@"), cwd)
-    for value in operands + values.get("--url", []):
-        if value.startswith(("file://", "fileb://")):
-            check_path(value, cwd)
-    if command == "gh":
-        start = None
-        if pair in {("gist", "create"), ("gist", "new"), ("ssh-key", "add"), ("gpg-key", "add"), ("attestation", "verify"), ("attestation", "download")}:
-            start = 2
-        elif pair in {("release", "create"), ("release", "new"), ("release", "upload"), ("gist", "edit")} or operands[:3] == ["repo", "deploy-key", "add"]:
-            start = 3
-        if start is not None:
-            # release アセットは file#label で表示名を指定
-            for value in operands[start:]:
-                check_path(value.split("#", 1)[0] if pair[0] == "release" else value, cwd)
-
-
-def inspect_container_paths(args, cwd):
-    """コンテナへ渡すファイル・マウント・build context・socket を検査"""
-    operands, values = path_arguments(args, {"-v", "--volume", "--mount", "--secret", "--env-file", "-f", "--file", "--build-context", "--config", "-H", "--host", "--name", "-e", "--env", "--build-arg", "-t", "--tag"})
-    if not {"build", "run", "create", "cp", "compose"}.intersection(operands):
-        return
-    if "--use-api-socket" in args:
-        deny("ホストの socket をコンテナへ渡す操作は許可していません。")
-    if "--secret" in values:
-        deny("secret をコンテナへ渡す操作は許可していません。")
-    check_path_values(values, {"--env-file"}, cwd)
-    if "build" in operands:
-        check_path_values(values, {"-f", "--file"}, cwd)
-    elif "compose" in operands:
-        operations = operands[operands.index("compose") + 1:]
-        boundary = args.index(operations[0]) if operations else len(args)
-        _operands, compose_values = path_arguments(args[:boundary], {"-f", "--file"})
-        check_path_values(compose_values, {"-f", "--file"}, cwd)
-    for value in values.get("-v", []) + values.get("--volume", []):
-        source = value.split(":", 1)[0]
-        if source.endswith(".sock"):
-            deny("ホストの socket をコンテナへ渡す操作は許可していません。")
-        # パス表記以外は named volume
-        if source.startswith(("/", ".", "~", "$")):
-            check_path(source, cwd, recursive=True)
-    for value in values.get("--mount", []):
-        fields = dict(part.split("=", 1) for part in value.split(",") if "=" in part)
-        source = fields.get("source", fields.get("src", ""))
-        if source.endswith(".sock"):
-            deny("ホストの socket をコンテナへ渡す操作は許可していません。")
-        if source and fields.get("type", "bind") == "bind":
-            check_path(source, cwd, recursive=True)
-    if "cp" in operands and len(operands) >= 3:
-        source = operands[operands.index("cp") + 1]
-        check_path(source.split(":", 1)[-1], cwd, recursive=True)
-    if "build" in operands and operands[-1] != "build":
-        check_path(operands[-1], cwd, recursive=True)
-    for value in values.get("--build-context", []):
-        check_path(value.partition("=")[2], cwd, recursive=True)
-
-
-# ファイル本文を読まないコマンド
-NAME_ONLY_COMMANDS = {"echo", "printf", "test", "[", "[[", "ls", "stat", "touch", "mkdir", "chmod", "chown", "chgrp", "rm", "rmdir", "mv", "ln"}
-
-
-def inspect_paths(command, args, cwd, reads_stdin=False):
-    """読み取り・送信するファイルの認証情報を検査"""
-    if command in NAME_ONLY_COMMANDS:
-        return
-    if command in {"grep", "egrep", "fgrep", "rg"}:
-        result = inspect_grep_paths(command, args, cwd, reads_stdin)
-    elif command in {"sed", "gsed", "awk", "gawk", "mawk", "nawk", "jq", "yq"}:
-        result = inspect_filter_paths(command, args, cwd)
-    elif command in {"cat", "head", "tail", "less", "more", "nl", "wc", "sort", "uniq", "cut", "paste", "od", "xxd", "hexdump", "strings", "base64", "base32", "md5", "md5sum", "sha1sum", "sha256sum", "shasum", "cksum", "file", "diff", "cmp", "comm"}:
-        result = inspect_reader_paths(command, args, cwd)
-    elif command in {"cp", "scp", "rsync"}:
-        result = inspect_copy_paths(command, args, cwd)
-    elif command == "dd":
-        result = inspect_dd_paths(args, cwd)
-    elif command == "git":
-        result = inspect_git_paths(args, cwd)
-    elif command == "openssl":
-        result = inspect_openssl_paths(args, cwd)
-    elif command == "tar":
-        result = inspect_tar_paths(args, cwd)
-    elif command in {"curl", "wget", "gh"}:
-        result = inspect_transfer_paths(command, args, cwd)
-    elif command == "docker":
-        result = inspect_container_paths(args, cwd)
-    else:
-        for argument in args:
-            value = argument.partition("=")[2] if "=" in argument else argument
-            if value.startswith(("file://", "fileb://")):
-                check_path(value, cwd)
-        return
-    if result is None:
-        return
-    operands, cwd = result
-    for operand in operands:
-        check_path(operand, cwd)
-
-
-SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
-SEPARATORS = {";", "&", "&&", "||", "|", "|&", "(", ")", "{", "}", "\n", ";;", ";&", ";;&"}
-REDIRECTIONS = {"<", ">", ">>", "<>", ">|", "<<", "<<-", "<<<", "<&", ">&", "&>", "&>>"}
-# { と } は語の位置で判定するため、文字列一致の演算子から除く
-OPERATORS = sorted((SEPARATORS - {"{", "}"}) | REDIRECTIONS, key=len, reverse=True)
-# ブレース展開で作る語数・文字数の上限
-BRACE_WORDS = 4096
-BRACE_CHARS = 1 << 20
-# 引用の位置の印（引数に現れない文字）
-QUOTE_MARK = "\0"
-# 単純コマンドの先頭に置ける予約語（time の -p・-- を含む）と、代入引数を受け取る宣言コマンド
-LEADING_WORDS = {"if", "then", "elif", "else", "while", "until", "do", "!", "time", "-p", "--"}
-DECLARATION_COMMANDS = {"export", "readonly", "declare", "typeset", "local"}
-ASSIGNMENT = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)(?:\[[^]]*\])?\+?=(.*)$", re.S)
-PARAMETER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-# 代入を拒否する実行設定変数
-EXECUTION_VARIABLES = set("""
-    BASH_ENV ENV ZDOTDIR SHELLOPTS SUDO_ASKPASS
-    GIT_ASKPASS GIT_EXEC_PATH
-    GIT_CONFIG GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_COUNT
-    GIT_CONFIG_PARAMETERS GIT_TEMPLATE_DIR
-    DOCKER_CLI_PLUGIN_EXTRA_DIRS
-""".split())
-EXECUTION_PREFIXES = ("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")
-# 値をシェルコードとして検査
-COMMAND_VARIABLES = set("""
-    SUDO_EDITOR GIT_SSH GIT_SSH_COMMAND GIT_EDITOR GIT_SEQUENCE_EDITOR
-    GIT_PAGER GH_PAGER GH_EDITOR GH_BROWSER PAGER EDITOR VISUAL
-    BROWSER AWS_PAGER MANPAGER TG_TF_PATH TERRAGRUNT_TFPATH
-    npm_config_call npm_config_script_shell
-""".split())
-PROXIES = {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "FTP_PROXY", "PIP_PROXY"}
-# 代入可・展開不可の変数
-REFERENCE_VARIABLES = {"SSH_AUTH_SOCK", "SSH_AGENT_PID", "GPG_AGENT_INFO", "DOCKER_HOST"}
-
-
-@dataclass
-class Word:
-    """シェルの語・展開変数名・引用・コマンド置換"""
-    value: str
-    parameters: set = field(default_factory=set)
-    quoted: bool = False
-    substitutions: list = field(default_factory=list)
-    expansions: list = field(default_factory=list)
-
-
-def ansi_c_quote(text, index):
-    """$'...' の値と閉じ引用符の次の位置"""
-    value = bytearray()
-    escapes = dict(zip("abefnrtvE", "\a\b\x1b\f\n\r\t\v\x1b"))
-    while index < len(text):
-        char = text[index]
-        index += 1
-        if char == "'":
-            return os.fsdecode(bytes(value)), index
-        if char != "\\":
-            value.extend(os.fsencode(char))
-            continue
-        if index >= len(text):
-            break
-        escape = text[index]
-        index += 1
-        if escape in escapes:
-            char = escapes[escape]
-        elif escape in "\\'\"?":
-            char = escape
-        elif escape in "01234567xuU":
-            if escape in "01234567":
-                index -= 1
-                pattern, base = r"[0-7]{1,3}", 8
-            else:
-                width = {"x": 2, "u": 4, "U": 8}[escape]
-                pattern, base = r"[0-9a-fA-F]{1," + str(width) + "}", 16
-            match = re.match(pattern, text[index:])
-            if not match:
-                raise ParseError("invalid ANSI-C escape")
-            number = int(match.group(), base)
-            index += len(match.group())
-            if escape not in "uU":
-                number %= 256
-                if number == 0:
-                    raise ParseError("NUL in ANSI-C quote")
-                value.append(number)
-                continue
-            char = chr(number)
-        elif escape == "c":
-            if index >= len(text) or not text[index].isascii() or text[index] == "\\":
-                raise ParseError("unsupported ANSI-C control escape")
-            char = chr(127 if text[index] == "?" else ord(text[index].upper()) & 31)
-            index += 1
-        else:
-            char = "\\" + escape
-        if "\0" in char:
-            raise ParseError("NUL in ANSI-C quote")
-        value.extend(os.fsencode(char))
-    raise ParseError("unterminated ANSI-C quote")
-
-
-def heredoc_delimiter(text, index):
-    """引用解除後の区切り語・次の位置（コマンド置換は None）"""
-    delimiter, quote, substituted, started = [], None, False, False
-    while index < len(text):
-        char = text[index]
-        if quote == "'":
-            if char == "'":
-                quote = None
-            else:
-                delimiter.append(char)
-            index += 1
-            continue
-        if char == "\\":
-            if index + 1 >= len(text):
-                raise ParseError("unfinished shell escape")
-            following = text[index + 1]
-            if following != "\n":
-                if quote == '"' and following not in '$`"\\':
-                    delimiter.append("\\")
-                delimiter.append(following)
-                started = True
-            index += 2
-            continue
-        if char in "'\"":
-            if quote == char:
-                quote = None
-            elif quote is None:
-                quote = char
-            else:
-                delimiter.append(char)
-            started = True
-            index += 1
-            continue
-        if quote is None:
-            if char in " \t":
-                if started:
-                    break
-                index += 1
-                continue
-            if char in "\r\n|&;()<>":
-                break
-            if text.startswith('$"', index):
-                index += 1
-                continue
-            if text.startswith("$'", index):
-                decoded, index = ansi_c_quote(text, index + 2)
-                delimiter.append(decoded)
-                started = True
-                continue
-        # 区切り語を展開せず、範囲不明のコマンド置換は除外
-        if char == "`" or text.startswith("$(", index):
-            substituted = started = True
-            index += 1
-            continue
-        if text.startswith("${", index):
-            end = group_end(text, index + 2, "{", "}")
-            body = text[index + 2:end]
-            if body.startswith("!") or re.search(r"@P$", body):
-                deny("間接参照・再評価によるパラメータ展開は許可していません。")
-            delimiter.append(text[index:end + 1])
-            started = True
-            index = end + 1
-            continue
-        if char == "$":
-            match = PARAMETER.match(text, index + 1)
-            if match:
-                name = match.group()
-                delimiter.append("$" + name)
-                started = True
-                index = match.end()
-                continue
-        delimiter.append(char)
-        started = True
-        index += 1
-    if quote:
-        raise ParseError("unterminated shell quote")
-    if not started:
-        raise ParseError("heredoc delimiter is missing")
-    return None if substituted else "".join(delimiter), index
-
-
-def heredoc_body(text, index, delimiter, strip_tabs):
-    """heredoc 本文と区切り語直後の位置"""
-    body = []
-    while index < len(text):
-        end = text.find("\n", index)
-        end = len(text) if end < 0 else end
-        line = text[index:end]
-        if strip_tabs:
-            index += len(line) - len(line.lstrip("\t"))
-            line = line.lstrip("\t")
-        if line.rstrip("\r") == delimiter:
-            return "".join(body), index + len(delimiter)
-        body.append(line + "\n")
-        index = end + 1
-    raise ParseError("unterminated heredoc")
-
-
-def group_end(text, start, opening, closing, heredocs=False):
-    """引用を飛ばして展開の終端を探す"""
-    depth, quote, index = 1, None, start
-    pending, arithmetic, comment, backtick = [], [], False, False
-    while index < len(text):
-        char = text[index]
-        if quote is None and text.startswith("$'", index):
-            _, index = ansi_c_quote(text, index + 2)
-            continue
-        if char == "\\" and quote != "'":
-            index += 2
-            continue
-        if heredocs and not comment and quote != "'" and text.startswith("$(", index) and not text.startswith("$((", index):
-            # 入れ子のコマンド置換は引用も独立
-            index = group_end(text, index + 2, "(", ")", heredocs=True) + 1
-            continue
-        if quote:
-            if char == quote:
-                quote = None
-        elif char in "'\"":
-            quote = char
-        elif heredocs and char == "`":
-            # バッククォートの heredoc は shell_tokens で処理
-            backtick = not backtick
-        elif heredocs and text.startswith("((", index):
-            # 二重括弧内の << は左シフト
-            arithmetic.append(depth)
-            depth += 2
-            index += 2
-            continue
-        elif char == opening:
-            depth += 1
-        elif char == closing:
-            depth -= 1
-            if not depth:
-                return index
-            while arithmetic and depth <= arithmetic[-1]:
-                arithmetic.pop()
-            # 閉じた括弧内の heredoc は本文を読めない
-            pending = [item for item in pending if item[0] <= depth]
-        elif heredocs and char == "#" and text[index - 1] in " \t\n;&|(":
-            # コメント内も引用・括弧を追跡し、heredoc は無視
-            comment = True
-        elif heredocs and not comment and not backtick and not arithmetic and text.startswith("<<", index):
-            if text.startswith("<<<", index):
-                index += 3
-                continue
-            strip_tabs = text.startswith("<<-", index)
-            delimiter, index = heredoc_delimiter(text, index + (3 if strip_tabs else 2))
-            if delimiter is not None:
-                pending.append((depth, delimiter, strip_tabs))
-            continue
-        elif heredocs and char == "\n":
-            comment = False
-            if pending and not backtick:
-                _, delimiter, strip_tabs = pending.pop(0)
-                body, index = heredoc_body(text, index + 1, delimiter, strip_tabs)
-                # heredoc 本文の余分な閉じ括弧はシェルにより終端扱い
-                level = 0
-                for item in body:
-                    level += (item == opening) - (item == closing)
-                    if level < 0:
-                        raise ParseError("unbalanced heredoc body")
-                # 区切り語の後の閉じ括弧はシェルにより解釈が異なる
-                if any(line.startswith(delimiter) and closing in line for line in body.split("\n")):
-                    raise ParseError("ambiguous heredoc terminator")
-                continue
-        index += 1
-    raise ParseError("unterminated shell expansion")
-
-
-def brace_sequence(chars):
-    """{x..y[..step]} の要素（範囲でなければ None）"""
-    if not all(active for _, active in chars):
-        return None
-    body = "".join(char for char, _ in chars)
-    match = re.fullmatch(r"(-?\d+)\.\.(-?\d+)(?:\.\.(-?\d+))?", body)
-    if match:
-        start, end, letters = int(match[1]), int(match[2]), False
-        # 0 始まりの端点は桁をそろえる
-        width = max(len(match[1]), len(match[2])) if any(re.match(r"-?0\d", value) for value in match.groups()[:2]) else 0
-    else:
-        match = re.fullmatch(r"([A-Za-z])\.\.([A-Za-z])(?:\.\.(-?\d+))?", body)
-        if not match:
-            # 英字の組以外の1文字の組は zsh だけが範囲に展開し、bash は文字のまま残す
-            if re.fullmatch(r".\.\..", body, re.S):
-                raise ParseError("ambiguous brace expansion")
-            return None
-        start, end, letters, width = ord(match[1]), ord(match[2]), True, 0
-    step = abs(int(match[3] or 1)) or 1
-    if abs(end - start) // step + 1 > BRACE_WORDS:
-        raise ParseError("brace expansion limit exceeded")
-    direction = 1 if end >= start else -1
-    return [chr(number) if letters else str(number).zfill(width) for number in range(start, end + direction, step * direction)]
-
-
-def brace_expand(chars):
-    """引用外の {a,b}・{x..y} を bash の規則と順に展開（chars は文字と展開可否の組、上限超過は ParseError）"""
-    # 通常の括弧の対応・親と、各深さの最後の区切り（, と直後が } でない ..）を1回の走査で求める
-    pairs, parents, separators, stack, root_separators, root_closes = {}, {}, {}, [], [], []
-    for index, (char, active) in enumerate(chars):
-        if not active:
-            continue
-        if char == "{":
-            parents[index] = stack[-1] if stack else None
-            stack.append(index)
-        elif char == "}":
-            if stack:
-                pairs[stack.pop()] = index
-            else:
-                root_closes.append(index)
-        elif char == "," or char == "." and chars[index + 1:index + 2] == [(".", True)] and chars[index + 2:index + 3] != [("}", True)]:
-            if stack:
-                separators[stack[-1]] = index
-            else:
-                root_separators.append(index)
-    # zsh は引用・エスケープを除いた中身でも数列・1文字の範囲を展開するため、その形は止める
-    for start, close in pairs.items():
-        if close - start <= 64 and not all(active for _, active in chars[start + 1:close]):
-            if brace_sequence([(char, True) for char, _ in chars[start + 1:close] if char != QUOTE_MARK]):
-                raise ParseError("ambiguous brace expansion")
-    # bash は区切りより前の同じ深さの } を飛ばすため、区切りのない { は外側の深さで対応する } を探す（親から順に決まる）
-    follows, closes = {}, {}
-    for start, parent in parents.items():
-        if start not in pairs:
-            continue
-        if parent is None:
-            after = bisect.bisect_right(root_separators, pairs[start])
-            following = bisect.bisect_right(root_closes, root_separators[after]) if after < len(root_separators) else len(root_closes)
-            follows[start] = root_closes[following] if following < len(root_closes) else None
-        elif parent not in pairs:
-            follows[start] = None
-        else:
-            follows[start] = pairs[parent] if separators.get(parent, -1) > pairs[start] else follows[parent]
-        closes[start] = pairs[start] if start in separators else follows[start]
-    work = 0
-
-    def expand(start, end, word_limit, char_limit):
-        """chars[start:end] を展開した語（語数・文字数は上限まで）"""
-        nonlocal work
-        words, run, index, head = [""], [], start, start
-        while index < end:
-            char, active = chars[index]
-            close = closes.get(index) if active and char == "{" else None
-            # 語頭の {} は展開しない
-            if close is not None and index == head and chars[index + 1] == ("}", True):
-                close = None
-            if close is None or close >= end:
-                run.append(char)
-                index += 1
-                continue
-            work += close - index
-            if work > BRACE_CHARS:
-                raise ParseError("brace expansion limit exceeded")
-            # 同じ深さの , で分け、それぞれを展開する
-            options, size, bounds, level = [], 0, [index], 0
-            for position in range(index + 1, close):
-                item, enabled = chars[position]
-                if enabled and item == "{":
-                    level += 1
-                elif enabled and item == "}" and level:
-                    level -= 1
-                elif enabled and item == "," and not level:
-                    bounds.append(position)
-            if len(bounds) > 1:
-                for left, right in zip(bounds, bounds[1:] + [close]):
-                    # 子には、今の語と組み合わせても上限に収まる残りだけを渡す
-                    part = expand(left + 1, right, word_limit // len(words) - len(options), char_limit // len(words) - size)
-                    options.extend(part)
-                    size += sum(map(len, part))
-            else:
-                # 数列の本体は短いため、長い区間は切り出さない
-                options = brace_sequence(chars[index + 1:close]) if close - index <= 64 else None
-                if options is None and (
-                    any(item == "," or item == "{" and enabled for item, enabled in chars[index + 1:close])
-                    or ("{", True) in chars[close + 1:end]
-                ):
-                    # .. で閉じたが展開できない括弧の中に引用内・置換内などの , か引用外の { を含む形と、後ろに引用外の { が続く形は、
-                    # bash 3.2 が括弧と後ろを文字のまま残し、bash 5.3・zsh は展開するため止める
-                    raise ParseError("ambiguous brace expansion")
-                # 展開できない { … } は文字のまま残し、後ろだけを展開する
-                options = options or ["".join(item for item, _ in chars[index:close + 1])]
-            if len(options) == 1:
-                # 候補が1つなら語を複製せずに続ける
-                run.append(options[0])
-                index = head = close + 1
-                continue
-            prefix = "".join(run)
-            run.clear()
-            # 組み合わせを作る前に語数・文字数を見積もる
-            size = len(options) * sum(map(len, words)) + len(words) * (len(options) * len(prefix) + sum(map(len, options)))
-            if len(words) * len(options) > word_limit or size > char_limit:
-                raise ParseError("brace expansion limit exceeded")
-            words = [word + prefix + option for word in words for option in options]
-            index = head = close + 1
-        suffix = "".join(run)
-        if len(words) > word_limit or sum(map(len, words)) + len(words) * len(suffix) > char_limit:
-            raise ParseError("brace expansion limit exceeded")
-        return [word + suffix for word in words]
-
-    return expand(0, len(chars), BRACE_WORDS, BRACE_CHARS)
-
-
-def shell_tokens(text, literal=False, braces=False):
-    """引用・演算子を区別し、変数値・関数・実行結果は推論しない（braces はブレース展開を解釈）"""
-    tokens, pending, keywords, redirected = [], [], set(), set()
-    value, parameters, substitutions, active, quotes = [], set(), [], set(), set()
-    quote, quoted, started, conditional = None, False, False, False
-    index, produced, produced_chars = 0, 0, 0
-
-    def flush():
-        """語の確定・ブレース展開・heredoc 本文の予約"""
-        nonlocal value, parameters, substitutions, active, quotes, quoted, started, produced, produced_chars, conditional
-        if started:
-            word = Word("".join(value), parameters, quoted, substitutions)
-            if tokens and tokens[-1] in ("<<", "<<-"):
-                pending.append((len(tokens), word.value, tokens[-1] == "<<-", quoted))
-            elif braces and any(value[position] == "{" for position in active):
-                chars = [
-                    item
-                    for position, chunk in enumerate(value + [""])
-                    for item in [(QUOTE_MARK, False)] * (position in quotes) + [(char, position in active) for char in chunk]
-                ]
-                word.expansions = [(item.replace(QUOTE_MARK, ""), QUOTE_MARK in item) for item in brace_expand(chars)]
-                produced += len(word.expansions)
-                produced_chars += sum(len(item) for item, _ in word.expansions)
-                if produced > BRACE_WORDS or produced_chars > BRACE_CHARS:
-                    raise ParseError("brace expansion limit exceeded")
-            # 予約語として認識されうる位置の語と、その位置の [[ に対応する ]]
-            name = plain(word)
-            if name == "]]" and conditional or not argument_position():
-                keywords.add(len(tokens))
-                conditional = name == "[[" if name in ("[[", "]]") else conditional
-            tokens.append(word)
-        value, parameters, substitutions, active, quotes, quoted, started = [], set(), [], set(), set(), False, False
-
-    def plain(token):
-        """引用のない語の値（それ以外は None）"""
-        return token.value if isinstance(token, Word) and not token.quoted else None
-
-    def argument_position():
-        """直前の字句から、次の語が bash・zsh のグループになりえない引数の位置か判定"""
-        # 区切り・コマンド名より前のリダイレクト先（zsh の >! 系を含む）と、予約語の位置の予約語・代入・]]・always・nocorrect・function [名前]・coproc [名前]・repeat 回数・zsh の短い for・select の名前の後は zsh がグループにしうる
-        previous, operator = tokens[-1] if tokens else None, len(tokens) - 2
-        if operator > 0 and plain(tokens[operator]) == "!":
-            operator -= 1
-        if not isinstance(previous, Word):
-            return False
-        if operator >= 0 and isinstance(tokens[operator], str) and tokens[operator] in REDIRECTIONS:
-            # コマンド名の後のリダイレクト先の後は引数の位置
-            return operator in redirected
-        value = plain(previous) if len(tokens) - 1 in keywords else None
-        leading = plain(tokens[-2]) if len(tokens) - 2 in keywords else None
-        # time の -p・-- の後の {} はグループにならない
-        return not (
-            value in LEADING_WORDS - {"-p", "--"}
-            or value in {"]]", "always", "nocorrect", "function", "coproc"}
-            or value and ASSIGNMENT.match(value)
-            or leading in {"function", "coproc", "repeat", "for", "select"}
-        )
-
-    def command_start():
-        """区切りの後の語から、次の語が bash のコマンド位置か判定"""
-        # 予約語だけが並ぶ位置（遡るのは末尾の予約語だけ）
-        position = len(tokens)
-        while position and plain(tokens[position - 1]) in LEADING_WORDS:
-            position -= 1
-        if not position or not isinstance(tokens[position - 1], Word):
-            return not position or tokens[position - 1] in SEPARATORS
-        # function 名前・coproc [名前] の後（末尾の3語までを見る）
-        count = 0
-        while count < min(3, len(tokens)) and isinstance(tokens[-count - 1], Word):
-            count += 1
-        if count == 3 or count < len(tokens) and tokens[-count - 1] not in SEPARATORS:
-            return False
-        unit = [plain(token) for token in tokens[-count:]]
-        return unit[:1] == ["function"] and count == 2 or unit[:1] == ["coproc"]
-
-    while index < len(text):
-        char = text[index]
-        if quote == "'":
-            if char == "'":
-                quote = None
-            else:
-                value.append(char)
-            index += 1
-            continue
-        if not literal and quote is None and text.startswith("$'", index):
-            quotes.add(len(value))
-            decoded, index = ansi_c_quote(text, index + 2)
-            value.append(decoded)
-            quoted = started = True
-            continue
-        if not literal and quote is None and text.startswith('$"', index):
-            index += 1
-            continue
-        if char == "\\":
-            if index + 1 >= len(text):
-                raise ParseError("unfinished shell escape")
-            following = text[index + 1]
-            if following != "\n":
-                if (quote == '"' or literal) and following not in '$`"\\':
-                    value.append("\\")
-                value.append(following)
-                started = True
-            index += 2
-            continue
-        if not literal and char in "'\"":
-            if quote == char:
-                quote = None
-            elif quote is None:
-                quote = char
-                quotes.add(len(value))
-            else:
-                value.append(char)
-            quoted = started = True
-            index += 1
-            continue
-        if char == "`":
-            end = index + 1
-            while end < len(text) and text[end] != "`":
-                end += 2 if text[end] == "\\" else 1
-            if end >= len(text):
-                raise ParseError("unterminated command substitution")
-            substitutions.append(text[index + 1:end])
-            # 本文の , は bash 3.2 のブレース展開の判定に使うため印に残す
-            value.append("$(,)" if "," in text[index + 1:end] else "$()")
-            started = True
-            index = end + 1
-            continue
-        if text.startswith("$(", index) or (quote is None and text[index:index + 2] in {"<(", ">("}):
-            arithmetic = text.startswith("$((", index)
-            end = group_end(text, index + 2, "(", ")", heredocs=not arithmetic)
-            body = text[index + 2:end]
-            if arithmetic:
-                _, inner = shell_tokens(body[1:-1], literal=True)
-                substitutions.extend(inner)
-                parameters.update(PARAMETER.findall(body))
-            else:
-                substitutions.append(body)
-            value.append("$(,)" if "," in body else "$()")
-            started = True
-            index = end + 1
-            continue
-        if text.startswith("${", index):
-            end = group_end(text, index + 2, "{", "}")
-            body = text[index + 2:end]
-            if body.startswith("!") or re.search(r"@P$", body):
-                deny("間接参照・再評価によるパラメータ展開は許可していません。")
-            match = PARAMETER.match(body)
-            if match and not body[match.end():].startswith(("+", ":+")):
-                parameters.add(match.group())
-            _, inner = shell_tokens(body, literal=True)
-            substitutions.extend(inner)
-            # heredoc 区切り語の HOME は展開しない
-            heredoc_word = tokens and tokens[-1] in ("<<", "<<-")
-            value.append(os.path.expanduser("~") if body == "HOME" and not heredoc_word else text[index:end + 1])
-            started = True
-            index = end + 1
-            continue
-        if char == "$":
-            match = PARAMETER.match(text, index + 1)
-            if match:
-                name = match.group()
-                parameters.add(name)
-                heredoc_word = tokens and tokens[-1] in ("<<", "<<-")
-                value.append(os.path.expanduser("~") if name == "HOME" and not heredoc_word else "$" + name)
-                started = True
-                index = match.end()
-                continue
-        if not literal and quote is None:
-            if char == "#" and not started:
-                end = text.find("\n", index)
-                index = len(text) if end < 0 else end
-                continue
-            if char in " \t\r":
-                flush()
-                index += 1
-                continue
-            if char in "{}":
-                following = text[index + 1:index + 2]
-                if braces:
-                    # bash の { } はコマンド位置の単独の語だけが予約語
-                    reserved = not started and (not following or following in " \t\r\n;&|()<>") and command_start()
-                elif char == "{" and following == "}" and (started or argument_position()):
-                    # 引数の位置の {}（find・xargs の置き場所）は語にし、ほかは zsh の空のグループも含めて区切る
-                    value.append("{}")
-                    started = True
-                    index += 2
-                    continue
-                else:
-                    reserved = True
-                if reserved:
-                    flush()
-                    tokens.append(char)
-                    index += 1
-                    continue
-            operator = next((op for op in OPERATORS if text.startswith(op, index)), None)
-            if operator:
-                # 引数の位置のリダイレクトを記録する（直前に付いた fd 番号はその語の前で判定）
-                glued = started and "".join(value).isdigit()
-                placed = glued and argument_position()
-                flush()
-                if operator in REDIRECTIONS and (placed or not glued and argument_position()):
-                    redirected.add(len(tokens))
-                tokens.append(operator)
-                index += len(operator)
-                if operator == "\n":
-                    for token_index, delimiter, strip_tabs, is_quoted in pending:
-                        body, index = heredoc_body(text, index, delimiter, strip_tabs)
-                        end = text.find("\n", index)
-                        index = len(text) if end < 0 else end + 1
-                        names, inner = set(), []
-                        if not is_quoted:
-                            expanded, inner = shell_tokens(body, literal=True)
-                            for word in expanded:
-                                names.update(word.parameters)
-                        tokens[token_index] = Word(body, names, is_quoted, inner)
-                    pending.clear()
-                continue
-            # 引用外の文字だけがブレース展開の構文になる
-            active.add(len(value))
-        value.append(char)
-        started = True
-        index += 1
-    if quote:
-        raise ParseError("unterminated shell quote")
-    flush()
-    if pending:
-        raise ParseError("heredoc body is missing")
-    return tokens, [body for token in tokens if isinstance(token, Word) for body in token.substitutions]
-
-
-def inspect_assignment(value, cwd):
-    """代入による実行設定の差し替え・秘密値の平文指定を検査"""
-    match = ASSIGNMENT.match(value)
-    if not match:
-        return
-    name, content = match.groups()
-    if name == "GOOGLE_CREDENTIALS":
-        if content and (any(char in content for char in "{}\r\n$") or not content.startswith(("/", "./", "../"))):
-            deny("GOOGLE_CREDENTIALS には静的なファイルパスだけを指定してください。")
-        return
-    if name in EXECUTION_VARIABLES or name.startswith(EXECUTION_PREFIXES):
-        deny(EXEC_OVERRIDE_REASON)
-    if name in COMMAND_VARIABLES and content:
-        scan(content, cwd)
-    if name.upper() in PROXIES:
-        if "@" in content:
-            deny("proxy の認証情報を引数へ載せることは許可していません。")
-    elif name not in CREDENTIAL_PATH_VARIABLES | REFERENCE_VARIABLES and secret_name(name) and content:
-        deny("秘密値を持つ環境変数への平文の代入は許可していません。")
-
-
-def sensitive_parameter(name):
-    """展開を拒否する変数を判定"""
-    return name not in CREDENTIAL_PATH_VARIABLES and (
-        secret_name(name)
-        or name in REFERENCE_VARIABLES or name.upper() in PROXIES
-    )
-
-
-# ラッパー: 値付きオプション・フラグ
-WRAPPER_OPTIONS = {
-    command: (set(values.split()), set(flags.split()))
-    for command, (values, flags) in {
-        "!": ("", ""),
-        "arch": ("-arch -d -e", "-32 -64 -arm64 -arm64e -c -i386 -x86_64 -x86_64h"),
-        "builtin": ("", ""),
-        "caffeinate": ("-t -w", "-d -i -m -s -u"),
-        "command": ("", "-p"),
-        "coproc": ("", ""),
-        "env": ("--chdir --unset -C -u", "--ignore-environment --null -0 -i"),
-        "exec": ("--argv0 -a", "-c -l"),
-        "nice": ("--adjustment -n", ""),
-        "nohup": ("", ""),
-        "sudo": ("--chdir --close-from --group --host --prompt --user -C -D -g -h -p -u", "--list --non-interactive --preserve-env --validate -E -H -K -b -k -l -n -v"),
-        "time": ("--format --output -f -o", "--append --portability --verbose -a -l -p -v"),
-        "timeout": ("--kill-after --signal -k -s", "--foreground --preserve-status --verbose -v"),
-        "xargs": ("--max-args --max-procs --replace -E -I -J -L -P -n -s", "--no-run-if-empty --null -0 -p -r -t -x"),
-    }.items()
-}
-# 動的引数の目印（シェル引数に現れない NUL）
-UNKNOWN_ARGUMENT = "\0"
-
-
-def unwrap(command, args, cwd, inherited_assignments):
-    """ラッパーから子コマンドの引数・cwd を抽出"""
-    value_options, flags = WRAPPER_OPTIONS[command]
-    args = list(args)
-    assignments, replacements, index = [], [], 0
-    while index < len(args):
-        arg = args[index]
-        if arg == "--":
-            index += 1
-            break
-        if arg in {"--help", "--version"} or command == "sudo" and arg == "-V":
-            return [], cwd
-        if command == "command" and arg in {"-v", "-V"}:
-            return [], cwd
-        if command == "arch" and arg == "-h":
-            return [], cwd
-        if command == "xargs" and arg in {"-i", "--replace"}:
-            replacements.append(("-I", "{}"))
-            index += 1
-            continue
-        if command == "xargs" and arg.startswith("-i"):
-            arg = args[index] = "-I" + arg[2:]
-        if ASSIGNMENT.match(arg):
-            inspect_assignment(arg, cwd)
-            if arg.startswith(("TF_CLI_ARGS=", "TF_CLI_ARGS_", "OP_BIOMETRIC_UNLOCK_ENABLED=")):
-                assignments.append(arg)
-            index += 1
-            continue
-        if not arg.startswith("-") or arg == "-":
-            break
-        if not arg.startswith("--") and len(arg) > 2 and arg not in value_options | flags:
-            expanded = []
-            for offset, letter in enumerate(arg[1:], 1):
-                short = "-" + letter
-                if short in value_options:
-                    expanded.append(short)
-                    if arg[offset + 1:]:
-                        expanded.append(arg[offset + 1:])
-                    break
-                if short not in flags:
-                    raise UnsupportedSyntax("unsupported wrapper option")
-                expanded.append(short)
-            args[index:index + 1] = expanded
-            arg = args[index]
-        option, separator, value = arg.partition("=")
-        if option in value_options:
-            if not separator:
-                index += 1
-                if index >= len(args):
-                    raise ParseError("wrapper option argument is missing")
-                value = args[index]
-            if command == "env" and option in {"-u", "--unset"} or command == "arch" and option == "-d":
-                inherited_assignments.pop(value, None)
-                assignments[:] = [assignment for assignment in assignments if not assignment.startswith(value + "=")]
-            if command == "arch" and option == "-e":
-                inspect_assignment(value, cwd)
-                if value.startswith(("TF_CLI_ARGS=", "TF_CLI_ARGS_", "OP_BIOMETRIC_UNLOCK_ENABLED=")):
-                    assignments.append(value)
-            if command == "xargs" and option in {"-I", "-J", "--replace"}:
-                if not value:
-                    raise ParseError("empty xargs replacement")
-                replacements.append((option, value))
-            if option in {"-D", "--chdir"} or command == "env" and option == "-C":
-                if "$" in value:
-                    raise UnsupportedSyntax("dynamic working directory")
-                cwd = resolve_path(os.path.expanduser(value), cwd, os.path.abspath)
-        elif command == "env" and arg in {"-i", "--ignore-environment"} or command in {"arch", "exec"} and arg == "-c":
-            inherited_assignments.clear()
-            assignments.clear()
-        elif arg not in flags:
-            raise UnsupportedSyntax("unsupported wrapper option")
-        index += 1
-    # timeout の先頭位置引数は時間
-    if command == "timeout" and index < len(args):
-        index += 1
-    child = args[index:]
-    if command == "xargs":
-        child = child or ["echo"]
-        # 標準入力の値は未確定
-        if not replacements:
-            child.append(UNKNOWN_ARGUMENT)
-        for option, value in replacements:
-            if option == "-J":
-                try:
-                    position = child.index(value, 1)
-                except ValueError:
-                    child.append(UNKNOWN_ARGUMENT)
-                else:
-                    child[position] = UNKNOWN_ARGUMENT
-            else:
-                child[1:] = [UNKNOWN_ARGUMENT if value in arg else arg for arg in child[1:]]
-    return assignments + child if child else [], cwd
-
-
-# インタプリタ: コードフラグ・値付きオプション
-INTERPRETER_OPTIONS = {
-    "awk": ("", "-F -f -v"),
-    "gawk": ("", "-F -f -v"),
-    "node": ("ep", "--import --input-type --loader --require -r"),
-    "perl": ("eE", "-I -M"),
-    "php": ("r", "-c -d"),
-    "python": ("c", "--check-hash-based-pycs -W -X"),
-    "ruby": ("e", "--backtrace-limit --crash-report --disable --enable --encoding --external-encoding --internal-encoding --parser -C -E -I -r"),
-}
-CODE_READERS = {"open", "read_text", "read_bytes", "readFile", "readFileSync", "file_get_contents", "readfile"}
-# AppleScript の文字列を検査から除外
-STRING_LITERAL = re.compile(r'''"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*' ''', re.S | re.X)
-
-
-def mask_code(language, code, cwd, depth):
-    """コメント・静的文字列を除き、補間式を別途検査"""
-    strings, executable = [], []
-    index = 0
-    while index < len(code):
-        char = code[index]
-        line_comment = char == "#" and language != "node"
-        line_comment |= language in {"node", "php"} and code.startswith("//", index)
-        if line_comment:
-            end = code.find("\n", index)
-            index = len(code) if end < 0 else end
-            continue
-        if language in {"node", "php"} and code.startswith("/*", index):
-            end = code.find("*/", index + 2)
-            if end < 0:
-                raise ParseError("unterminated code comment")
-            executable.append(" ")
-            index = end + 2
-            continue
-        if char not in "'\"`":
-            executable.append(char)
-            index += 1
-            continue
-        if char == "`" and language != "node":
-            deny("直接コードからのコマンド置換は許可していません。")
-        quote, value = char, []
-        index += 1
-        while index < len(code) and code[index] != quote:
-            if code[index] == "\\":
-                value.append(code[index:index + 2])
-                index += 2
-                continue
-            prefix = code[index:index + 2]
-            interpolated = (
-                language == "ruby" and quote == '"' and prefix == "#{"
-                or language == "node" and quote == "`" and prefix == "${"
-                or language == "perl" and quote == '"' and prefix in {"${", "@{"}
-                or language == "php" and quote == '"' and prefix in {"${", "{$"}
-            )
-            if interpolated:
-                start = index + (1 if prefix == "{$" else 2)
-                end = group_end(code, start, "{", "}")
-                inspect_code(language, code[start:end], cwd, depth + 1)
-                index = end + 1
-                continue
-            if quote != "'" and language in {"perl", "php"} and re.match(r"\$_?ENV\b", code[index:]):
-                deny("コードからの環境変数取得は許可していません。")
-            value.append(code[index])
-            index += 1
-        if index >= len(code):
-            raise ParseError("unterminated code string")
-        strings.append("".join(value))
-        executable.append("__string_{}__".format(len(strings) - 1))
-        index += 1
-    return "".join(executable), strings
-
-
-def qualified_name(node, aliases):
-    """import 別名を解いた完全修飾名"""
-    if isinstance(node, ast.Name):
-        return aliases.get(node.id, node.id)
-    if isinstance(node, ast.Attribute):
-        return qualified_name(node.value, aliases) + "." + node.attr
-    if isinstance(node, ast.Call):
-        name = qualified_name(node.func, aliases)
-        if name in {"getattr", "builtins.getattr"}:
-            if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant) and isinstance(node.args[1].value, str):
-                return qualified_name(node.args[0], aliases) + "." + node.args[1].value
-        elif name in {"__import__", "builtins.__import__"}:
-            if node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
-                return node.args[0].value
-    return ""
-
-
-def inspect_python_process(name, node, cwd, depth):
-    """Python の静的な子コマンド・再評価コードを検査"""
-    process_args = node.args[1:] if name.startswith("os.spawn") else node.args
-    argument = process_args[0] if process_args else next((item.value for item in node.keywords if item.arg == "args"), None)
-    if name in {"eval", "exec", "builtins.eval", "builtins.exec"}:
-        if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
-            inspect_code("python", argument.value, cwd, depth + 1)
-    elif name in {"subprocess.Popen", "subprocess.run", "subprocess.call", "subprocess.check_call", "subprocess.check_output", "subprocess.getoutput", "subprocess.getstatusoutput"}:
-        options = {item.arg: item.value.value for item in node.keywords if isinstance(item.value, ast.Constant)}
-        directory = options.get("cwd")
-        child_cwd = resolve_path(directory, cwd) if isinstance(directory, str) else cwd
-        child = argument.elts if isinstance(argument, (ast.List, ast.Tuple)) else [argument]
-        if child and all(isinstance(item, ast.Constant) and isinstance(item.value, str) for item in child):
-            child = [item.value for item in child]
-            if options.get("shell") or name in {"subprocess.getoutput", "subprocess.getstatusoutput"}:
-                child = [options.get("executable") or "/bin/sh", "-c"] + child
-            elif isinstance(options.get("executable"), str):
-                child[0] = options["executable"]
-            inspect_argv(child, child_cwd, depth + 1)
-    elif re.match(r"os\.(?:system|popen|exec\w*|spawn\w*|posix_spawnp?)$", name):
-        if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
-            if name in {"os.system", "os.popen"}:
-                scan(argument.value, cwd, depth + 1)
-            elif len(process_args) > 1:
-                child = process_args[1].elts if isinstance(process_args[1], (ast.List, ast.Tuple)) else process_args[1:]
-                if all(isinstance(item, ast.Constant) and isinstance(item.value, str) for item in child):
-                    inspect_argv([argument.value] + [item.value for item in child[1:]], cwd, depth + 1)
-
-
-def inspect_python_code(code, cwd, depth):
-    """Python の秘密取得・子コマンドを検査"""
-    try:
-        tree = ast.parse(code)
-    except (SyntaxError, ValueError) as error:
-        raise UnsupportedSyntax("unsupported inline Python") from error
-    aliases = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            aliases.update((item.asname or item.name, item.name) for item in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            aliases.update((item.asname or item.name, (node.module or "") + "." + item.name) for item in node.names)
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Subscript) and qualified_name(node.value, aliases) == "os.environ":
-            if isinstance(node.slice, ast.Constant) and secret_name(str(node.slice.value)):
-                deny("コードからの秘密環境変数の取得は許可していません。")
-        if not isinstance(node, ast.Call):
-            continue
-        name = qualified_name(node.func, aliases)
-        if name in {"getattr", "builtins.getattr"}:
-            name = qualified_name(node, aliases)
-        try:
-            inspect_python_process(name, node, cwd, depth)
-        except UnsupportedSyntax:
-            pass
-        if name in {"os.getenv", "os.environ.get"}:
-            key = node.args[0] if node.args else next((item.value for item in node.keywords if item.arg == "key"), None)
-            if isinstance(key, ast.Constant) and isinstance(key.value, str) and secret_name(key.value):
-                deny("コードからの秘密環境変数の取得は許可していません。")
-        if (
-            name in {"dict", "list", "print"}
-            and any(qualified_name(item, aliases) == "os.environ" for item in node.args)
-            or name in {"os.environ.items", "os.environ.values"}
+def secret_name(name):
+    """変数名・設定キーが秘密値を表すか判定（パスを指す名前は除く）"""
+    name = name.upper()
+    return bool(SECRET_WORDS.search(name)) and not name.endswith(("_DIR", "_FILE", "_PATH"))
+
+
+def in_order(patterns, args):
+    """各正規表現に全体一致する引数が、この順に現れるか判定"""
+    remaining = iter(args)
+    return all(any(re.fullmatch(pattern, arg) for arg in remaining) for pattern in patterns)
+
+
+def check(argv, cwd):
+    """秘密の取得・重大な破壊・保護機構の迂回にあたるコマンドを拒否"""
+    command, args = os.path.basename(argv[0]).casefold(), argv[1:]
+    # 除外指定（--exclude の値・! で始まる glob）と数値は読み取り対象ではない
+    operands = [
+        arg for option, arg in zip(argv, args)
+        if arg and not arg.startswith(("-", "!")) and not arg.isdigit() and not option.startswith("--exclude")
+    ]
+    # help・版数の表示は実行を伴わない（-- より後ろは子コマンドの引数）
+    if not {"--help", "--version"} & set(args[:args.index("--")] if "--" in args else args):
+        for reason, (name, *patterns) in RULES:
+            if re.fullmatch(name, command) and in_order(patterns, args):
+                raise Denied(reason)
+        if command == "printenv" and (not operands or any(map(secret_name, operands))) or (
+            command == "env" and all(arg.startswith("-") or "=" in arg for arg in args)
         ):
-            deny("環境変数の一括取得は許可していません。")
-        if name.rsplit(".", 1)[-1] in CODE_READERS:
-            receiver = node.func.value if isinstance(node.func, ast.Attribute) else None
-            sources = node.args[:1] + ([receiver] if receiver is not None else [])
-            sources.extend(item.value for item in node.keywords if item.arg in {"file", "filename", "path"})
-            literals = [
-                item.value
-                for source in sources
-                for item in ast.walk(source)
-                if isinstance(item, ast.Constant) and isinstance(item.value, str)
+            raise Denied("環境変数の一括出力・秘密値の表示は許可していません。")
+    if command == "rm" and in_order([r"--recursive|-[A-Za-z]*[rR][A-Za-z]*"], args):
+        for target in args:
+            path = os.path.realpath(os.path.join(cwd, expand(target)))
+            if re.sub(r"/\*$", "", path) in {"", "/", os.path.realpath(expand("~"))}:
+                raise Denied("ルート・ホーム全体の再帰削除は許可していません。")
+    if command in READERS:
+        if command in PATTERN_FIRST:
+            # -e の値はパターン。-e も -f（パターン・プログラムのファイル）もなければ、最初の位置引数がパターン・プログラム
+            patterns = [arg for option, arg in zip(argv, args) if option in {"-e", "--expression", "--regexp"}]
+            first = 0 if patterns or {"-f", "--file", "--from-file"} & set(args) else 1
+            operands = [operand for operand in operands if operand not in patterns][first:]
+        if command in COPIERS:
+            operands = operands[:-1]
+        if command == "dd":
+            operands = [arg.partition("=")[2] for arg in args if arg.startswith("if=")]
+        if command == "curl":
+            # --upload-file の値と、-T・file://・@・< に続くファイルは、本文を送信・出力する（URL 中の @ は除く）
+            operands = [arg for option, arg in zip(argv, args) if option in {"-T", "--upload-file"}] + [
+                arg[mark.end():].partition(";")[0]
+                for arg in args if not re.match(r"(?!file:)[a-z]+://", arg)
+                for mark in re.finditer(r"^-T|^file://|[@<]", arg)
             ]
-            if any(credential_path(value, cwd) for value in literals):
-                deny("コードによる認証情報ファイルの直接読み取りは許可していません。")
-
-
-def masked_call_options(language, options, strings, cwd):
-    """shell 指定・子プロセスの cwd を抽出"""
-    shell, child_cwd = False, cwd
-    for key, setting in re.findall(r"([A-Za-z_0-9]+)\s*:\s*([A-Za-z_0-9]+)", options or ""):
-        key_literal = re.fullmatch(r"__string_(\d+)__", key)
-        if key_literal:
-            key = strings[int(key_literal.group(1))]
-        if key == "shell":
-            shell = setting == "true" or setting.startswith("__string_")
-        if key == "cwd" and language == "node":
-            directory = re.fullmatch(r"__string_(\d+)__", setting)
-            if directory:
-                value = strings[int(directory.group(1))]
-                if os.path.isabs(value) or cwd is not None:
-                    child_cwd = resolve_path(value, cwd)
-    return shell, child_cwd
-
-
-def inspect_masked_calls(language, executable, strings, cwd, depth):
-    """静的に決まる子コマンドを検査"""
-    calls = (
-        r"\b(eval|exec|execSync|execFile|execFileSync|spawn|spawnSync|system|popen|shell_exec|passthru|proc_open)"
-        r"\s*\(?\s*__string_(\d+)__(?:\s*,\s*\[([^\]]*)\])?(?:\s*,\s*\{([^{}]*)\})?"
-    )
-    for match in re.finditer(calls, executable):
-        name, literal, array, options = match.groups()
-        value = strings[int(literal)]
-        shell, child_cwd = masked_call_options(language, options, strings, cwd)
-        child = []
-        if array is not None:
-            child = (
-                [strings[int(index)] for index in re.findall(r"__string_(\d+)__", array)]
-                if re.fullmatch(r"\s*(?:__string_\d+__\s*,?\s*)*", array)
-                else None
-            )
-        elif language == "node" and name in {"execFile", "execFileSync", "spawn", "spawnSync"} and options is None:
-            if re.match(r"\s*,", executable[match.end():]):
-                child = None
-        arguments = None
-        if language in {"ruby", "perl"} and name in {"system", "exec", "spawn"}:
-            arguments = re.match(r"(?:\s*,\s*__string_\d+__)+(?=\s*(?:,?\s*\)|;|\n|$))", executable[match.end():])
-            if arguments:
-                child = [strings[int(index)] for index in re.findall(r"__string_(\d+)__", arguments.group())]
-            elif re.match(r"\s*,", executable[match.end():]):
-                child = None
-        try:
-            if name == "eval":
-                inspect_code(language, value, cwd, depth + 1)
-            elif child is None:
-                continue
-            elif shell:
-                scan(" ".join([value] + child), child_cwd, depth + 1)
-            elif (
-                array is not None or arguments is not None
-                or name in {"execFile", "execFileSync", "spawnSync"}
-                or name == "spawn" and language != "ruby"
-            ):
-                inspect_argv([value] + child, child_cwd, depth + 1)
-            else:
-                scan(value, child_cwd, depth + 1)
-        except UnsupportedSyntax:
-            pass
-
-
-def inspect_masked_code(language, code, cwd, depth):
-    """Python 以外の秘密取得・子コマンドを検査"""
-    executable, strings = mask_code(language, code, cwd, depth)
-    inspect_masked_calls(language, executable, strings, cwd, depth)
-    for match in re.finditer(r"\b(?:open|readFile|readFileSync|file_get_contents|readfile|read|file|filebase64)\s*\(?\s*(?:pathexpand\s*\(\s*)?__string_(\d+)__", executable):
-        if credential_path(strings[int(match.group(1))], cwd):
-            deny("コードによる認証情報ファイルの直接読み取りは許可していません。")
-    for match in re.finditer(r"\b(?:process\.env|ENV|_ENV)\b", executable):
-        access = re.match(r"\s*(?:\.([A-Za-z_][A-Za-z_0-9]*)|[\[{]\s*(?:__string_(\d+)__|([A-Za-z_][A-Za-z_0-9]*))\s*[\]}])", executable[match.end():])
-        if not access:
-            deny("環境変数の一括取得は許可していません。")
-        attribute, literal, key = access.groups()
-        if attribute in {"fetch", "get"}:
-            call = re.match(r"\s*\(?\s*__string_(\d+)__", executable[match.end() + access.end():])
-            if not call:
-                continue
-            name = strings[int(call.group(1))]
-        else:
-            name = strings[int(literal)] if literal is not None else attribute or key
-        if secret_name(name):
-            deny("コードからの秘密環境変数の取得は許可していません。")
-
-
-def inspect_code(language, code, cwd, depth=0):
-    """直接記述されたファイル操作・秘密取得・プロセス起動だけを検査"""
-    if depth > 32:
-        raise ParseError("nested code limit exceeded")
-    if UNKNOWN_ARGUMENT in code:
-        raise UnsupportedSyntax("dynamic inline code")
-    if language == "python":
-        inspect_python_code(code, cwd, depth)
-    else:
-        inspect_masked_code(language, code, cwd, depth)
-
-
-def interpreter_input(command, args):
-    """入力形式と、位置引数をファイルとして読むかを判定"""
-    code_flags, value_options = INTERPRETER_OPTIONS[command]
-    value_flags = set(value_options.split())
-    # 残りを結合値にするフラグ
-    attached_flags = {"perl": "CDFimx", "ruby": "CEFix"}.get(command, "")
-    # 値は1文字
-    single_flags = "K" if command == "ruby" else ""
-    # 値は : 以降
-    colon_flags = {"perl": "dV", "ruby": "W"}.get(command, "")
-    # perl の -a / -F は -n を暗黙に有効化
-    reads_flags = {"perl": "npaF", "ruby": "np"}.get(command, "")
-    no_run_flags = {"perl": "ch?v", "ruby": "ch"}.get(command, "")
-    no_run_options = {
-        "perl": {"--help", "--version"},
-        "ruby": {"--help", "--version", "--copyright", "--yydebug"},
-    }.get(command, set())
-    chunks, script, operands, index = [], None, [], 0
-    reads = command in {"awk", "gawk"}
-    no_run = False
-    while index < len(args):
-        arg = args[index]
-        if arg == "--":
-            operands = args[index + 1:]
-            script = operands[0] if operands else None
-            break
-        if arg == "-":
-            script, operands = arg, args[index:]
-            break
-        if arg in value_flags:
-            index += 2
-            continue
-        if arg.startswith("--"):
-            if arg in no_run_options:
-                no_run = True
-            elif command == "ruby" and (arg == "--dump" or arg.startswith("--dump=")):
-                value = arg.partition("=")[2]
-                if arg == "--dump":
-                    index += 1
-                    if index >= len(args):
-                        raise ParseError("dump option is missing")
-                    value = args[index]
-                no_run = no_run or any(
-                    item.partition("+")[0]
-                    in {"version", "copyright", "usage", "help", "yydebug", "syntax", "parsetree", "insns"}
-                    for item in re.split(r"[\s,]+", value)
-                )
-            elif arg in {"--eval", "--print"}:
-                if index + 1 >= len(args):
-                    raise ParseError("inline code is missing")
-                index += 1
-                chunks.append(args[index])
-            elif arg.startswith(("--eval=", "--print=")):
-                chunks.append(arg.partition("=")[2])
-        elif arg.startswith("-"):
-            skip = False
-            for position, flag in enumerate(arg[1:], 1):
-                if skip:
-                    skip = False
-                    continue
-                if flag in single_flags:
-                    skip = True
-                    continue
-                if flag in colon_flags and (
-                    arg[position + 1:position + 2] == ":"
-                    or command == "perl" and flag == "d" and arg[position + 1:position + 3] == "t:"
-                ):
-                    break
-                if flag in reads_flags:
-                    reads = True
-                if flag in no_run_flags:
-                    no_run = True
-                if "-" + flag in value_flags:
-                    if not arg[position + 1:]:
-                        index += 1
-                    break
-                if flag in attached_flags:
-                    break
-                is_module = command == "python" and flag == "m"
-                if is_module or flag in code_flags:
-                    value = arg[position + 1:]
-                    if not value:
-                        index += 1
-                        if index >= len(args):
-                            raise ParseError("Python module is missing" if is_module else "inline code is missing")
-                        value = args[index]
-                    if is_module:
-                        return None, [value] + args[index + 1:], None, [], False
-                    chunks.append(value)
-                    break
-        else:
-            if command in {"awk", "gawk"} and not chunks:
-                chunks.append(arg)
-                operands = args[index + 1:]
-            else:
-                script, operands = arg, args[index:]
-            break
-        if chunks and command == "python":
-            operands = args[index + 1:]
-            break
-        index += 1
-    return "\n".join(chunks) if chunks else None, None, script, operands, reads and not no_run
-
-
-def script_uses_stdin(path):
-    """標準入力を指すスクリプトのパスか判定"""
-    if UNKNOWN_ARGUMENT in path:
-        raise UnsupportedSyntax("dynamic script path")
-    if path in {"/dev/stdin", "/dev/fd/0", "/proc/self/fd/0"}:
-        return True
-    if re.match(r"^/(?:dev|proc/(?:self|\d+))/fd/", path):
-        raise UnsupportedSyntax("uninspected script file descriptor")
-    return False
-
-
-def pop_assignments(argv, cwd):
-    """先頭の代入を検査・除去し、検査に必要な値を抽出"""
-    assignments = {}
-    while argv and (match := ASSIGNMENT.match(argv[0])):
-        assignment = argv.pop(0)
-        inspect_assignment(assignment, cwd)
-        name, value = match.groups()
-        if name in {"TF_CLI_ARGS", "OP_BIOMETRIC_UNLOCK_ENABLED"} or name.startswith("TF_CLI_ARGS_"):
-            assignments[name] = value
-    return assignments
-
-
-def env_split_args(args):
-    """静的な env -S を引数へ展開"""
-    for index, arg in enumerate(args):
-        if arg in {"-S", "--split-string"} or arg.startswith("--split-string="):
-            joined = "=" in arg
-            if not joined and index + 1 >= len(args):
-                raise ParseError("env split string is missing")
-            value = arg.partition("=")[2] if joined else args[index + 1]
-            split, nested = shell_tokens(value)
-            if nested or any(not isinstance(word, Word) for word in split):
-                raise UnsupportedSyntax("unsupported env split string")
-            return args[:index] + [word.value for word in split] + args[index + (1 if joined else 2):]
-    return args
-
-
-def inspect_wrapper(command, args, assignments, cwd, depth, stdin, external):
-    """子コマンドと env の一括出力を検査"""
-    if command == "sudo":
-        assignments.pop("OP_BIOMETRIC_UNLOCK_ENABLED", None)
-    child, child_cwd = unwrap(command, args, cwd, assignments)
-    if command == "env" and not child and not has_option(args, {"--help", "--version"}):
-        deny("環境変数の一括出力は許可していません。")
-    if child:
-        child = [name + "=" + value for name, value in assignments.items()] + child
-        if command == "xargs":
-            inspect_argv(child, child_cwd, depth + 1, None, True)
-        else:
-            inspect_argv(child, child_cwd, depth + 1, stdin, external)
-
-
-def terraform_args(command, args, assignments):
-    """静的な TF_CLI_ARGS をサブコマンド直後へ挿入"""
-    words = cli_words(command, args)
-    while words and words[0] in {"run", "run-all", "stack"}:
-        words = words[1:]
-    if not words:
-        return args
-    additional = []
-    for name in ("TF_CLI_ARGS", "TF_CLI_ARGS_" + words[0]):
-        split, nested = shell_tokens(assignments.get(name, ""))
-        if not nested and all(isinstance(word, Word) and not word.parameters for word in split):
-            additional.extend(word.value for word in split)
-    position = args.index(words[0]) + 1
-    return args[:position] + additional + args[position:]
-
-
-def inspect_recursive_removal(args, cwd):
-    """再帰削除の対象がルート・ホーム全体か検査"""
-    for target in args:
-        if target.startswith("-") or UNKNOWN_ARGUMENT in target:
-            continue
-        path = resolve_path(os.path.expanduser(target), cwd, os.path.realpath)
-        if path is None:
-            continue
-        path = path.rstrip("/") or "/"
-        home = os.path.realpath(os.path.expanduser("~"))
-        if path in {"/", home} or path.startswith("/*") or path.startswith(home + "/*"):
-            deny("ルート・ホーム全体の再帰削除は許可していません。")
-
-
-def inspect_container_exec(command, args, cwd, depth, stdin, external):
-    """コンテナ内の子コマンド・引き渡す資格情報を検査"""
-    if "--" in args and any(word in args[:args.index("--")] for word in {"exec", "rsh", "run"}):
-        inspect_argv(args[args.index("--") + 1:], cwd, depth + 1, stdin, external)
-    elif "exec" in args or "rsh" in args:
-        operation = "exec" if "exec" in args else "rsh"
-        words = cli_words(command, args[args.index(operation) + 1:], {"-e", "--env", "-u", "--user", "-w", "--workdir", "-c", "--container"})
-        if len(words) > 1:
-            inspect_argv(words[1:], cwd, depth + 1, stdin, external)
-    if command == "docker":
-        for value in option_values(args, {"-e", "--env", "--build-arg"}):
-            name = value.partition("=")[0]
-            # -e NAME（値なし）はホストの値を継承
-            if sensitive_parameter(name) or name in CREDENTIAL_PATH_VARIABLES and "=" not in value:
-                deny("資格情報をコンテナの環境へ渡すことは許可していません。")
-        if has_option(args, {"--ssh"}):
-            deny("認証エージェントをコンテナへ転送することは許可していません。")
-
-
-def inspect_shell(args, cwd, depth, stdin, external):
-    """-c・スクリプトを検査し、標準入力を読む起動だけ入力を検査"""
-    index = 0
-    while index < len(args):
-        arg = args[index]
-        if arg in {"--rcfile", "--init-file"} or arg.startswith(("--rcfile=", "--init-file=")):
-            deny("シェル起動ファイルの差し替えは許可していません。")
-        if arg in {"-o", "-O", "+o", "+O"}:
-            index += 2
-            continue
-        if arg.startswith("-") and not arg.startswith("--") and "c" in arg[1:]:
-            if index + 1 >= len(args):
-                raise ParseError("shell command string is missing")
-            scan(args[index + 1], cwd, depth + 1, stdin, external)
-            return
-        if not arg.startswith("-"):
-            if credential_path(arg, cwd):
-                deny("認証情報ファイルをスクリプトとして読み込むことは許可していません。")
-            if not script_uses_stdin(arg):
-                return
-            break
-        index += 1
-    if external:
-        raise UnsupportedSyntax("uninspected shell input")
-    if stdin is not None:
-        scan(stdin, cwd, depth + 1)
-
-
-def inspect_eval(command, args, cwd, depth, stdin, external):
-    """eval・trap のシェルコードを検査"""
-    values = args[1:] if args[:1] == ["--"] else args
-    if values and values[0] not in {"-", "", "-l", "-p"}:
-        scan(" ".join(values) if command == "eval" else values[0], cwd, depth + 1, stdin, external)
-
-
-def inspect_source(args, cwd, depth, stdin, external):
-    """source のファイル・標準入力を検査"""
-    if args[:1] == ["--"]:
-        args = args[1:]
-    if args and credential_path(args[0], cwd):
-        deny("認証情報ファイルの source は許可していません。")
-    if args and script_uses_stdin(args[0]):
-        if external:
-            raise UnsupportedSyntax("uninspected source input")
-        if stdin is not None:
-            scan(stdin, cwd, depth + 1)
-
-
-def inspect_osascript(args, stdin):
-    """AppleScript からのシェル起動を検査"""
-    for code in option_values(args, {"-e"}) + ([stdin] if stdin is not None else []):
-        executable = STRING_LITERAL.sub('""', code)
-        if re.search(r"\bdo\s+shell\s+script\b", executable, re.I):
-            deny("AppleScript からのシェル起動は許可していません。")
-
-
-FIND_VALUE_OPTIONS = set("""
-    -D -name -iname -path -ipath -wholename -iwholename -regex -iregex -lname -ilname
-    -type -xtype -user -group -uid -gid -perm -size -mtime -mmin -atime -amin -ctime -cmin
-    -Btime -Bmin -used -newer -anewer -cnewer -Bnewer -samefile -inum -links -fstype
-    -maxdepth -mindepth -printf -fprint -fprint0 -fls -fprintf -regextype -context -flags
-""".split())
-
-
-def inspect_find(args, cwd, depth):
-    """-exec 系の子コマンドと、本文を読む場合の起点パスを検査"""
-    # bfs は式の後ろの起点も受け付けるため、子コマンドと述語の値以外の語と、値の誤認に備えて cwd を起点とする
-    roots, children, index = ["."], [], 0
-    while index < len(args):
-        arg = args[index]
-        index += 1
-        if arg in {"-exec", "-execdir", "-ok", "-okdir"}:
-            end = index
-            while end < len(args) and args[end] not in {";", "+"}:
-                end += 1
-            if end == len(args):
-                raise ParseError("unterminated find executor")
-            children.append((arg, args[index:end]))
-            index = end + 1
-        elif arg in FIND_VALUE_OPTIONS or re.fullmatch(r"-newer[aBcmt]{2}", arg):
-            index += 2 if arg == "-fprintf" else 1
-        elif not arg.startswith(("-", "(", ")", "!", ",")):
-            roots.append(arg)
-    for executor, child in children:
-        # -execdir・-okdir は一致したディレクトリで実行するため、{} なしでも相対パスで読める
-        reads_matches = executor in {"-execdir", "-okdir"} or any("{}" in word for word in child)
-        if child and os.path.basename(child[0]).casefold() not in NAME_ONLY_COMMANDS and reads_matches:
-            for root in roots:
-                check_path(root, cwd, recursive=True, search=True)
-        inspect_argv(child, cwd, depth + 1)
-
-
-def inspect_submodule_foreach(args, cwd, depth):
-    """submodule foreach の子コマンドを検査"""
-    index = args.index("foreach")
-    if "submodule" in args[:index] and index + 1 < len(args):
-        scan(args[index + 1], cwd, depth + 1)
-
-
-def inspect_runner(command, args, cwd, depth):
-    """ランナーの子コマンドを検査"""
-    for code in option_values(args, {"-c", "--command", "--call"}):
-        scan(code, cwd, depth + 1)
-    if "--" in args:
-        inspect_argv(args[args.index("--") + 1:], cwd, depth + 1)
-    elif command in {"npx", "npm", "pnpm", "mise"}:
-        # exe は npm だけが exec の短縮形（npx ではパッケージ名）
-        runners = {"exec", "exe", "x"} if command == "npm" else {"exec", "x"}
-        start = next((index + 1 for index, arg in enumerate(args) if arg in runners), 0 if command == "npx" else len(args))
-        if start < len(args) and not args[start].startswith("-"):
-            inspect_argv(args[start:], cwd, depth + 1)
-
-
-def inspect_interpreter_operands(language, operands, cwd):
-    """インタプリタが読む位置引数を検査"""
-    for operand in operands:
-        # awk の var=value は変数代入
-        if language in {"awk", "gawk"} and re.match(r"[A-Za-z_][A-Za-z_0-9]*=", operand):
-            continue
-        check_path(operand, cwd)
-
-
-def inspect_interpreter(language, args, cwd, depth, stdin, external):
-    """コード・入力ファイルを検査"""
-    code, module, script, operands, reads = interpreter_input(language, args)
-    if module is not None:
-        if UNKNOWN_ARGUMENT in module[0]:
-            raise UnsupportedSyntax("dynamic Python module")
-        if module[0] in {"pip", "pip3"}:
-            inspect_argv(module, cwd, depth + 1)
-        return
-    if code is None and credential_path(script, cwd):
-        deny("認証情報ファイルをコードとして読み込むことは許可していません。")
-    unsupported = None
-    try:
-        if code is not None:
-            inspect_code(language, code, cwd)
-        else:
-            uses_stdin = not script or script == "-" or script_uses_stdin(script)
-            if uses_stdin and external:
-                raise UnsupportedSyntax("uninspected interpreter input")
-            if uses_stdin and stdin is not None:
-                inspect_code(language, stdin, cwd)
-    except UnsupportedSyntax as error:
-        # コード未対応でも入力ファイルは検査する
-        unsupported = error
-    if reads:
-        inspect_interpreter_operands(language, operands, cwd)
-    if unsupported is not None:
-        raise unsupported
-
-
-def inspect_op(args, assignments):
-    """秘密値を返さないサインインを検査"""
-    values = CLI_VALUE_OPTIONS["op"]
-    flags = {"--cache", "--debug", "--iso-timestamps", "--no-color"}
-    if has_option(args, {"--help", "-h", "--version"}, value_options=values):
-        return True
-    index = 0
-    while index < len(args) and args[index].startswith("-"):
-        option, separator, _ = args[index].partition("=")
-        if option in {"--help", "-h", "--version"}:
-            index += 1
-        elif option in values:
-            index += 1 if separator else 2
-        elif option in flags:
-            index += 1
-        else:
-            return False
-    if index >= len(args):
-        return False
-    subcommand, options = args[index], args[index + 1:]
-    if subcommand == "signin":
-        if assignments.get("OP_BIOMETRIC_UNLOCK_ENABLED") != "true" or has_option(options, {"--raw", "--force"}, "f", value_options=values, short_bool_values=True):
-            deny(SECRET_OUTPUT_REASON)
-        return True
-    return False
-
-
-def inspect_argv(argv, cwd, depth, stdin=None, external=False):
-    """単純コマンドを検査（stdin は静的入力、external は未検査入力の有無）"""
-    if depth > 32:
-        raise ParseError("nested command limit exceeded")
-    assignments = pop_assignments(argv, cwd)
-    if not argv:
-        return
-    command = os.path.basename(argv[0]).casefold()
-    args = argv[1:]
-    if "$" in command or "`" in command or UNKNOWN_ARGUMENT in command:
-        raise UnsupportedSyntax("dynamic command name")
-    command = {"pn": "pnpm", "podman": "docker", "nerdctl": "docker"}.get(command, command)
-    if command in {"export", "readonly", "declare", "typeset", "local", "env", "sudo"}:
-        for arg in args:
-            inspect_assignment(arg, cwd)
-    if (
-        command in {"read", "mapfile", "readarray"}
-        and any(arg in EXECUTION_VARIABLES for arg in args)
-        or command == "printf"
-        and any(name in EXECUTION_VARIABLES for name in option_values(args, {"-v"}))
-    ):
-        deny("組み込みコマンドによる実行設定の差し替えは許可していません。")
-    if command == "env":
-        args = env_split_args(args)
-    if command in WRAPPER_OPTIONS:
-        inspect_wrapper(command, args, assignments, cwd, depth, stdin, external)
-        return
-    if command == "op" and inspect_op(args, assignments):
-        return
-    if command in {"terraform", "terragrunt"}:
-        args = terraform_args(command, args, assignments)
-    inspect_cli(command, args, cwd)
-    inspect_paths(command, args, cwd, stdin is not None or external)
-    if command in {"terraform", "terragrunt"} and "console" in cli_words(command, args) and stdin is not None:
-        inspect_code("terraform", stdin, cwd, depth + 1)
-    if command == "rm" and has_option(args, {"--recursive"}, "rR"):
-        inspect_recursive_removal(args, cwd)
-    if command in {"kubectl", "oc", "docker"}:
-        inspect_container_exec(command, args, cwd, depth, stdin, external)
+        if any(credential_path(operand, cwd) for operand in operands):
+            raise Denied(CREDENTIAL_REASON)
     if command in SHELLS:
-        inspect_shell(args, cwd, depth, stdin, external)
-    elif command in {"eval", "trap"}:
-        inspect_eval(command, args, cwd, depth, stdin, external)
-    elif command in {"source", "."}:
-        inspect_source(args, cwd, depth, stdin, external)
-    elif command == "osascript":
-        inspect_osascript(args, stdin)
-    elif command == "find":
-        inspect_find(args, cwd, depth)
-    elif command == "git" and "foreach" in args:
-        inspect_submodule_foreach(args, cwd, depth)
-    elif command in {"npx", "npm", "pnpm", "yarn", "mise", "flock", "script"}:
-        inspect_runner(command, args, cwd, depth)
-    if command == "git":
-        # git は展開中に組み込みコマンドへ達した段を実行するため、各段を検査する
-        for stage in git_alias_expansions(args):
-            inspect_cli(command, stage, cwd)
-            inspect_paths(command, stage, cwd, stdin is not None or external)
-            if "foreach" in stage:
-                inspect_submodule_foreach(stage, cwd, depth)
-    language = re.sub(r"\d+(?:\.\d+)*$", "", command)
-    if language in INTERPRETER_OPTIONS:
-        inspect_interpreter(language, args, cwd, depth, stdin, external)
+        for index, arg in enumerate(args[:-1]):
+            if re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", arg):
+                scan(args[index + 1], cwd)
+    if command == "eval":
+        scan(" ".join(args), cwd)
+    if command in DELEGATORS and "--" in args[:-1]:
+        inspect(args[args.index("--") + 1:], cwd)
 
 
-def changed_directory(argv, cwd):
-    """cd 後の cwd を返し、追跡不能なら UnsupportedSyntax"""
-    assignments = []
-    while argv and ASSIGNMENT.match(argv[0]):
-        assignments.append(argv.pop(0))
-    while argv and argv[0] in {"builtin", "command"}:
-        argv, _ = unwrap(argv[0], argv[1:], cwd, {})
-    directory_variables = {"HOME", "CDPATH", "OLDPWD", "PWD"}
-    if argv and argv[0] in DECLARATION_COMMANDS:
-        assignments.extend(argv[1:])
-    if (
-        any(
-            (match := ASSIGNMENT.match(value)) and match.group(1) in directory_variables
-            for value in assignments
-        )
-        or argv and (
-            argv[0] in {"unset", "read", "mapfile", "readarray"}
-            and any(arg in directory_variables for arg in argv[1:])
-            or argv[0] == "printf"
-            and any(name in directory_variables for name in option_values(argv[1:], {"-v"}))
-        )
-    ):
-        raise UnsupportedSyntax("changed directory environment")
-    if argv and argv[0] in {"eval", "source", ".", "pushd", "popd", "trap", "time"}:
-        raise UnsupportedSyntax("untracked working directory")
-    if not argv or argv[0] != "cd":
-        return cwd
-    args, physical = argv[1:], False
-    while args and args[0].startswith("-") and args[0] != "-":
-        option, args = args[0], args[1:]
-        if option == "--":
-            break
-        if not re.fullmatch(r"-[LP]+", option):
-            raise UnsupportedSyntax("unsupported cd option")
-        physical = option[-1] == "P"
-    if not args:
-        args = [os.path.expanduser("~")]
-    if len(args) != 1 or args[0] == "-" or any(char in args[0] for char in "$`*?["):
-        raise UnsupportedSyntax("dynamic working directory")
-    path = resolve_path(os.path.expanduser(args[0]), cwd, os.path.realpath if physical else os.path.abspath)
-    return path if path is None or os.path.isdir(path) else cwd
+def inspect(argv, cwd):
+    """単純コマンドと、ラッパーが起動する子コマンドを検査"""
+    # command -v・-V は子コマンドを起動しない
+    runs = os.path.basename(argv[0]) in RUNNERS and argv[:2] not in (["command", "-v"], ["command", "-V"])
+    for index in range(len(argv) if runs else 1):
+        check(argv[index:], cwd)
 
 
-# ブレース展開を解釈する検査の途中か（入れ子の検査で重ねて起動しない）
-brace_pass = False
+def quote_end(text, start):
+    """二重引用を閉じる " の位置（中のコマンド置換は対応する ) まで飛ばし、閉じていなければ末尾）"""
+    while start < len(text) and text[start] != '"':
+        if text.startswith("$(", start):
+            start = closing(text, start + 2)
+        else:
+            start += 2 if text[start] == "\\" else 1
+    return start
 
 
-def scan(text, cwd, depth=0, input_text=None, input_external=False):
-    """cwd を追跡しながらシェルコードを検査"""
-    global brace_pass
-    initial_cwd = cwd
-    if depth > 32:
-        raise ParseError("nested command limit exceeded")
-    if UNKNOWN_ARGUMENT in text:
-        raise UnsupportedSyntax("dynamic shell code")
-    # { } を区切る検査（引数の位置の {} だけは語）に加え、ブレース展開後の引数列でも検査
-    if not brace_pass and ("{" in text or "}" in text):
-        brace_pass = True
-        try:
-            scan(text, cwd, depth, input_text, input_external)
-        finally:
-            brace_pass = False
-    tokens, nested = shell_tokens(text, braces=brace_pass)
-    spelling = [token.value if isinstance(token, Word) and not token.quoted else token for token in tokens]
-    bomb = [":", "(", ")", "{", ":", "|", ":", "&", "}"]
-    if any(spelling[index:index + len(bomb)] == bomb for index in range(len(spelling))):
-        deny("fork bomb は許可していません。")
-    sequential, command_start = True, True
-    for index, token in enumerate(tokens):
-        if isinstance(token, Word):
-            if not command_start:
-                continue
-            if not token.quoted and (
-                token.value in {"if", "for", "select", "while", "until", "case", "function", "coproc"}
-                or tokens[index + 1:index + 3] == ["(", ")"]
-            ):
-                sequential = False
-                break
-            command_start = not token.quoted and (
-                token.value in {"!", "time", "-p"} or bool(ASSIGNMENT.match(token.value))
-            )
-        elif token in {"&&", "||", "|", "|&", "&", "{", "}"} or token in REDIRECTIONS:
-            sequential = False
-            break
-        elif token in SEPARATORS:
-            command_start = True
-    # 文脈不明なら開始位置で展開を検査
-    if not sequential:
-        for body in nested:
-            scan(body, cwd, depth + 1, input_text, input_external)
-    unit, piped, cwd_stack = [], False, []
-    continued = False
-    for token_index, token in enumerate(tokens + ["\n"]):
-        if isinstance(token, Word) or token not in SEPARATORS:
-            unit.append(token)
-            continue
-        # &&・| 直後の改行はコマンド列を継続
-        if token == "\n" and not unit and continued:
-            continue
-        argv, kept, words, stdin, external = [], [], [], input_text, piped or input_external
-        index, command = 0, None
-        while index < len(unit):
-            item = unit[index]
-            fd = None
-            if isinstance(item, Word) and item.value.isdigit() and index + 1 < len(unit) and isinstance(unit[index + 1], str) and unit[index + 1] in REDIRECTIONS:
-                fd = int(item.value)
-                index += 1
-                item = unit[index]
-            if isinstance(item, str) and item in REDIRECTIONS:
-                index += 1
-                if index >= len(unit) or not isinstance(unit[index], Word):
-                    raise ParseError("redirection operand is missing")
-                operand = unit[index]
-                words.append(operand)
-                input_fd = fd == 0 or fd is None and item.startswith("<")
-                if item in {"<", "<>"}:
-                    # zsh はブレース展開した複数のファイルを読み込む
-                    if any(credential_path(value, cwd) for value, _ in operand.expansions or [(operand.value, True)]):
-                        deny("認証情報ファイルを標準入力へ読み込むことは許可していません。")
-                    if input_fd:
-                        external = True
-                elif item in {"<<", "<<-", "<<<"}:
-                    if input_fd:
-                        stdin, external = operand.value, False
-                elif item in {"<&", ">&"} and input_fd and operand.value != "-":
-                    external = True
-                elif item in {">", ">>", ">|"} and any(re.match(r"^/dev/(?:disk|rdisk|sd|nvme)", value) for value, _ in operand.expansions or [(operand.value, True)]):
-                    deny("ディスクデバイスへの書き込みは許可していません。")
-            elif isinstance(item, Word):
-                values = item.expansions or [(item.value, True)]
-                if item.expansions and ASSIGNMENT.match(item.value):
-                    # 先頭の代入語は展開せず、zsh は宣言コマンドの代入も展開しないため展開前の値も検査
-                    if command is None:
-                        values = [(item.value, True)]
-                    elif command in DECLARATION_COMMANDS:
-                        values = [(item.value, True), *values]
-                # bash は引用のない候補が空になると除き、zsh は残す
-                added = [value for value, quoted in values if value or quoted]
-                argv.extend(added)
-                if command is None:
-                    command = next((value for value in added if value not in LEADING_WORDS and not ASSIGNMENT.match(value)), None)
-                kept.extend(value for value, _ in values)
-                words.append(item)
+def closing(text, start):
+    """$( に対応する ) の次の位置（引用内の括弧は数えず、閉じていなければ末尾）"""
+    depth = 1
+    while start < len(text) and depth:
+        char = text[start]
+        if char == '"':
+            start = quote_end(text, start + 1) + 1
+        elif char == "'":
+            start = text.find("'", start + 1) + 1 or len(text)
+        else:
+            depth += (char == "(") - (char == ")")
+            start += 2 if char == "\\" else 1
+    return start
+
+
+def live_part(body):
+    """二重引用・未引用 heredoc の本文のうち、シェルが展開する部分（\\$ と \\` は展開しない）"""
+    return re.sub(r"\\(.)", lambda match: "" if match[1] in "$`" else match[0], body, flags=re.S)
+
+
+def substitutions(live):
+    """シェルが展開する部分に含まれるコマンド置換の本文"""
+    bodies, start = re.findall(r"`([^`]*)`", live), live.find("$(")
+    while start >= 0:
+        end = closing(live, start + 2)
+        bodies.append(live[start + 2:end].removesuffix(")"))
+        start = live.find("$(", end)
+    return bodies
+
+
+def tokenize(text):
+    """演算子（文字列）と語（引用を解除した値, シェルが展開する部分）に分割"""
+    tokens, value, live, index = [], None, "", 0
+    while index < len(text):
+        match = TOKEN.match(text, index)
+        kind, piece = match.lastgroup, match.group()
+        # 二重引用と引用外のコマンド置換は、対応する終わりまでを語の一部とする
+        if piece == '"':
+            kind, piece = "double", text[index:quote_end(text, index + 1) + 1]
+        elif text.startswith("$(", index):
+            piece = text[index:closing(text, index + 2)]
+        index += len(piece)
+        if kind in {"blank", "comment", "operator"}:
+            if value is not None:
+                tokens.append((value, live))
+                value, live = None, ""
+            if kind == "operator":
+                # リダイレクトの fd 番号は除く
+                tokens.append(piece.lstrip("0123456789"))
+        elif kind != "continuation":
+            value = value or ""
+            if kind == "single":
+                value += piece[1:-1]
+            elif kind == "double":
+                body = piece[1:].removesuffix('"')
+                value += re.sub(r"\\([$`\"\\])", r"\1", body)
+                live += live_part(body)
+            elif kind == "escape":
+                value += piece[1]
             else:
-                raise ParseError("unsupported shell operator")
-            index += 1
-        while argv and argv[0] in {"if", "then", "elif", "else", "while", "until", "do", "!"}:
-            argv.pop(0)
-            kept.pop(0)
-        function_header = (
-            token == "(" and len(argv) == 1
-            and tokens[token_index + 1:token_index + 2] == [")"]
-        ) and all(not word.quoted and not word.parameters and not word.substitutions for word in words)
-        if sequential:
-            for word in words:
-                for body in word.substitutions:
-                    scan(body, cwd, depth + 1, input_text, input_external)
-        # 存在・空の test は値を出力しない
-        presence = len(argv) in {3, 4} and argv[0] in {"test", "[", "[["} and argv[1] in {"-e", "-f", "-n", "-z"}
-        if not presence and any(sensitive_parameter(name) for word in words for name in word.parameters):
-            deny("秘密値を持つ環境変数の明示展開は許可していません。")
-        if argv and not function_header and argv[0] not in {"for", "select", "case", "in", "esac", "fi", "done", "function"}:
-            try:
-                for variant in [argv] if kept == argv else [argv, kept]:
-                    inspect_argv(variant.copy(), cwd, depth, stdin, external)
-                if not piped and token not in {"|", "|&", "&"}:
-                    cwd = changed_directory(argv, cwd)
-            except UnsupportedSyntax:
-                if sequential:
-                    sequential = False
-                    for body in nested:
-                        scan(body, initial_cwd, depth + 1, input_text, input_external)
-        if token == "(":
-            cwd_stack.append(cwd)
-        elif token == ")" and cwd_stack:
-            cwd = cwd_stack.pop()
-        unit = []
-        piped = token in {"|", "|&"}
-        continued = token in {"&&", "||", "|", "|&"}
+                value += piece
+                live += piece
+    return tokens + ([(value, live)] if value is not None else [])
+
+
+def strip_heredoc(match):
+    """終端を引用した heredoc の本文はデータとして除き、未引用の本文は同じコマンドの語（NUL と16進）に置き換える"""
+    if match[2]:
+        return match[1] + match[4]
+    return f"{match[1]} <<<\0{live_part(match[5]).encode('utf-8', 'surrogatepass').hex()}{match[4]}"
+
+
+def scan(text, cwd):
+    """シェルコードを単純コマンドへ分けて検査（変数値・関数・実行結果は推論しない）"""
+    argv, lives, redirect, outer, piped = [], [], None, [], False
+    for token in tokenize(HEREDOC.sub(strip_heredoc, text)) + ["\n"]:
+        if isinstance(token, tuple):
+            value, live = token
+            # 未引用の heredoc の本文は、シェルが展開する部分として検査
+            if value.startswith("\0"):
+                live = bytes.fromhex(value[1:]).decode("utf-8", "surrogatepass")
+            lives.append(live)
+            if redirect in {"<", "<>"} and credential_path(value, cwd):
+                raise Denied(CREDENTIAL_REASON)
+            if redirect and ">" in redirect and re.match(r"/dev/(?:r?disk|sd|nvme)", value):
+                raise Denied(DESTRUCTIVE_REASON)
+            if redirect is None:
+                argv.append(value)
+            redirect = None
+        elif "<" in token or ">" in token:
+            redirect = token
+        else:
+            while argv and (argv[0] in KEYWORDS or ASSIGNMENT.match(argv[0])):
+                del argv[0]
+            names = []
+            for live in lives:
+                # コマンド置換の本文は別のシェルコードとして検査し、変数の展開は置換の外だけを見る
+                for body in substitutions(live):
+                    scan(body, cwd)
+                    live = live.replace(body, "")
+                names += EXPANSION.findall(live)
+            # test は値を出力しない
+            if argv[:1] not in (["test"], ["["], ["[["]) and any(map(secret_name, names)):
+                raise Denied("秘密値を持つ環境変数の明示展開は許可していません。")
+            if argv:
+                inspect(argv, cwd)
+            # 後続の相対パスを移動先で解決する（パイプ・バックグラウンドの cd と、存在しない移動先は親に及ばない）
+            if argv[:1] == ["cd"] and token not in {"|", "&"} and not piped:
+                target = os.path.join(cwd, expand(argv[-1] if len(argv) > 1 else "~"))
+                cwd = target if os.path.isdir(target) else cwd
+            # サブシェルを抜けたら作業場所を戻す
+            if token == "(":
+                outer.append(cwd)
+            elif token == ")" and outer:
+                cwd = outer.pop()
+            argv, lives, redirect, piped = [], [], None, token == "|"
 
 
 def main():
     """Bash・Monitor 入力の検査と deny 出力"""
     try:
         event = json.load(sys.stdin)
-        if not isinstance(event, dict) or not isinstance(event.get("tool_name"), str):
-            raise ParseError("invalid hook input")
         if event["tool_name"] not in {"Bash", "Monitor"}:
             return 0
-        tool_input = event.get("tool_input")
-        if not isinstance(tool_input, dict):
-            raise ParseError("tool_input must be an object")
-        cwd = event.get("cwd", os.getcwd())
-        if not isinstance(cwd, str) or not os.path.isabs(cwd):
-            raise ParseError("cwd must be an absolute path")
-        # WebSocket 監視ではコマンドを実行しない
-        if event["tool_name"] == "Monitor" and "ws" in tool_input:
-            ws = tool_input["ws"]
-            if not isinstance(ws, dict) or not isinstance(ws.get("url"), str):
-                raise ParseError("ws.url must be a string")
-            if "command" not in tool_input:
-                return 0
-        if not isinstance(tool_input.get("command"), str):
-            raise ParseError("command must be a string")
-        scan(tool_input["command"], cwd)
+        tool_input = event["tool_input"]
+        # Monitor の WebSocket 監視はコマンドを実行しない
+        if event["tool_name"] != "Monitor" or "command" in tool_input or "ws" not in tool_input:
+            scan(tool_input["command"], event.get("cwd") or os.getcwd())
     except Denied as error:
         json.dump({"hookSpecificOutput": {
             "hookEventName": "PreToolUse", "permissionDecision": "deny",
             "permissionDecisionReason": str(error),
         }}, sys.stdout, ensure_ascii=False)
         sys.stdout.write("\n")
-    except (ParseError, ValueError, TypeError, IndexError, OSError, RecursionError):
+    except Exception:
         print("pre-bash-guard: 入力を安全に解析できませんでした。", file=sys.stderr)
         return 2
     return 0
