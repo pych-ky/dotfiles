@@ -8,6 +8,7 @@
 "aqua:suzuki-shunsuke/ghtkn"   = "latest"
 "aqua:suzuki-shunsuke/tfcmt"   = "latest"
 aws-cli                        = { version = "latest", symlink_bins = "true" }
+aws-sam                        = "latest"
 deno                           = "latest"
 go                             = "latest"
 golangci-lint                  = "latest"
