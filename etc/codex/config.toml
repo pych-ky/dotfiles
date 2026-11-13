@@ -12,8 +12,6 @@ model_reasoning_effort  = "xhigh"
 model_reasoning_summary = "auto"
 hide_agent_reasoning    = true  # codex exec の出力のみ
 
-personality = "pragmatic"
-
 web_search = "live"
 
 suppress_unstable_features_warning = true

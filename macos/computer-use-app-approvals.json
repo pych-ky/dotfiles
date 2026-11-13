@@ -1,7 +1,10 @@
 {
   "approvedBundleIdentifiers": [
     "com.anthropic.claudefordesktop",
-    "com.apple.controlcenter",
+    "com.apple.ActivityMonitor",
+    "com.apple.finder",
+    "com.google.Chrome",
+    "com.meta.endo",
     "com.microsoft.edgemac",
     "com.stablyai.orca",
     "com.tinyspeck.slackmacgap"

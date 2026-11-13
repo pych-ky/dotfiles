@@ -3,7 +3,6 @@
 
 import importlib.util
 import json
-import os
 import re
 import sys
 from pathlib import Path
@@ -11,106 +10,44 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 
 
-def load_guard(cwd):
-    """共通ガードを読み込み、既定・実行時の Hermes ホームを保護対象へ追加"""
+def load_guard():
+    """共通ガードの読み込み"""
     source = Path(__file__).resolve().parents[2] / ".claude/hooks/pre-bash-guard.py"
-    spec = importlib.util.spec_from_file_location("hermes_pre_bash_guard", source)
+    spec = importlib.util.spec_from_file_location("pre_bash_guard", source)
     guard = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = guard
     spec.loader.exec_module(guard)
-
-    roots = set()
-    for root in {str(Path.home() / ".hermes"), os.environ.get("HERMES_HOME", "")}:
-        if root:
-            roots.update(guard.path_spellings(root, cwd))
-    guard.HERMES_ROOTS.update(roots)
-    guard.CREDENTIAL_LOCATIONS += tuple(
-        f"{root}/{name}"
-        for root in roots
-        for name in guard.HERMES_CREDENTIAL_FILES + guard.HERMES_CREDENTIAL_DIRECTORIES
-    )
-    original_credential_path = guard.credential_path
-
-    def credential_path(value, directory):
-        """scheme 付きの値も Hermes 認証保存先・スナップショットを検査"""
-        if original_credential_path(value, directory):
-            return True
-        return bool(value) and any(
-            guard.hermes_credential_path(path, directory)
-            for path in guard.path_spellings(value, directory)
-        )
-
-    guard.credential_path = credential_path
     return guard
 
 
-def check_path(guard, path, cwd, recursive=False):
-    """明示された認証ファイル・既知の認証保存先の親を拒否"""
-    if not isinstance(path, str) or not path:
-        raise ValueError("path must be a nonempty string")
-    predicate = guard.path_exposes_credentials if recursive else guard.credential_path
-    if predicate(path, cwd):
-        guard.deny("認証情報ファイルの直接読み取り・変更は許可していません。")
-
-
-def inspect_call(guard, tool, arguments, cwd):
-    """公式ツールのコマンド・パス・直接 Python コードを検査"""
-    if tool == "terminal":
-        directory = arguments.get("workdir")
-        if directory is None or directory == "":
-            directory = cwd
-        if not isinstance(directory, str) or not os.path.isabs(directory):
-            raise ValueError("workdir must be an absolute path")
-        if not isinstance(arguments.get("command"), str):
-            raise ValueError("command must be a string")
-        guard.scan(arguments["command"], directory)
-    elif tool in {"execute_code", "browser_exec"}:
-        if not isinstance(arguments.get("code"), str):
-            raise ValueError("code must be a string")
-        guard.inspect_code("python", arguments["code"], cwd)
-    elif tool == "search_files":
-        target = arguments.get("target", "content")
-        if target not in {"content", "files", "grep", "find"}:
-            raise ValueError("invalid search target")
-        if target in {"content", "grep"}:
-            search_path = arguments.get("path", ".")
-            if search_path is None or (isinstance(search_path, str) and not search_path.strip()):
-                search_path = "."
-            check_path(guard, search_path, cwd, recursive=True)
-            if arguments.get("file_glob"):
-                check_path(guard, arguments["file_glob"], cwd)
-    elif tool == "patch" and arguments.get("mode", "replace") == "patch":
-        patch = arguments.get("patch")
-        if not isinstance(patch, str):
-            raise ValueError("patch must be a string")
-        for match in re.finditer(r"^\*\*\*\s*(?:Update|Add|Delete)\s+File:\s*(.+)$", patch, re.MULTILINE):
-            check_path(guard, match[1].strip(), cwd)
-        for match in re.finditer(r"^\*\*\*\s*Move\s+File:\s*(.+?)\s*->\s*(.+)$", patch, re.MULTILINE):
-            for path in match.groups():
-                check_path(guard, path.strip(), cwd)
-    elif tool in {"read_file", "write_file", "patch"}:
-        check_path(guard, arguments.get("path"), cwd)
+def tool_paths(tool, arguments):
+    """ツールが本文を読み書きするパス"""
+    if tool == "search_files":
+        # ファイル名の検索は本文を読まない
+        if arguments.get("target") in {"files", "find"}:
+            return []
+        return [arguments.get("path") or ".", arguments.get("file_glob")]
+    if tool == "patch" and arguments.get("mode") == "patch":
+        headers = re.findall(r"^\*\*\*\s*(?:Update|Add|Delete|Move)\s+File:\s*(.+)$", arguments["patch"], re.M)
+        return [path.strip() for header in headers for path in header.split("->")]
+    if tool in {"read_file", "write_file", "patch"}:
+        return [arguments["path"]]
+    return []
 
 
 def main():
     """拒否を Hermes 形式で返し、入力・内部故障は終了コード 2 で停止"""
     try:
         event = json.load(sys.stdin)
-        if not isinstance(event, dict) or event.get("hook_event_name") != "pre_tool_call":
-            raise ValueError("invalid hook event")
-        tool, arguments, cwd = (event.get(key) for key in ("tool_name", "tool_input", "cwd"))
-        if not isinstance(tool, str) or not isinstance(arguments, dict):
-            raise ValueError("invalid tool input")
-        if not isinstance(cwd, str) or not os.path.isabs(cwd):
-            raise ValueError("cwd must be an absolute path")
-        guard = load_guard(cwd)
+        tool, arguments, cwd = event["tool_name"], event["tool_input"], event["cwd"]
+        guard = load_guard()
         try:
-            inspect_call(guard, tool, arguments, cwd)
+            if tool == "terminal":
+                guard.scan(arguments["command"], arguments.get("workdir") or cwd)
+            elif any(guard.credential_path(path, cwd) for path in tool_paths(tool, arguments)):
+                raise guard.Denied("認証情報ファイルの直接読み取り・変更は許可していません。")
         except guard.Denied as error:
             json.dump({"action": "block", "message": str(error)}, sys.stdout, ensure_ascii=False)
             sys.stdout.write("\n")
-        except guard.UnsupportedSyntax:
-            pass
     except Exception:
         print("pre-tool-guard: 入力を安全に解析できませんでした。", file=sys.stderr)
         return 2
