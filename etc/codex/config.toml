@@ -138,7 +138,7 @@ statusMessage = "Bash コマンドを検査中"
 [tui]
 status_line = [
   "model-with-reasoning",
-  "permissions",  # 権限プロファイル / sandbox mode
+  "permissions",
   "current-dir",
   "git-branch",
   "context-used",

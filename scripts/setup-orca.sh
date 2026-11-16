@@ -4,79 +4,29 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
-setup_common_library="$repo_dir/lib/setup-common.sh"
-if [[ ! -f "$setup_common_library" || -L "$setup_common_library" ]]; then
-  printf 'error: setup common library is missing or unsafe: %s\n' "$setup_common_library" >&2
-  exit 1
-fi
-# shellcheck source=lib/setup-common.sh
-source "$setup_common_library"
-
-if ((EUID == 0)); then
-  printf 'error: do not run scripts/setup-orca.sh with sudo or as root\n' >&2
-  exit 1
-fi
-
-if [[ "$(uname -s)" != Darwin ]]; then
-  printf 'error: scripts/setup-orca.sh supports macOS only\n' >&2
-  exit 1
-fi
-
-setup_validate_home || exit 1
-
 orca_app=/Applications/Orca.app
-if [[ ! -d "$orca_app" ]]; then
-  orca_app="$HOME/Applications/Orca.app"
-fi
+data_dir="$HOME/Library/Application Support/orca"
+profile_index="$data_dir/orca-profile-index.json"
+
 if [[ ! -d "$orca_app" ]]; then
   printf 'skipped: Orca is not installed\n'
   exit 3
 fi
-
-process_status=0
-pgrep -xq Orca || process_status=$?
-case "$process_status" in
-0)
+if pgrep -xq Orca; then
   printf 'skipped: Orca is running\n'
   exit 3
-  ;;
-1) ;;
-*)
-  printf 'error: could not determine whether Orca is running\n' >&2
-  exit 1
-  ;;
-esac
-
-if ! command -v jq >/dev/null 2>&1; then
-  printf 'error: jq is required\n' >&2
-  exit 1
 fi
-
-data_dir="$HOME/Library/Application Support/orca"
-profile_index="$data_dir/orca-profile-index.json"
-managed_settings="$repo_dir/macos/orca.json"
-
 if [[ ! -f "$profile_index" ]]; then
   printf 'skipped: launch and quit Orca once, then run scripts/setup-orca.sh\n'
   exit 3
 fi
 
-profile_id="$(jq -er '.activeProfileId | strings | select(test("^[A-Za-z0-9_-]+$"))' "$profile_index")"
-settings_file="$data_dir/profiles/$profile_id/orca-data.json"
-settings_db="$data_dir/profiles/$profile_id/profile-state.db"
-
-jq -e 'type == "object"' "$managed_settings" >/dev/null
+profile_id="$(jq -er .activeProfileId "$profile_index")"
 
 # SQLite は Orca 内蔵の保存 API 経由で更新
-if [[ -e "$settings_db" || -L "$settings_db" ]]; then
-  if [[ -L "$settings_db" || ! -f "$settings_db" ]]; then
-    printf 'error: Orca profile database must be a regular file: %s\n' "$settings_db" >&2
-    exit 1
-  fi
-  env -u NODE_OPTIONS -u NODE_REPL_EXTERNAL_MODULE ELECTRON_RUN_AS_NODE=1 \
-    "$orca_app/Contents/MacOS/Orca" --input-type=commonjs - \
-    "$orca_app" "$data_dir" "$profile_id" "$managed_settings" <<'JAVASCRIPT'
+env -u NODE_OPTIONS -u NODE_REPL_EXTERNAL_MODULE ELECTRON_RUN_AS_NODE=1 \
+  "$orca_app/Contents/MacOS/Orca" --input-type=commonjs - \
+  "$orca_app" "$data_dir" "$profile_id" "$repo_dir/macos/orca.json" <<'JAVASCRIPT'
 const fs = require("node:fs");
 const path = require("node:path");
 const { isDeepStrictEqual } = require("node:util");
@@ -102,29 +52,19 @@ function main() {
   const [appPath, dataDir, profileId, managedFile] = process.argv.slice(2);
   const mainDir = path.join(appPath, "Contents/Resources/app.asar.unpacked/out/main");
   const chunksDir = path.join(mainDir, "chunks");
-  // 保存モジュールの候補を抽出
-  const authorityFiles = fs.readdirSync(chunksDir).filter((name) =>
+  const authorityFile = fs.readdirSync(chunksDir).find((name) =>
     /^profile-state-sqlite-authority-.*\.js$/.test(name));
-  if (authorityFiles.length !== 1) {
-    throw new Error("unsupported Orca profile-state API");
-  }
-  // 短縮された export 名には依存しない
+  // 短縮された export 名には依存せず、保存 API のメソッドでクラスを特定
   const methods = ["readAcceptedState", "readInitialState", "writeSerializedDomains", "close"];
-  // 保存 API を持つクラスを抽出
-  const authorities = Object.values(require(path.join(chunksDir, authorityFiles[0])))
-    .filter((value) => typeof value === "function" &&
-      // メソッドの有無を確認
+  const Authority = authorityFile && Object.values(require(path.join(chunksDir, authorityFile)))
+    .find((value) => typeof value === "function" &&
       methods.every((method) => typeof value.prototype?.[method] === "function"));
-  if (authorities.length !== 1) {
-    throw new Error("unsupported Orca profile-state API");
-  }
-  const Authority = authorities[0];
+  if (!Authority) throw new Error("unsupported Orca profile-state API");
   const { acquireProfileStateMaintenance } = require(path.join(
-    mainDir, "persistence/profile-state/profile-state-access.js"));
+    mainDir, "persistence/profile-state/access/profile-state-access.js"));
   const settingsFile = path.join(dataDir, "profiles", profileId, "orca-data.json");
   const databaseFile = path.join(dataDir, "profiles", profileId, "profile-state.db");
   const managed = JSON.parse(fs.readFileSync(managedFile, "utf8"));
-  if (!isObject(managed)) throw new Error("Orca managed settings must be an object");
 
   const maintenance = acquireProfileStateMaintenance(dataDir);
   let authority;
@@ -160,38 +100,7 @@ try {
   process.exitCode = 1;
 }
 JAVASCRIPT
-  if [[ ${DOTFILES_BOOTSTRAP:-0} != 1 ]]; then
-    printf 'ok: Orca settings\n'
-  fi
-  exit 0
-fi
 
-if [[ -L "$settings_file" || ! -f "$settings_file" ]]; then
-  printf 'error: Orca profile data must be an existing regular file: %s\n' "$settings_file" >&2
-  exit 1
-fi
-
-jq -e '.settings | type == "object"' "$settings_file" >/dev/null
-
-# エージェント環境は空オブジェクトも置換
-settings_filter=".settings *= \$managed[0] | .settings.agentDefaultEnv += \$managed[0].agentDefaultEnv"
-
-if jq -e --slurpfile managed "$managed_settings" \
-  ". == ($settings_filter)" "$settings_file" >/dev/null; then
-  if [[ ${DOTFILES_BOOTSTRAP:-0} != 1 ]]; then
-    printf 'ok: Orca settings\n'
-  fi
-  exit 0
-fi
-
-temporary_settings="$(mktemp "$settings_file.XXXXXX")"
-trap 'rm -f -- "$temporary_settings"' EXIT
-
-jq --slurpfile managed "$managed_settings" \
-  "$settings_filter" "$settings_file" >"$temporary_settings"
-mv -- "$temporary_settings" "$settings_file"
-trap - EXIT
-printf 'changed: updated Orca settings: %s\n' "$settings_file"
 if [[ ${DOTFILES_BOOTSTRAP:-0} != 1 ]]; then
   printf 'ok: Orca settings\n'
 fi

@@ -1,56 +1,47 @@
 # Zsh 対話シェル設定
 
-HISTFILE="$HOME/.zsh_history"
 HISTSIZE=100000
 SAVEHIST=100000
 setopt SHARE_HISTORY
 
-if [[ -x /opt/homebrew/bin/brew ]]; then
-  eval "$(/opt/homebrew/bin/brew shellenv)"
-elif [[ -x /usr/local/bin/brew ]]; then
-  eval "$(/usr/local/bin/brew shellenv)"
-fi
+eval "$(/opt/homebrew/bin/brew shellenv)"
 
 # (N-/) は既存ディレクトリだけ追加
 typeset -U path PATH
 path=(
-  ${HOMEBREW_PREFIX:-/usr/local}/opt/git/bin(N-/)
-  ${HOMEBREW_PREFIX:-/usr/local}/opt/libpq/bin(N-/)  # keg-only の libpq
+  $HOME/.local/bin
+  $HOMEBREW_PREFIX/opt/git/bin(N-/)
+  $HOMEBREW_PREFIX/opt/libpq/bin(N-/)  # keg-only の libpq
   $HOME/.orbstack/bin(N-/)
   $path
 )
-export PATH="$HOME/.local/bin:$PATH"
 
-if command -v mise >/dev/null 2>&1; then
-  eval "$(mise activate zsh)"
-fi
+eval "$(mise activate zsh)"
 
-if [[ "$TERM" != "dumb" ]] && command -v starship >/dev/null 2>&1; then
+if [[ "$TERM" != "dumb" ]]; then
   eval "$(starship init zsh)"
 fi
 
-command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init zsh)"
+eval "$(zoxide init zsh)"
 
 for f in "$HOME"/.zsh/plugins/*/*.plugin.zsh(N); do
   . "$f"
 done
 unset f
 
-[[ -r "$HOME/.shell/functions/git-worktree.sh" ]] && . "$HOME/.shell/functions/git-worktree.sh"
-[[ -r "$HOME/.shell/functions/ghq.sh" ]] && . "$HOME/.shell/functions/ghq.sh"
-[[ -r "$HOME/.shell/functions/codex.sh" ]] && . "$HOME/.shell/functions/codex.sh"
-[[ -r "$HOME/.shell/functions/claude.sh" ]] && . "$HOME/.shell/functions/claude.sh"
+. "$HOME/.shell/functions/git-worktree.sh"
+. "$HOME/.shell/functions/ghq.sh"
+. "$HOME/.shell/functions/codex.sh"
+. "$HOME/.shell/functions/claude.sh"
 
-if command -v fzf >/dev/null 2>&1; then
-  . <(fzf --zsh)
-  # cghq 後にプロンプトを再描画
-  _cghq_widget() {
-    cghq
-    zle reset-prompt
-  }
-  zle -N _cghq_widget
-  bindkey '^G' _cghq_widget
-fi
+. <(fzf --zsh)
+# cghq 後にプロンプトを再描画
+_cghq_widget() {
+  cghq
+  zle reset-prompt
+}
+zle -N _cghq_widget
+bindkey '^G' _cghq_widget
 
 # Karabiner の Home/End → Ctrl+Home/End を行頭・行末へ割り当て
 bindkey '^[[1;5H' beginning-of-line

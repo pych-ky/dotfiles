@@ -3,63 +3,13 @@
 
 set -euo pipefail
 
+# sudo 付きで実行すると root の設定に書き込む
 if ((EUID == 0)); then
   printf 'error: do not run scripts/setup-macos.sh with sudo or as root\n' >&2
   exit 1
 fi
 
-if [[ "$(uname -s)" != Darwin ]]; then
-  printf 'error: scripts/setup-macos.sh supports macOS only\n' >&2
-  exit 1
-fi
-
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
-rectangle_shutdown_max_attempts=50
-rectangle_shutdown_interval=0.2
-
-rectangle_restart_pending=0
-
-# Rectangle の終了を待機
-wait_for_rectangle_exit() {
-  local attempts=0
-
-  while pgrep -xq Rectangle; do
-    if ((attempts >= rectangle_shutdown_max_attempts)); then
-      printf 'error: timed out waiting for Rectangle to exit\n' >&2
-      return 1
-    fi
-
-    sleep "$rectangle_shutdown_interval"
-    attempts=$((attempts + 1))
-  done
-}
-
-# 終了させた Rectangle を再起動
-restart_rectangle() {
-  ((rectangle_restart_pending)) || return 0
-  rectangle_restart_pending=0
-  open -a Rectangle
-}
-
-# 終了コードを保って Rectangle を復帰
-restore_rectangle_on_exit() {
-  local status="$1"
-  local restart_status
-
-  trap - EXIT
-  if restart_rectangle; then
-    :
-  else
-    restart_status=$?
-    printf 'warning: failed to restart Rectangle\n' >&2
-    if ((status == 0)); then
-      status="$restart_status"
-    fi
-  fi
-
-  exit "$status"
-}
 
 # plist の他項目を保ってデスクトップの配置を変更
 set_desktop_arrangement() {
@@ -168,14 +118,20 @@ defaults write org.p0deje.Maccy historySize -int 999
 ## Rectangle
 
 # 終了時の旧設定書き戻しと import の競合を防ぐ
+rectangle_running=0
 if pgrep -xq Rectangle; then
-  rectangle_restart_pending=1
-  trap 'restore_rectangle_on_exit "$?"' EXIT
-  killall Rectangle 2>/dev/null || true
-  wait_for_rectangle_exit
+  rectangle_running=1
+  killall Rectangle
+  while pgrep -xq Rectangle; do
+    sleep 0.2
+  done
 fi
 
 defaults import com.knollsoft.Rectangle "$repo_dir/macos/rectangle.plist"
+
+if ((rectangle_running)); then
+  open -a Rectangle
+fi
 
 ## 電源管理
 
@@ -184,9 +140,6 @@ sudo -n pmset -c sleep 0 2>/dev/null || printf 'warning: skipped pmset sleep set
 killall Dock 2>/dev/null || true
 killall Finder 2>/dev/null || true
 killall ControlCenter 2>/dev/null || true
-
-restart_rectangle
-trap - EXIT
 
 if [[ ${DOTFILES_BOOTSTRAP:-0} != 1 ]]; then
   printf 'ok: macOS settings applied\n'

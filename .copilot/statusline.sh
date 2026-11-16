@@ -3,9 +3,7 @@
 
 set -euo pipefail
 
-script_dir="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
-
-# モデル未確定時は Claude 設定で補完しない
+# モデル未確定時は表示しない
 # 推論レベルは display_name にのみ含まれる
 payload="$(jq -e 'select(.model.id) | {
   workspace,
@@ -15,4 +13,4 @@ payload="$(jq -e 'select(.model.id) | {
   fast_mode: (.model.id == "claude-opus-4.8-fast")
 }')" || exit 0
 
-"$script_dir/../.claude/hooks/statusline.sh" copilot <<<"$payload"
+"$HOME/.claude/hooks/statusline.sh" copilot <<<"$payload"

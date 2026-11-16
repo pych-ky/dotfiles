@@ -11,13 +11,5 @@ trim_trailing_whitespace = true
 indent_size  = 2
 indent_style = space
 
-# Markdown の改行用空白を保持
-[*.{md,md.template}]
-trim_trailing_whitespace = false
-
 [*.py]
 indent_size = 4
-
-[Makefile]
-indent_style = tab
-indent_size  = tab

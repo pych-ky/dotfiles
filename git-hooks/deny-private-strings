@@ -20,7 +20,8 @@ work_remotes_file="$config_dir/work-remotes.txt"
 
 [[ -r "$denylist_file" ]] || exit 0
 
-# 前後空白・コメント・空行を除去（空パターンの全行一致を防ぐ）
+# 前後空白・コメント・空行を除去
+# 空パターンは全行に一致するため残さない
 strip_pattern_file() {
   sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
     -e '/^#/d' -e '/^$/d' -- "$1"
@@ -86,26 +87,8 @@ filter_public_origins() {
   ' <(strip_pattern_file "$public_url_origins_file") <(patterns) -
 }
 
-# symlink を解決した絶対パスを取得
-resolve_path() {
-  local path="$1"
-  local target dir
-
-  while [[ -L "$path" ]]; do
-    target="$(readlink "$path")" || return 1
-    if [[ "$target" == /* ]]; then
-      path="$target"
-    else
-      path="$(dirname "$path")/$target"
-    fi
-  done
-
-  dir="$(cd -P -- "$(dirname "$path")" 2>/dev/null && pwd)" || return 1
-  printf '%s/%s\n' "$dir" "$(basename "$path")"
-}
-
 # パターン自身が一致する配置元リポジトリは検査を省略
-denylist_source="$(resolve_path "$denylist_file" 2>/dev/null || true)"
+denylist_source="$(readlink -f "$denylist_file" 2>/dev/null || true)"
 current_repo="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 denylist_repo=
 if [[ -n "$denylist_source" ]]; then

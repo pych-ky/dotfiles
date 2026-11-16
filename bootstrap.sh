@@ -10,14 +10,8 @@ current_step=
 step_failed_start=0
 step_skipped_start=0
 
-setup_common_library="$repo_dir/lib/setup-common.sh"
-if [[ ! -f "$setup_common_library" || -L "$setup_common_library" ]]; then
-  printf 'error: setup common library is missing or unsafe: %s\n' \
-    "$setup_common_library" >&2
-  exit 1
-fi
 # shellcheck source=lib/setup-common.sh
-source "$setup_common_library"
+source "$repo_dir/lib/setup-common.sh"
 
 # ステップの結果を表示
 finish_step() {
@@ -87,136 +81,42 @@ run_and_record() {
   "$@" || record_failure "$label" "$?"
 }
 
-# 必要なら端末で sudo 認証
-ensure_sudo() {
-  if sudo -n -v 2>/dev/null; then
-    return 0
-  fi
-
-  if ! { : </dev/tty; } 2>/dev/null; then
-    printf 'error: sudo authentication requires an interactive terminal\n' >&2
-    printf '       run ./bootstrap.sh from a local terminal\n' >&2
-    return 1
-  fi
-
-  sudo -v
-}
-
-# インストーラーを取得・実行
+# インストーラーを取得し、指定コマンドの標準入力へ渡す
+# 取得が途中で切れた内容を実行しないよう、全体を取得してから渡す
 run_downloaded_installer() {
   local url="$1"
-  local interpreter="$2"
-  local environment_assignment="$3"
   local installer
 
-  shift 3
-
+  shift
   installer="$(curl -fsSL "$url")" || return
-  if [[ -z "$installer" ]]; then
-    setup_error "downloaded installer is empty: $url"
-    return 1
-  fi
-
-  if [[ -n "$environment_assignment" ]]; then
-    env "$environment_assignment" "$interpreter" -s -- "$@" <<<"$installer"
-  else
-    "$interpreter" -s -- "$@" <<<"$installer"
-  fi
-}
-
-# PATH・~/.local/bin から実行ファイルを検索
-resolve_user_executable() {
-  local name="$1"
-  local candidate
-
-  if candidate="$(command -v "$name" 2>/dev/null)"; then
-    printf '%s\n' "$candidate"
-    return 0
-  fi
-
-  if [[ -x "$HOME/.local/bin/$name" ]]; then
-    printf '%s\n' "$HOME/.local/bin/$name"
-    return 0
-  fi
-
-  return 1
+  "$@" <<<"$installer"
 }
 
 # 未導入の CLI を公式配布から導入
 install_user_cli() {
   local name="$1"
   local label="$2"
-  local url="$3"
-  local interpreter="$4"
-  local environment_assignment="${5:-}"
 
-  if (($# >= 5)); then
-    shift 5
-  else
-    shift 4
-  fi
-
-  if resolve_user_executable "$name" >/dev/null; then
-    return 0
-  fi
-
-  run_and_record \
-    "$label" \
-    run_downloaded_installer "$url" "$interpreter" "$environment_assignment" "$@"
-}
-
-# PATH・既定パスから brew を検索
-resolve_homebrew_executable() {
-  local candidate
-
-  if candidate="$(command -v brew 2>/dev/null)" && [[ -x "$candidate" ]]; then
-    printf '%s\n' "$candidate"
-    return 0
-  fi
-
-  for candidate in /opt/homebrew/bin/brew /usr/local/bin/brew; do
-    if [[ -x "$candidate" ]]; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-  done
-
-  return 1
+  shift 2
+  command -v "$name" >/dev/null 2>&1 || run_and_record "$label" run_downloaded_installer "$@"
 }
 
 # Homebrew を導入・有効化
 setup_homebrew() {
-  local homebrew_installer
   local homebrew_shellenv
 
-  brew_executable="$(resolve_homebrew_executable || true)"
-  if [[ -z "$brew_executable" ]]; then
-    homebrew_installer="$(
-      curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh
-    )" || return
-    if [[ -z "$homebrew_installer" ]]; then
-      setup_error 'downloaded Homebrew installer is empty'
-      return 1
-    fi
-
-    ensure_sudo || return
-    env NONINTERACTIVE=1 /bin/bash <<<"$homebrew_installer" || return
-    brew_executable="$(resolve_homebrew_executable || true)"
+  if [[ ! -x /opt/homebrew/bin/brew ]]; then
+    sudo -v || return
+    run_downloaded_installer https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh \
+      env NONINTERACTIVE=1 /bin/bash || return
   fi
 
-  if [[ -z "$brew_executable" ]]; then
-    setup_error 'Homebrew executable was not found after installation'
-    return 1
-  fi
-
-  homebrew_shellenv="$("$brew_executable" shellenv)" || return
+  homebrew_shellenv="$(/opt/homebrew/bin/brew shellenv)" || return
   eval "$homebrew_shellenv"
 }
 
 # Homebrew と Brewfile のパッケージを導入
 setup_homebrew_and_bundle() {
-  local brew_cellar
-
   setup_homebrew || {
     record_failure 'Homebrew' "$?"
     record_skip 'Homebrew packages (Homebrew is unavailable)'
@@ -224,18 +124,8 @@ setup_homebrew_and_bundle() {
   }
 
   step 'Homebrew packages'
-  brew_cellar="$("$brew_executable" --prefix)/Cellar"
-  if [[ -d "$brew_cellar" && ! -w "$brew_cellar" ]]; then
-    printf 'warning: %s is not writable\n' "$brew_cellar" >&2
-    printf '         fix it with: sudo chown -R "%s" "%s"\n' \
-      "$(id -un)" "$brew_cellar" >&2
-  fi
-
-  # Homebrew が sudo timestamp を無効化するため、再認証も任せる
-  run_and_record \
-    'Homebrew packages' \
-    env HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_AUTOREMOVE=1 \
-    "$brew_executable" bundle --quiet --no-upgrade --file="$repo_dir/macos/Brewfile"
+  run_and_record 'Homebrew packages' \
+    brew bundle --quiet --no-upgrade --file="$repo_dir/macos/Brewfile"
 }
 
 # ログイン項目を設定
@@ -317,100 +207,30 @@ APPLESCRIPT
   done
 }
 
-# mise で開発ツールを導入
-setup_mise_tools() {
-  # mise install は設定なしでも成功するため事前検証
-  local mise_config="${XDG_CONFIG_HOME:-$HOME/.config}/mise/config.toml"
-
-  if ! command -v mise >/dev/null 2>&1; then
-    record_skip 'Development tools (mise is unavailable)'
-  elif [[ ! -r "$mise_config" ]]; then
-    printf 'error: mise configuration is not readable: %s\n' "$mise_config" >&2
-    printf '       check that scripts/link-dotfiles.sh completed successfully\n' >&2
-    record_failure 'Development tools (missing mise configuration)' 1
-  else
-    run_and_record 'Development tools' mise install
-  fi
-}
-
 # 未導入の Zsh プラグインを取得
 install_zsh_plugin() {
-  local plugins_dir="$1"
-  local name="$2"
-  local url="$3"
-  local entrypoint="$name.plugin.zsh"
-  local target="$plugins_dir/$name"
+  local target="$HOME/.zsh/plugins/$1"
 
-  [[ -f "$target/$entrypoint" && -r "$target/$entrypoint" ]] && return 0
-
-  if [[ -e "$target" || -L "$target" ]]; then
-    printf 'error: incomplete zsh plugin: %s\n' "$target" >&2
-    printf '       expected: %s\n' "$target/$entrypoint" >&2
-    printf '       move or remove the directory, then rerun ./bootstrap.sh\n' >&2
-    return 1
-  fi
-
-  setup_run_noninteractive_git clone --quiet -- "$url" "$target" || return
-  if [[ ! -f "$target/$entrypoint" || ! -r "$target/$entrypoint" ]]; then
-    setup_error "zsh plugin entrypoint was not installed: $target/$entrypoint"
-    return 1
-  fi
-  printf 'changed: installed Zsh plugin: %s\n' "$name"
-}
-
-# Zsh プラグインを導入
-setup_zsh_plugins() {
-  local plugins_dir="$HOME/.zsh/plugins"
-
-  mkdir -p "$plugins_dir" || {
-    record_failure 'zsh plugins directory' "$?"
-    return 0
-  }
-
-  local plugin name
-  for plugin in \
-    'zsh-autosuggestions https://github.com/zsh-users/zsh-autosuggestions' \
-    'fast-syntax-highlighting https://github.com/zdharma-continuum/fast-syntax-highlighting.git'; do
-    name="${plugin%% *}"
-    run_and_record "$name" install_zsh_plugin "$plugins_dir" "$name" "${plugin#* }"
-  done
+  [[ ! -e "$target" ]] || return 0
+  setup_run_noninteractive_git clone --quiet -- "$2" "$target" || return
+  printf 'changed: installed Zsh plugin: %s\n' "$1"
 }
 
 # Codex に Linear プラグインを導入
 setup_codex_plugins() {
-  local executable
   local plugins
   local install_output
   local status
 
-  if ! executable="$(resolve_user_executable codex)"; then
-    record_skip 'Codex plugins (Codex CLI is unavailable)'
-    return 0
-  fi
-  if ! command -v jq >/dev/null 2>&1; then
-    record_skip 'Codex plugins (jq is unavailable)'
-    return 0
-  fi
-
-  plugins="$(
-    "$executable" plugin list --json |
-      jq -ce '
-        if type == "object" and (.installed | type == "array") then
-          [.installed[] | objects | .pluginId? | strings]
-        else
-          error("expected an object with an installed array")
-        end
-      '
-  )" || {
+  plugins="$(codex plugin list --json)" || {
     record_failure 'Codex plugin list' "$?"
     return 0
   }
-
-  if jq -e 'index("linear@openai-curated-remote") != null' <<<"$plugins" >/dev/null; then
+  if jq -e '.installed | any(.pluginId == "linear@openai-curated-remote")' <<<"$plugins" >/dev/null; then
     return 0
   fi
 
-  if install_output="$("$executable" plugin add --json linear@openai-curated-remote)"; then
+  if install_output="$(codex plugin add --json linear@openai-curated-remote)"; then
     return 0
   else
     status=$?
@@ -421,53 +241,32 @@ setup_codex_plugins() {
 
 # 非公開設定を取得・適用
 setup_private_overlay() {
-  local overlay_dir
-  local overlay_url
+  local overlay_dir="$HOME/ghq/github.com/pych-ky/dotfiles-private"
   local status=0
 
-  if [[ "${DOTFILES_PRIVATE_SKIP:-0}" == 1 ]]; then
-    record_skip 'Private settings (DOTFILES_PRIVATE_SKIP=1)'
-    return 0
-  fi
-
-  # publish-lock が未作成の取得先に入らないよう末尾の / を除く
-  overlay_dir="$(setup_normalize_repository_dir \
-    "${DOTFILES_PRIVATE_DIR:-$HOME/ghq/github.com/pych-ky/dotfiles-private}" \
-    DOTFILES_PRIVATE_DIR)" || {
-    record_failure 'Private settings checkout' 1
-    return 0
-  }
-  overlay_url="${DOTFILES_PRIVATE_REPO_URL:-https://github.com/pych-ky/dotfiles-private.git}"
-
-  setup_ensure_private_checkout \
-    "$overlay_dir" "$overlay_url" 'Private settings' \
-    DOTFILES_PRIVATE_DIR DOTFILES_PRIVATE_REPO_URL \
-    setup.sh 'dotfiles-private setup.sh is missing or not executable' 0 || status=$?
-
+  setup_ensure_private_checkout "$overlay_dir" \
+    https://github.com/pych-ky/dotfiles-private.git 'Private settings' || status=$?
   case "$status" in
   0) run_and_record 'Private settings' "$overlay_dir/setup.sh" ;;
   3) skipped_steps+=('Private settings (repository is inaccessible)') ;;
-  *) record_failure 'Private settings checkout' 1 ;;
+  *) record_failure 'Private settings checkout' "$status" ;;
   esac
 }
 
+# sudo 付きで実行すると HOME に root 所有のファイルができる
 if ((EUID == 0)); then
-  setup_error 'do not run bootstrap.sh with sudo or as root'
+  printf 'error: do not run bootstrap.sh with sudo or as root\n' >&2
   exit 1
 fi
 
-if [[ "$(uname -s)" != Darwin ]]; then
-  setup_error 'bootstrap.sh supports macOS only'
-  exit 1
-fi
-
-setup_validate_home
 export DOTFILES_BOOTSTRAP=1
+# 公式インストーラーの導入先
+export PATH="$HOME/.local/bin:$PATH"
 
 step 'Administrator access'
 # 認証中の終了時も sudo timestamp を破棄
 trap 'sudo -k 2>/dev/null || true' EXIT
-ensure_sudo
+sudo -v
 
 step 'macOS settings'
 run_and_record 'macOS settings' "$repo_dir/scripts/setup-macos.sh"
@@ -487,23 +286,27 @@ run_optional_setup 'Orca settings' "$repo_dir/scripts/setup-orca.sh"
 run_and_record 'Menu bar settings' "$repo_dir/scripts/setup-menubar.sh"
 
 step 'Zsh plugins'
-setup_zsh_plugins
+run_and_record zsh-autosuggestions install_zsh_plugin \
+  zsh-autosuggestions https://github.com/zsh-users/zsh-autosuggestions
+run_and_record fast-syntax-highlighting install_zsh_plugin \
+  fast-syntax-highlighting https://github.com/zdharma-continuum/fast-syntax-highlighting.git
 
 step 'Development tools'
-setup_mise_tools
+run_and_record 'Development tools' mise install
 
 step 'Claude Code'
-install_user_cli claude 'Claude Code installer' https://claude.ai/install.sh /bin/bash
+install_user_cli claude 'Claude Code installer' \
+  https://claude.ai/install.sh /bin/bash -s --
 
 step 'Codex'
 install_user_cli codex 'Codex installer' \
-  https://chatgpt.com/codex/install.sh /bin/sh CODEX_NON_INTERACTIVE=1
+  https://chatgpt.com/codex/install.sh env CODEX_NON_INTERACTIVE=1 /bin/sh -s --
 run_and_record 'Codex settings' "$repo_dir/scripts/setup-codex.sh"
 setup_codex_plugins
 
 step 'Hermes Agent'
 install_user_cli hermes 'Hermes Agent installer' \
-  https://hermes-agent.nousresearch.com/install.sh /bin/bash '' --non-interactive
+  https://hermes-agent.nousresearch.com/install.sh /bin/bash -s -- --non-interactive
 run_and_record 'Hermes settings' "$repo_dir/scripts/setup-hermes.sh"
 
 step 'Codex pets'
@@ -513,7 +316,6 @@ step 'Agent Skills'
 run_optional_setup 'Agent Skills' "$repo_dir/scripts/setup-skills.sh"
 
 step 'Private settings'
-trap 'setup_cleanup_private_checkout' EXIT
 setup_private_overlay
 
 step 'Login items'

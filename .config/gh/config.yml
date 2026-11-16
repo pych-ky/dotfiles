@@ -2,25 +2,6 @@
 
 version: 1
 
-## Git
-
 aliases:
     co: pr checkout
 expiring_credentials: enabled
-git_protocol: https
-
-## 外部コマンド・接続
-
-browser:
-editor:
-http_unix_socket:
-pager:
-
-## 操作・表示
-
-accessible_colors: disabled
-accessible_prompter: disabled
-color_labels: disabled
-prefer_editor_prompt: disabled
-prompt: enabled
-spinner: enabled
