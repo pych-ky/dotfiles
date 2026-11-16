@@ -3,38 +3,20 @@
 
 set -euo pipefail
 
-if ((EUID == 0)); then
-  printf 'error: do not run scripts/setup-menubar.sh with sudo or as root\n' >&2
-  exit 1
-fi
-
-if [[ "$(uname -s)" != Darwin ]]; then
-  printf 'error: scripts/setup-menubar.sh supports macOS only\n' >&2
-  exit 1
-fi
-
 changed_count=0
 
-# 管理キーを比較・更新・読み戻し検証
+# 管理キーが異なる場合だけ更新
 write_default() {
   local domain="$1" key="$2" type="$3" value="$4"
-  local current expected="$4"
+  local expected="$4"
 
   case "$type:$value" in
   -bool:true) expected=1 ;;
   -bool:false) expected=0 ;;
   esac
 
-  if current="$(defaults read "$domain" "$key" 2>/dev/null)" &&
-    [[ "$current" == "$expected" ]]; then
-    return 0
-  fi
-
+  [[ "$(defaults read "$domain" "$key" 2>/dev/null)" != "$expected" ]] || return 0
   defaults write "$domain" "$key" "$type" "$value"
-  if [[ "$(defaults read "$domain" "$key")" != "$expected" ]]; then
-    printf 'error: failed to verify preference: %s / %s\n' "$domain" "$key" >&2
-    return 1
-  fi
   changed_count=$((changed_count + 1))
 }
 

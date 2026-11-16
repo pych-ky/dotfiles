@@ -1,6 +1,6 @@
 # mise ツールバージョン設定
 
-# Python 以外は macos/Brewfile と重複させない。リポジトリ設定で上書き可
+# Python 以外は macos/Brewfile と重複させない
 
 
 [tools]

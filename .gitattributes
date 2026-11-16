@@ -1,16 +1,3 @@
-# Git の改行・バイナリ設定
+# Git の改行設定
 
 * text=auto eol=lf
-
-*.gif binary
-*.gz binary
-*.ico binary
-*.jpeg binary
-*.jpg binary
-*.pdf binary
-*.png binary
-*.tar binary
-*.webp binary
-*.woff binary
-*.woff2 binary
-*.zip binary

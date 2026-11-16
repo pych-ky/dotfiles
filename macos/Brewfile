@@ -1,6 +1,6 @@
 # Homebrew パッケージ
 
-# 任意 GUI はコメント解除後、brew bundle --file=macos/Brewfile で導入
+# コメントアウトした cask は任意で導入
 
 ## 外部 tap
 
@@ -15,17 +15,20 @@ brew "fzf"
 brew "starship"
 brew "zoxide"
 
-### 基本ユーティリティ
+### ファイル / テキスト処理
 
-brew "ca-certificates"
 brew "coreutils"
-brew "duti"
 brew "gnu-sed"
 brew "jq"
 brew "pandoc"
 brew "ripgrep"
 brew "tree"
 brew "yq"
+
+### 証明書 / 既定アプリ
+
+brew "ca-certificates"
+brew "duti"
 
 ### Git / GitHub
 
@@ -100,14 +103,20 @@ cask "logi-options+"
 cask "rectangle"
 cask "typeless"
 
-### ユーティリティ
+### ランチャー / クリップボード
+
+cask "maccy"
+cask "raycast"
+
+### システム監視 / メディアキー
+
+cask "notunes"
+cask "stats"
+
+### 画面収録 / アンインストール
 
 cask "appcleaner"
 cask "licecap"
-cask "maccy"
-cask "notunes"
-cask "raycast"
-cask "stats"
 
 ### セキュリティ / パスワード管理
 

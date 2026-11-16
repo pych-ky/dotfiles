@@ -2,9 +2,6 @@
 
 # Claude Code の shell snapshot に含めるため __aws_* 名を使う
 
-[ -n "${__AWS_FUNCTIONS_LOADED:-}" ] && return
-__AWS_FUNCTIONS_LOADED=1
-
 # 認証プロバイダーの環境変数名を列挙
 __aws_credential_provider_variables() {
   printf '%s\n' \
@@ -38,88 +35,33 @@ __aws_has_credential_provider() {
 
 # 認証プロバイダーの環境変数を解除
 __aws_clear_credentials() {
-  local clear_status=0
   local variable
 
   while IFS= read -r variable; do
-    unset "$variable" || clear_status=1
+    unset "$variable"
   done < <(__aws_credential_provider_variables)
-
-  return "$clear_status"
 }
 
 # 認証プロバイダーを外したサブシェルで実行
 __aws_run_without_credentials() (
-  __aws_clear_credentials || exit
+  __aws_clear_credentials
   "$@"
 )
-
-# プロファイルで STS 接続を確認
-__aws_verify_profile_credentials() (
-  local profile="$1"
-
-  __aws_clear_credentials || exit
-  AWS_PROFILE="$profile" AWS_PAGER='' aws sts get-caller-identity
-)
-
-# SSO プロファイルか確認
-__aws_require_sso_profile() {
-  local profile="${1:?使い方: __aws_require_sso_profile <profile>}"
-  local sso_session
-  local sso_start_url
-
-  sso_session="$(__aws_run_without_credentials \
-    aws configure get sso_session --profile "$profile" 2>/dev/null)" || sso_session=
-  sso_start_url="$(__aws_run_without_credentials \
-    aws configure get sso_start_url --profile "$profile" 2>/dev/null)" || sso_start_url=
-
-  if [ -z "$sso_session$sso_start_url" ]; then
-    printf 'aws-use: %s is not configured as an AWS SSO profile\n' "$profile" >&2
-    return 2
-  fi
-}
-
-# 次回起動用にプロファイル名を保存
-__aws_persist_active_profile() {
-  local profile="${1:?使い方: __aws_persist_active_profile <profile>}"
-  local file="$HOME/.aws/active-profile"
-  local directory="${file%/*}"
-  local temporary
-
-  mkdir -p "$directory" || return
-  temporary="$(mktemp "$directory/.active-profile.XXXXXX")" || return
-
-  if [ -d "$file" ] ||
-    ! printf '%s\n' "$profile" >"$temporary" ||
-    ! mv -f "$temporary" "$file"; then
-    rm -f "$temporary"
-    return 1
-  fi
-}
 
 # SSO ログイン後にプロファイルを切り替え・保存
 aws-use() {
   local profile="${1:?使い方: aws-use <profile>}"
 
-  if ! command -v aws >/dev/null 2>&1; then
-    printf 'aws: aws CLI not found\n' >&2
-    return 127
-  fi
-
-  __aws_require_sso_profile "$profile" || return
   __aws_run_without_credentials aws sso login --profile "$profile" || return
-
-  __aws_verify_profile_credentials "$profile" || return
-  __aws_persist_active_profile "$profile" || return
-  __aws_clear_credentials || return
+  AWS_PAGER='' __aws_run_without_credentials aws sts get-caller-identity --profile "$profile" || return
+  # 次回起動時に load-active-profile.sh が復元
+  printf '%s\n' "$profile" >"$HOME/.aws/active-profile" || return
+  __aws_clear_credentials
   export AWS_PROFILE="$profile"
 }
 
 # 認証プロバイダーと保存済みプロファイルを解除
 aws-clear() {
-  local clear_status=0
-
-  __aws_clear_credentials || clear_status=1
-  rm -f "$HOME/.aws/active-profile" || clear_status=1
-  return "$clear_status"
+  __aws_clear_credentials
+  rm -f "$HOME/.aws/active-profile"
 }

@@ -4,50 +4,8 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
-setup_common_library="$repo_dir/lib/setup-common.sh"
-if [[ ! -f "$setup_common_library" || -L "$setup_common_library" ]]; then
-  printf 'error: setup common library is missing or unsafe: %s\n' \
-    "$setup_common_library" >&2
-  exit 1
-fi
-# shellcheck source=lib/setup-common.sh
-source "$setup_common_library"
-
-if ((EUID == 0)); then
-  printf 'error: do not run scripts/setup-typeless.sh with sudo or as root\n' >&2
-  exit 1
-fi
-
-if [[ "$(uname -s)" != Darwin ]]; then
-  printf 'error: scripts/setup-typeless.sh supports macOS only\n' >&2
-  exit 1
-fi
-
-setup_validate_home || exit 1
-
-if ! command -v jq >/dev/null 2>&1; then
-  printf 'error: jq is required\n' >&2
-  exit 1
-fi
-
 managed_settings="$repo_dir/macos/typeless.json"
 settings_file="$HOME/Library/Application Support/Typeless/app-settings.json"
-
-if [[ -L "$settings_file" || (-e "$settings_file" && ! -f "$settings_file") ]]; then
-  printf 'error: Typeless settings must be a regular file\n' >&2
-  exit 1
-fi
-
-# 旧設定の移行によるショートカットの上書きを防ぐ
-if [[ -f "$settings_file" ]] &&
-  jq -e '
-    (.__COMPATIBLE_FEATURE_SHORTCUT_BINDINGS_MIGRATED_FLAG | IN(null, false, 0, "")) and
-    (.keyboardShortcut | IN(null, false, 0, "") | not)
-  ' "$settings_file" >/dev/null; then
-  printf 'error: launch and quit Typeless to migrate legacy shortcuts, then run scripts/setup-typeless.sh again\n' >&2
-  exit 1
-fi
 
 if [[ -f "$settings_file" ]] &&
   jq -e --slurpfile managed "$managed_settings" \
@@ -68,19 +26,12 @@ temporary_settings="$(mktemp "$settings_file.XXXXXX")"
 trap 'rm -f -- "$temporary_settings"' EXIT
 
 if [[ -f "$settings_file" ]]; then
-  jq -s '
-    if length == 2 and all(.[]; type == "object") then
-      .[0] * .[1]
-    else
-      error("Typeless settings must contain one JSON object per file")
-    end
-  ' "$settings_file" "$managed_settings" >"$temporary_settings"
+  jq -s '.[0] * .[1]' "$settings_file" "$managed_settings" >"$temporary_settings"
 else
   jq . "$managed_settings" >"$temporary_settings"
 fi
 
 mv -- "$temporary_settings" "$settings_file"
-trap - EXIT
 printf 'changed: updated Typeless settings: %s\n' "$settings_file"
 if [[ ${DOTFILES_BOOTSTRAP:-0} != 1 ]]; then
   printf 'ok: Typeless settings\n'

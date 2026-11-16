@@ -3,8 +3,6 @@
 
 set -euo pipefail
 
-export PATH="$HOME/.local/bin:$PATH"
-
 # bootstrap では設定成功の明細だけを省略
 success_filter=
 if [[ ${DOTFILES_BOOTSTRAP:-0} == 1 ]]; then
@@ -38,7 +36,9 @@ def set_hermes_config(key, value, force=False):
 
 set_hermes_config("model.provider", "openai-codex")
 set_hermes_config("model.default", "gpt-6.1-sol")
+# Hermes 独自の記憶・委譲機能を使うため標準の実行基盤を使う
 set_hermes_config("model.openai_runtime", "auto")
+# この実行基盤は Ultra を Max として送信する
 # reasoning_effort と offer_version は実行時に参照されるが既定スキーマに未登録
 set_hermes_config("agent.reasoning_effort", "max", force=True)
 set_hermes_config("auth.adopt_external_logins", "false")

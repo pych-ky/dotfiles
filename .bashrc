@@ -1,13 +1,9 @@
 # Bash 対話シェル設定
 
-if [ -x /opt/homebrew/bin/brew ]; then
-  eval "$(/opt/homebrew/bin/brew shellenv)"
-elif [ -x /usr/local/bin/brew ]; then
-  eval "$(/usr/local/bin/brew shellenv)"
-fi
+eval "$(/opt/homebrew/bin/brew shellenv)"
 
 # PATH 優先順: ~/.local/bin → Homebrew Git → OrbStack
-for dir in "$HOME/.orbstack/bin" "${HOMEBREW_PREFIX:-/usr/local}/opt/git/bin" "$HOME/.local/bin"; do
+for dir in "$HOME/.orbstack/bin" "$HOMEBREW_PREFIX/opt/git/bin" "$HOME/.local/bin"; do
   [ -d "$dir" ] || continue
   case ":$PATH:" in
   *":$dir:"*) ;;
@@ -15,24 +11,19 @@ for dir in "$HOME/.orbstack/bin" "${HOMEBREW_PREFIX:-/usr/local}/opt/git/bin" "$
   esac
 done
 unset dir
-export PATH
 
-if command -v mise >/dev/null 2>&1; then
-  eval "$(mise activate bash)"
-fi
+eval "$(mise activate bash)"
 
-[ -r "$HOME/.shell/functions/aws.sh" ] && . "$HOME/.shell/functions/aws.sh"
+. "$HOME/.shell/functions/aws.sh"
 
-[ -r "$HOME/.shell/functions/git-worktree.sh" ] && . "$HOME/.shell/functions/git-worktree.sh"
-[ -r "$HOME/.shell/functions/ghq.sh" ] && . "$HOME/.shell/functions/ghq.sh"
-[ -r "$HOME/.shell/functions/codex.sh" ] && . "$HOME/.shell/functions/codex.sh"
-[ -r "$HOME/.shell/functions/claude.sh" ] && . "$HOME/.shell/functions/claude.sh"
+. "$HOME/.shell/functions/git-worktree.sh"
+. "$HOME/.shell/functions/ghq.sh"
+. "$HOME/.shell/functions/codex.sh"
+. "$HOME/.shell/functions/claude.sh"
 
-if command -v fzf >/dev/null 2>&1; then
-  eval "$(fzf --bash)"
-fi
+eval "$(fzf --bash)"
 
-[ -r "$HOME/.aws/load-active-profile.sh" ] && . "$HOME/.aws/load-active-profile.sh"
+. "$HOME/.aws/load-active-profile.sh"
 
 # 組織設定・ツールの自動追記はローカル設定へ
 # shellcheck source=/dev/null

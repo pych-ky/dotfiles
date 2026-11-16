@@ -4,7 +4,6 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-export PATH="$HOME/.local/bin:$PATH"
 
 python3.14 - "$repo_dir/etc/codex/config.toml" <<'PYTHON'
 import json

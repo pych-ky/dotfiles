@@ -15,11 +15,7 @@ _wto_branches() {
 
 # SHA-1 の先頭6桁を取得
 _wto_hash6() {
-  if command -v shasum >/dev/null 2>&1; then
-    printf '%s' "$1" | shasum -a 1
-  else
-    printf '%s' "$1" | sha1sum
-  fi | awk '{print substr($1, 1, 6)}'
+  printf '%s' "$1" | shasum -a 1 | cut -c1-6
 }
 
 # worktree のブランチを確認
@@ -47,26 +43,17 @@ wto() {
   repository_root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
   repository_root="$(cd "$repository_root" && pwd -P)" || return 1
 
-  command -v fzf >/dev/null 2>&1 || {
-    echo 'wto: fzf is required' >&2
-    return 1
-  }
-
   local worktrees_root="$repository_root/.worktrees"
-  mkdir -p "$worktrees_root" || return 1
-  git -C "$repository_root" fetch --all --prune >/dev/null 2>&1 || true
+  git -C "$repository_root" fetch --all --prune >/dev/null 2>&1
 
   local branches
   branches="$(_wto_branches "$repository_root" | fzf -m --prompt='worktrees> ' --header='TABで複数選択 / ENTERで確定')" || return 1
-  [ -n "$branches" ] || return 1
 
   local branch dir leaf
   local failed=0
   local -a created_paths=()
 
   while IFS= read -r branch; do
-    [ -n "$branch" ] || continue
-
     leaf="${branch##*/}"
     dir="$worktrees_root/$leaf"
 
@@ -81,8 +68,9 @@ wto() {
       continue
     fi
 
+    # 同名ブランチを持つ remote が複数あっても origin を追跡
     if ! git -C "$repository_root" show-ref --verify --quiet "refs/heads/$branch"; then
-      git -C "$repository_root" branch --track "$branch" "origin/$branch" >/dev/null 2>&1 || true
+      git -C "$repository_root" branch --track "$branch" "origin/$branch" >/dev/null 2>&1
     fi
 
     if git -C "$repository_root" worktree add "$dir" "$branch" >/dev/null; then

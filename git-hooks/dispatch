@@ -1,16 +1,11 @@
 #!/usr/bin/env bash
 # Git フックの振り分け
 
-# secretlint → denylist → .git/hooks → Git LFS の順で実行
-# フック名の symlink を $0 で判定
-
 set -uo pipefail
 
+# フック名の symlink から起動されるため、$0 でフックを判定
 hook_name="$(basename "$0")"
-
-git_dir="$(git rev-parse --git-common-dir 2>/dev/null || true)"
-[[ -n "$git_dir" ]] || git_dir="$(git rev-parse --git-dir 2>/dev/null || true)"
-local_hook="${git_dir:-.git}/hooks/${hook_name}"
+local_hook="$(git rev-parse --git-common-dir 2>/dev/null)/hooks/${hook_name}"
 
 lfs_hooks=' pre-push post-checkout post-commit post-merge '
 

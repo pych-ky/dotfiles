@@ -4,7 +4,7 @@ macOS・シェル・開発ツール・AI エージェントの個人用設定。
 
 ## 一括セットアップ
 
-- macOS・対話可能なローカル端末・`sudo` 権限が必要
+- 対話可能なローカル端末と `sudo` 権限が必要
 - スクリプトには `sudo` を付けない
 
 ```sh
@@ -12,10 +12,10 @@ git clone <このリポジトリ> && cd dotfiles
 ./bootstrap.sh
 ```
 
-多くの設定はリンクされ、編集が実環境へ反映される。
+多くの設定はリンクされ、リポジトリの編集がそのまま実環境へ反映される。
 macOS 設定の一部は再ログイン後に反映される。
 
-- 警告・未実施項目を解消し、[手動セットアップ](#手動セットアップ)へ進む
+- 完了後は[手動セットアップ](#手動セットアップ)を行う
 
 ## 個別セットアップ
 
@@ -26,32 +26,12 @@ brew bundle --no-upgrade --file=macos/Brewfile
 brew bundle upgrade --file=macos/Brewfile
 ```
 
-- Homebrew formula の旧版は自動削除しない
-
-### 開発ツール（mise）
-
-- プロジェクトで指定がなければ、`python3` は mise 管理の Python 3.14 を使う
-- 旧バージョンを残して更新する
-- プロジェクト側の固定版指定は上書きしない
-
-グローバル設定を使った Node の導入・更新時は、非公開設定の `install-node-tools` があれば導入済み CLI を復元する。
-CLI の初回導入は非公開設定の `setup.sh` が行う。
-
-```sh
-mise install
-mise upgrade
-```
-
-- CLI の復元に失敗した場合は、原因を解消して `mise install node` を再実行する
-
 ### シンボリックリンク
 
 ```sh
 ./scripts/link-dotfiles.sh --dry-run
 ./scripts/link-dotfiles.sh
 ```
-
-通常ファイル・ディレクトリは `~/.dotfiles-backup/` に最新 5 世代を退避する。
 
 - 事前確認で差異があれば、端末の変更をリポジトリや `~/.zshrc.local` などへ統合してから実行する
 
@@ -63,88 +43,74 @@ mise upgrade
 ./scripts/setup-typeless.sh
 ./scripts/setup-orca.sh
 ./scripts/setup-menubar.sh
+./scripts/setup-pets.sh
+./scripts/setup-skills.sh
 ```
 
-- 電源管理には事前の `sudo` 認証が必要
-- アプリの表示許可は「システム設定 > メニューバー」で設定する
+- `setup-macos.sh` の電源管理は、事前に `sudo -v` で認証しておく
+- `setup-pets.sh`・`setup-skills.sh` は未取得のリポジトリを clone するだけで、既存の clone は更新しない
+  - 更新は [Codex Custom Pets](https://github.com/pych-ky/codex-custom-pets#readme)・[Agent Skills](https://github.com/pych-ky/agent-skills#readme) の手順で行う
 
-### 非公開リポジトリ
+### Node の CLI 復元
 
-- Codex Custom Pets: `./scripts/setup-pets.sh`（[導入先・退避・更新手順](https://github.com/pych-ky/codex-custom-pets#readme)）
-- Agent Skills: `./scripts/setup-skills.sh`（[導入・更新手順](https://github.com/pych-ky/agent-skills#readme)）
+- Node の導入・更新時に CLI の復元が失敗した場合は、原因を解消して `mise install node` を再実行する
 
 ## 設定の管理
 
 勤務先固有の情報・設定は公開側に置かず、必要なものだけ `dotfiles-private` で管理する。
 
-### AI ツール共通の文章ルール
+### 文章ルールと ChatGPT のカスタム指示
 
-- [共通本文](etc/ai-instructions/japanese-writing.md) を各ツールの常時適用される指示へ反映する
-
-### ChatGPT のカスタム指示
-
-- [本文](etc/chatgpt/custom-instructions.txt) の全文を「設定 > パーソナライズ > ChatGPT のカスタム指示」に貼り付けて保存し、開き直して一致を確認する
-- 推敲ルールは共通本文で変更し、ChatGPT 用本文へ反映する
-- アプリ側で変更した場合は、共通ルールの変更を共通本文へ、それ以外の変更を ChatGPT 用本文へ取り込む
+- 推敲ルールは[共通本文](etc/ai-instructions/japanese-writing.md)で変更し、各ツールの常時適用される指示と [ChatGPT 用本文](etc/chatgpt/custom-instructions.txt)へ反映する
+- ChatGPT 用本文は全文を「設定 > パーソナライズ > ChatGPT のカスタム指示」に貼り付けて保存し、開き直して一致を確認する
+- アプリ側で変更した場合は、共通ルールの変更を共通本文へ、それ以外を ChatGPT 用本文へ取り込む
 
 ### コピーする設定
 
+Codex Browser Use・Codex CLI と Orca のプロファイル・Orca キー設定・Computer Use 常時許可一覧はリンクせずコピーする。
+
 - アプリ側の変更は、共通化する分だけ次回セットアップ前にリポジトリへ取り込む
-
-- Browser Use: リンク非対応
-- Codex CLI・Orca プロファイル: モデル切替を別々に保存し、Orca 専用 HOME にも配置
-- Orca キー設定: アプリの保存でリンクが外れる。反映後はキーボード設定で再読み込みするか再起動する
-- Computer Use 常時許可一覧: アプリがリンク先の変更を検知しない
-
-- 配置先は [scripts/link-dotfiles.sh](scripts/link-dotfiles.sh) を参照
+- Orca キー設定の反映後は、Orca のキーボード設定で再読み込みするか再起動する
 
 ### Claude Code
 
 共通設定は `etc/claude-code/settings.json`。
 
-- 変更後は `scripts/link-dotfiles.sh --claude-settings-only` を実行し、Claude Code を再起動する
-
-- 端末・Orca ペイン: `claude` 関数の `--settings` で共通設定を使用。素の起動は `command claude`
-- IDE 拡張・Desktop: `/Library/Application Support/ClaudeCode/managed-settings.json` に配置するが、組織配布が優先。dotfiles 設置分のみ更新し、外部からの変更は保持
-- `~/.claude/settings.json`: Git 管理外のユーザー設定（Orca フック・プラグイン・`/model`）。セットアップは Playwright MCP の設定だけ反映
-
-- プロジェクトの `.claude/settings.local.json` は保持する
-- Orca は設定を同期するため専用ファイルを dotfiles へリンクせず、共通設定を重複させない
+- 変更後は `./scripts/link-dotfiles.sh --claude-settings-only` を実行し、Claude Code を再起動する
+- 端末・Orca ペインでは `claude` 関数が `--settings` で共通設定を渡す
+  - 共通設定なしで起動するには `command claude` を使う
+- IDE 拡張・Desktop 向けの `/Library/Application Support/ClaudeCode/managed-settings.json` は、組織配布があればそちらが優先される
+- `~/.claude/settings.json` は Git 管理外で、Orca フック・プラグイン・`/model` の保存先
+- Orca は設定を同期するため、専用ファイルを dotfiles へリンクせず、共通設定も重複させない
 
 ### Codex の設定
 
 `~/.codex/config.toml` はアプリが管理する端末固有設定。
+共通の既定値・権限は `etc/codex/config.toml`。
 
-- `./scripts/setup-codex.sh` で通常アプリ・Orca runtime のモデル保存値を `etc/codex/config.toml` の既定値へ揃える
-
-- 対話シェル: `--profile cli`。シェル関数を経由しない通常 CLI には `--no-daemon --profile cli` を付ける
-- Orca: `--profile orca`。起動引数の Sol / Xhigh により、セッション中のモデル切替は新規起動に持ち越さない
-- プロファイル保存先: 起動時の `CODEX_HOME` 配下の同名 `.config.toml`
-- 共通の既定モデル: Codex 画面・Chrome / Edge 拡張は `~/.codex/config.toml` を共有。Orca の通常の `config.toml` も同ファイルと同期するため、Orca 専用設定には使わない
-
-共通権限は `etc/codex/config.toml`。
-
-- 変更後は新規タスクで「保護付きフルアクセス」の選択を確認する。既存タスクは旧承認方式を引き継ぐ
+- 既定モデルの変更後は `./scripts/setup-codex.sh` で通常アプリ・Orca のモデル保存値を揃える
+- シェル関数を経由しない CLI には `--no-daemon --profile cli` を付ける
+- Orca は起動引数でモデルを指定するため、セッション中のモデル切替は次の起動に持ち越されない
+- Codex 画面・Chrome / Edge 拡張は `~/.codex/config.toml` を共有する
+  - Orca の通常の `config.toml` も同じ内容に同期されるため、Orca 専用の設定には使わない
+- 権限の変更後は、新規タスクで「保護付きフルアクセス」が選ばれていることを確認する
+  - 既存タスクは旧承認方式を引き継ぐ
 - 組み込みの「フルアクセス」を選び直すと承認方式が `never` に戻る
 
 ### Hermes Agent
 
-- `bootstrap.sh` で公式安定版の CLI を導入し、更新は `hermes update` で行う
-- Homebrew 版は [Hermes の公式サポート対象外](https://hermes-agent.nousresearch.com/docs/getting-started/platform-support)のため使用しない
+- 更新は `hermes update` で行う
+- Homebrew 版は[公式サポート対象外](https://hermes-agent.nousresearch.com/docs/getting-started/platform-support)のため使わない
 - 端末へ適用する設定は dotfiles に置き、会話・スケジュール参照用の ai-man-config には置かない
-
-- 設定: `./scripts/setup-hermes.sh` で適用する。変更はこのスクリプトに反映して再実行する
-- 共通規約: `~/.hermes/SOUL.md` は `.config/agents/AGENTS.md` へのリンクとし、リンク元で一元管理する。SOUL が自動注入されないサブエージェントには `prefill-messages.json` から読込を指示する
-- 認証: `hermes auth add openai-codex --type oauth --browser` で ChatGPT にログインする。既存 Codex / Claude Code の認証を自動共有しない
-- 実行ガード: 初回起動時・変更時に `.hermes/hooks/pre-tool-guard.sh` の実行を承認し、`hermes hooks doctor` で確認する。未承認の hook は実行されない
-- デスクトップ操作: 通常のターミナルで `./scripts/setup-hermes-computer-use.sh` を実行し、macOS のアクセシビリティ・画面収録を許可する。権限要求が `/Applications/CuaDriver.app` を参照するため、Hermes PM と同じ署名付きアプリをそこにも配置する。`hermes update` 後も再実行する
-
-- 独自の記憶・委譲機能を維持するため標準の実行基盤を使う
-- この基盤では Ultra を指定しても Max として送信されるため、推論量を Max に設定する
-
-共通スキルは `~/.agents/skills` を参照する。
-
-- 認証情報・会話履歴・自動生成状態は Git 管理外とし、`~/.hermes/config.yaml` 自体はリンクしない
+- 設定は `./scripts/setup-hermes.sh` で適用する
+  - 変更はこのスクリプトに反映して再実行する
+- `~/.hermes/config.yaml` はリンクせず、認証情報・会話履歴・自動生成状態も Git 管理外にする
+- 認証は `hermes auth add openai-codex --type oauth --browser` で ChatGPT にログインする
+  - 既存の Codex・Claude Code の認証は共有されない
+- 初回起動時と変更時に `.hermes/hooks/pre-tool-guard.sh` の実行を承認し、`hermes hooks doctor` で確認する
+  - 未承認の hook は実行されない
+- デスクトップ操作は、通常のターミナルで `./scripts/setup-hermes-computer-use.sh` を実行し、macOS のアクセシビリティ・画面収録を許可する
+  - `hermes update` 後も再実行する
 
 ローカル実行は OS の隔離環境ではなく、ガードは直接記述された既知の危険操作を静的に検査する。
 動的に組み立てたパス、`execute_code` などインタプリタへ渡すコード、起動済みプロセスへ送る標準入力、外部 CLI 内部の処理は追跡しない。
@@ -155,8 +121,10 @@ mise upgrade
 
 ### システムとアプリ
 
-- Aqua Voice: 初回起動時にログインし、マイク・アクセシビリティの利用を許可する。「設定 > キーバインド > ハンズフリーを有効化」に `F13` を割り当てる
-- Muse: [公式配布](https://ai.meta.com/muse/download/)からダウンロードし、`Muse.app` を `/Applications` に配置する。[Homebrew 版](https://github.com/Homebrew/homebrew-cask/blob/HEAD/Casks/m/muse.rb)は署名付き URL に対応できず無効化されている
+- Aqua Voice: 初回起動時にログインし、マイク・アクセシビリティの利用を許可する
+  - 「設定 > キーバインド > ハンズフリーを有効化」に `F13` を割り当てる
+- Muse: [公式配布](https://ai.meta.com/muse/download/)からダウンロードし、`Muse.app` を `/Applications` に配置する
+  - Homebrew 版は署名付き URL に対応できず無効化されている
 - システム設定 > プライバシーとセキュリティ
   - 必要なアプリにフルディスクアクセス・アクセシビリティ・入力監視を許可
   - ログイン項目の登録には、オートメーションで System Events を許可
@@ -164,12 +132,13 @@ mise upgrade
   - 「ログイン時に開く」: Stats の登録を確認
   - 「アプリのバックグラウンドでのアクティビティ」: Karabiner・Logi Options+・Logitech Inc をオン
   - 拡張機能 > Driver Extensions: Karabiner DriverKit VirtualHIDDevice をオン
+- システム設定 > メニューバー: アプリの表示を許可
 - メニューバーの日本語入力メニュー > ユーザ辞書を編集
   - `しかく` → `■` / `ほし` → `★` / `やじるし` → `→` / `かっこ` → `「」` を登録
 - Claude Code の Playwright MCP
   - Claude Code の初回起動後、`claude plugin install playwright@claude-plugins-official --scope user` で導入する
   - Chrome 用は `claude mcp add --scope user playwright-chrome -- npx @playwright/mcp@latest --cdp-endpoint=chrome` で登録する
-  - Edge の `edge://inspect/#remote-debugging` で「Allow remote debugging for this browser instance」を有効にする（[接続方式](https://playwright.dev/mcp/configuration/browser-extension)）
+  - Edge の `edge://inspect/#remote-debugging` で「Allow remote debugging for this browser instance」を有効にする
   - Chrome を使う場合は `chrome://inspect/#remote-debugging` でも同じ項目を有効にする
   - 接続時にブラウザの確認ダイアログが表示されたら、接続を許可する
 
@@ -183,12 +152,10 @@ mise upgrade
 
 - 外付けキーボードは Mac モードを使う
 
-#### Keychron K8 Pro 本体の移行
+#### Keychron K8 Pro のレイアウト
 
 1. USB 接続し、本体を Cable・Mac モードにする
-2. [VIA](https://usevia.app/) の Save + Load で旧レイアウトを保存し、[移行用レイアウト](macos/keychron_k8_pro_ansi_rgb.layout.json) を読み込む
+2. [VIA](https://usevia.app/) の Save + Load で[レイアウト](macos/keychron_k8_pro_ansi_rgb.layout.json)を読み込む
    - 機種定義が必要なら、[Keychron 公式配布](https://www.keychron.com/pages/firmware-and-json-files-of-the-keychron-qmk-k-pro-and-k-max-series-keyboards)の K8 Pro ANSI RGB v1.7 を使う
 3. Karabiner の Keychron 機器設定で Simple Modifications を空にする
 4. 左 Ctrl 位置でのコピー、かな・英数、F13、Fn 音量操作を確認する
-
-- 復元時は旧レイアウトを読み込み、Karabiner の Keychron 機器設定で左 Control / Option / Command を各々同じキーへ変換する 3 件を追加する

@@ -5,52 +5,6 @@ set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-setup_common_library="$repo_dir/lib/setup-common.sh"
-if [[ ! -f "$setup_common_library" || -L "$setup_common_library" ]]; then
-  printf 'error: setup common library is missing or unsafe: %s\n' \
-    "$setup_common_library" >&2
-  exit 1
-fi
-# shellcheck source=lib/setup-common.sh
-source "$setup_common_library"
-
-if ((EUID == 0)); then
-  printf 'error: do not run scripts/setup-git.sh with sudo or as root\n' >&2
-  exit 1
-fi
-
-setup_validate_home || exit 1
-
-if ! command -v git >/dev/null 2>&1; then
-  printf 'error: git is required\n' >&2
-  exit 1
-fi
-
-git_version_output=
-if ! git_version_output="$(git --version 2>&1)"; then
-  if [[ -n "$git_version_output" ]]; then
-    printf 'error: failed to determine Git version: %s\n' \
-      "$git_version_output" >&2
-  else
-    printf 'error: failed to determine Git version\n' >&2
-  fi
-  exit 1
-fi
-
-if [[ "$git_version_output" =~ ^git[[:space:]]+version[[:space:]]+([0-9]+)\.([0-9]+)([^0-9].*)?$ ]]; then
-  git_major="${BASH_REMATCH[1]}"
-  git_minor="${BASH_REMATCH[2]}"
-else
-  printf 'error: could not parse Git version: %s\n' "$git_version_output" >&2
-  exit 1
-fi
-
-if ((10#$git_major < 2 || (10#$git_major == 2 && 10#$git_minor < 37))); then
-  printf 'error: Git 2.37 or later is required (found: %s)\n' \
-    "$git_version_output" >&2
-  exit 1
-fi
-
 while read -r key value; do
   git config --global --replace-all "$key" "$value"
 done <<'SETTINGS'
@@ -66,33 +20,11 @@ transfer.credentialsInUrl die
 user.useConfigOnly true
 SETTINGS
 
-gitconfig_local="$HOME/.gitconfig.local"
-if [[ -f "$gitconfig_local" ]] &&
-  git config --file "$gitconfig_local" --get user.email >/dev/null 2>&1; then
-  for key in user.name user.email; do
-    if current="$(git config --global --get "$key" 2>/dev/null)" &&
-      [[ -n "$current" ]]; then
-      if git config --global --unset-all "$key"; then
-        printf 'changed: removed duplicate global setting: %s (managed in %s)\n' \
-          "$key" "$gitconfig_local"
-      fi
-    fi
-  done
-else
-  printf 'warning: %s does not define an identity; set user.name and user.email there\n' \
-    "$gitconfig_local" >&2
-fi
-
 # 空設定で継承 helper を無効化
 git config --global --replace-all 'credential.https://github.com.helper' ''
 git config --global --add \
   'credential.https://github.com.helper' '!gh auth git-credential'
 git config --global --replace-all 'credential.https://github.com.useHttpPath' true
-
-if ! command -v gh >/dev/null 2>&1; then
-  printf 'warning: gh is not installed; default GitHub HTTPS authentication will not work\n' >&2
-  printf "         install it, then run \`gh auth login\`\n" >&2
-fi
 
 # 組織別の includeIf・helper はローカルで上書き
 if ! git config --global --get-all include.path 2>/dev/null |
@@ -100,60 +32,18 @@ if ! git config --global --get-all include.path 2>/dev/null |
   git config --global --add include.path \~/.gitconfig.local
 fi
 
-# dispatch と検査フックは同じ場所に置く
+# dispatch は同じ場所の検査フックを呼ぶ
 hooks_dir="$HOME/.local/share/dotfiles/git-hooks"
-
-# 実行権を検証してフックをリンク
-# Git は壊れたフックを無視するため、設定前に検証
-link_hook() {
-  local source="$1"
-  local target="$hooks_dir/$2"
-
-  if [[ ! -x "$source" ]]; then
-    printf 'error: hook source is missing or not executable: %s\n' \
-      "$source" >&2
-    printf '       core.hooksPath は変更していません。リポジトリの状態を確認してから再実行してください\n' >&2
-    return 1
-  fi
-
-  if [[ -L "$target" && "$(readlink "$target")" == "$source" ]]; then
-    return 0
-  fi
-  ln -sfh -- "$source" "$target"
-}
-
-if mkdir -p "$hooks_dir"; then
-  link_hook "$repo_dir/git-hooks/deny-private-strings" 'deny-private-strings'
-
-  for hook in pre-commit prepare-commit-msg commit-msg post-commit pre-push \
-    post-checkout post-merge pre-rebase post-rewrite pre-merge-commit; do
-    link_hook "$repo_dir/git-hooks/dispatch" "$hook"
-  done
-
-  obsolete_hook="$hooks_dir/_local-hook-exec"
-  if [[ -L "$obsolete_hook" ]]; then
-    rm -- "$obsolete_hook"
-    printf 'changed: removed obsolete hook link: %s\n' "$obsolete_hook"
-  fi
-
-  git config --global --replace-all core.hooksPath "$hooks_dir"
-else
-  printf 'error: failed to create the hooks directory: %s\n' "$hooks_dir" >&2
-  exit 1
-fi
+mkdir -p "$hooks_dir"
+ln -sfh "$repo_dir/git-hooks/deny-private-strings" "$hooks_dir/deny-private-strings"
+for hook in pre-commit prepare-commit-msg commit-msg post-commit pre-push \
+  post-checkout post-merge pre-rebase post-rewrite pre-merge-commit; do
+  ln -sfh "$repo_dir/git-hooks/dispatch" "$hooks_dir/$hook"
+done
+git config --global --replace-all core.hooksPath "$hooks_dir"
 
 # LFS フックは dispatch に任せ、フィルタだけ導入
-if command -v git-lfs >/dev/null 2>&1; then
-  if lfs_output="$(git lfs install --skip-repo)"; then
-    if [[ -n "$lfs_output" && "$lfs_output" != 'Git LFS initialized.' ]]; then
-      printf '%s\n' "$lfs_output"
-    fi
-  else
-    lfs_status=$?
-    [[ -z "$lfs_output" ]] || printf '%s\n' "$lfs_output" >&2
-    exit "$lfs_status"
-  fi
-fi
+git lfs install --skip-repo >/dev/null
 
 if [[ ${DOTFILES_BOOTSTRAP:-0} != 1 ]]; then
   printf 'ok: Git configuration applied\n'
