@@ -35,7 +35,7 @@ def set_hermes_config(key, value, force=False):
 
 
 set_hermes_config("model.provider", "openai-codex")
-set_hermes_config("model.default", "gpt-6.1-sol")
+set_hermes_config("model.default", "gpt-6.2-sol")
 # Hermes 独自の記憶・委譲機能を使うため標準の実行基盤を使う
 set_hermes_config("model.openai_runtime", "auto")
 # この実行基盤は Ultra を Max として送信する
