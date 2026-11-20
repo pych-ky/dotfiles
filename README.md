@@ -78,7 +78,7 @@ Codex Browser Use・Codex CLI と Orca のプロファイル・Orca キー設定
 
 - 変更後は `./scripts/link-dotfiles.sh --claude-settings-only` を実行し、Claude Code を再起動する
 - 端末・Orca ペインでは `claude` 関数が `--settings` で共通設定を渡す
-  - 共通設定なしで起動するには `command claude` を使う
+  - `--settings` を渡さずに起動するには `command claude` を使う
 - IDE 拡張・Desktop 向けの `/Library/Application Support/ClaudeCode/managed-settings.json` は、組織配布があればそちらが優先される
 - `~/.claude/settings.json` は Git 管理外で、Orca フック・プラグイン・`/model` の保存先
 - Orca は設定を同期するため、専用ファイルを dotfiles へリンクせず、共通設定も重複させない
