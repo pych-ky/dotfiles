@@ -20,5 +20,6 @@
     "showBranch": false,
     "showQuota": true,
     "showYolo": true
-  }
+  },
+  "screenReader": true
 }
