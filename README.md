@@ -97,6 +97,14 @@ Codex Browser Use・Codex CLI と Orca のプロファイル・Orca キー設定
   - 既存タスクは旧承認方式を引き継ぐ
 - 組み込みの「フルアクセス」を選び直すと承認方式が `never` に戻る
 
+### GitHub Copilot CLI
+
+単体で起動したときの既定モデルと推論量は `.copilot/settings.json` で指定する。
+`/config model` で選んだ既定モデルもこのファイルに保存される。
+
+- 既定モデルや推論量を変えるときは、`macos/orca.json` の `agentDefaultArgs.copilot`・`agentLaunchChoices.copilot` も揃え、`./scripts/setup-orca.sh` を実行する
+- Orca のチャットは `copilot --acp` で起動し、`.copilot/settings.json` のモデルを使わない
+
 ### Hermes Agent
 
 - 更新は `hermes update` で行う
