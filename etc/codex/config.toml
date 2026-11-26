@@ -114,6 +114,32 @@ timeout       = 30
 statusMessage = "Bash コマンドを検査中"
 
 
+## 終了時差分検査
+
+[[hooks.UserPromptSubmit]]
+
+[[hooks.UserPromptSubmit.hooks]]
+type    = "command"
+command = "\"$HOME/.claude/hooks/stop-diff-check.sh\""
+timeout = 10
+
+[[hooks.PreToolUse]]
+matcher = "^(Bash|apply_patch)$"
+
+[[hooks.PreToolUse.hooks]]
+type    = "command"
+command = "\"$HOME/.claude/hooks/stop-diff-check.sh\""
+timeout = 10
+
+[[hooks.Stop]]
+
+[[hooks.Stop.hooks]]
+type          = "command"
+command       = "\"$HOME/.claude/hooks/stop-diff-check.sh\""
+timeout       = 15
+statusMessage = "変更差分を検査中"
+
+
 ## プラグイン
 
 [plugins]

@@ -100,7 +100,7 @@ Codex Browser Use・Codex CLI と Orca のプロファイル・Orca キー設定
 ### GitHub Copilot CLI
 
 単体で起動したときの既定モデルと推論量は `.copilot/settings.json` で指定する。
-`/config model` で選んだ既定モデルもこのファイルに保存される。
+`/config model` で選んだ既定モデルは `~/.copilot/settings.json` にだけ保存され、`./scripts/link-dotfiles.sh` を実行するとこのファイルの値に戻る。
 
 - 既定モデルや推論量を変えるときは、`macos/orca.json` の `agentDefaultArgs.copilot`・`agentLaunchChoices.copilot` も揃え、`./scripts/setup-orca.sh` を実行する
 - Orca のチャットは `copilot --acp` で起動し、`.copilot/settings.json` のモデルを使わない
@@ -143,12 +143,19 @@ Codex Browser Use・Codex CLI と Orca のプロファイル・Orca キー設定
 - システム設定 > メニューバー: アプリの表示を許可
 - メニューバーの日本語入力メニュー > ユーザ辞書を編集
   - `しかく` → `■` / `ほし` → `★` / `やじるし` → `→` / `かっこ` → `「」` を登録
+- Claude Code の Claude in Chrome
+  - Edge で Chrome ウェブストアから [Claude 拡張機能](https://chromewebstore.google.com/detail/claude/fcoeoabgfenejglbffodgkkbkcdhcgfn) を追加し、Claude Code と同じアカウント・組織でログインする
+  - Claude Code で `/chrome` を実行し、既定で有効にする項目を選ぶ
+  - 初回に拡張機能が検出されなければ Edge を再起動する
 - Claude Code の Playwright MCP
   - Claude Code の初回起動後、`claude plugin install playwright@claude-plugins-official --scope user` で導入する
   - Chrome 用は `claude mcp add --scope user playwright-chrome -- npx @playwright/mcp@latest --cdp-endpoint=chrome` で登録する
   - Edge の `edge://inspect/#remote-debugging` で「Allow remote debugging for this browser instance」を有効にする
   - Chrome を使う場合は `chrome://inspect/#remote-debugging` でも同じ項目を有効にする
   - 接続時にブラウザの確認ダイアログが表示されたら、接続を許可する
+- GitHub Copilot CLI の Playwright MCP
+  - Edge 用は `copilot mcp add playwright -- npx @playwright/mcp@latest --cdp-endpoint=msedge` で登録する
+  - Chrome 用は `copilot mcp add playwright-chrome -- npx @playwright/mcp@latest --cdp-endpoint=chrome` で登録する
 
 ### Logi Options+
 
