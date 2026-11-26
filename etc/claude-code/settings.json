@@ -293,6 +293,16 @@
   },
   "fastModePerSessionOptIn": true,
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.claude/hooks/stop-diff-check.sh\""
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash|Monitor",
@@ -300,6 +310,25 @@
           {
             "type": "command",
             "command": "\"$HOME/.claude/hooks/pre-bash-guard.sh\" || exit 2"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.claude/hooks/stop-diff-check.sh\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.claude/hooks/stop-diff-check.sh\""
           }
         ]
       }

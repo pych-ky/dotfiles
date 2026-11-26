@@ -1,11 +1,31 @@
 {
   "model": "gemini-4-neon",
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "type": "command",
+        "bash": "\"$HOME/.claude/hooks/stop-diff-check.sh\"",
+        "timeout": 10
+      }
+    ],
     "PreToolUse": [
       {
         "type": "command",
         "matcher": "Bash",
         "bash": "output=\"$(\"$HOME/.claude/hooks/pre-bash-guard.sh\")\" || exit 2; [ -z \"$output\" ] || { printf '%s\\n' \"$output\"; exit 2; }"
+      },
+      {
+        "type": "command",
+        "matcher": "Bash|Edit|Write",
+        "bash": "\"$HOME/.claude/hooks/stop-diff-check.sh\" || exit 0",
+        "timeout": 10
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "bash": "\"$HOME/.claude/hooks/stop-diff-check.sh\"",
+        "timeout": 15
       }
     ]
   },

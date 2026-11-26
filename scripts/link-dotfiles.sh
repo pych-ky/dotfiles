@@ -122,6 +122,35 @@ configure_claude_browser() {
   printf 'changed: configured Playwright MCP settings: %s\n' "$user_settings"
 }
 
+# Copilot のユーザー設定へリポジトリの項目を反映
+# Copilot が書き込むプラグイン登録を公開リポジトリへ入れないため、リンクにしない
+configure_copilot_settings() {
+  local source="$repo_dir/.copilot/settings.json"
+  local user_settings="$HOME/.copilot/settings.json"
+  local input_file="$user_settings"
+  local temporary_settings
+
+  if [[ -f "$user_settings" && ! -L "$user_settings" ]] &&
+    jq -e --slurpfile repo "$source" '. == (. * $repo[0])' "$user_settings" >/dev/null; then
+    return 0
+  fi
+  if ((dry_run)); then
+    printf 'info: would configure Copilot settings: %s\n' "$user_settings"
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$user_settings")" || return
+  [[ -f "$input_file" ]] || input_file=/dev/null
+  temporary_settings="$(mktemp "$user_settings.XXXXXX")" || return
+  if ! jq -s --slurpfile repo "$source" '(.[0] // {}) * $repo[0]' \
+    "$input_file" >"$temporary_settings" ||
+    ! mv -- "$temporary_settings" "$user_settings"; then
+    rm -f -- "$temporary_settings"
+    return 1
+  fi
+  printf 'changed: configured Copilot settings: %s\n' "$user_settings"
+}
+
 # dotfiles が配置した後に変更されていない managed 設定だけ更新
 install_claude_managed_config() {
   local source="$repo_dir/etc/claude-code/settings.json"
@@ -232,8 +261,9 @@ main() {
     ".claude/hooks/pre-bash-guard.py"
     ".claude/hooks/pre-bash-guard.sh"
     ".claude/hooks/statusline.sh"
+    ".claude/hooks/stop-diff-check.py"
+    ".claude/hooks/stop-diff-check.sh"
     ".config/agents/AGENTS.md"
-    ".copilot/settings.json"
     ".copilot/statusline.sh"
     ".hermes/hooks/pre-tool-guard.py"
     ".hermes/hooks/pre-tool-guard.sh"
@@ -247,9 +277,12 @@ main() {
     install_file link "$file" || failed_items+=("$file")
   done
   install_file link ".config/agents/AGENTS.md" ".hermes/SOUL.md" || failed_items+=(".hermes/SOUL.md")
+  install_file link ".config/agents/AGENTS.md" ".copilot/copilot-instructions.md" ||
+    failed_items+=(".copilot/copilot-instructions.md")
 
   configure_claude_browser || failed_items+=("Claude browser settings")
   install_claude_managed_config || failed_items+=("Claude managed settings")
+  configure_copilot_settings || failed_items+=("Copilot settings")
 
   # アプリがリンク先の変更を検知しないためコピー
   local computer_use_approvals="Library/Group Containers/2DC432GLL2.com.openai.sky.CUAService/Library/Application Support/Software/ComputerUseAppApprovals.json"
