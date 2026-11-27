@@ -222,6 +222,9 @@ setup_codex_plugins() {
   local install_output
   local status
 
+  # codex plugin は全プラグインの一覧の取り直しで1分以上かかることがあるため、導入済みは保存先の版フォルダで判定する
+  ! compgen -G "${CODEX_HOME:-$HOME/.codex}/plugins/cache/openai-curated-remote/linear/*/" >/dev/null || return 0
+
   plugins="$(codex plugin list --json)" || {
     record_failure 'Codex plugin list' "$?"
     return 0
