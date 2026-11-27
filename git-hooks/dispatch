@@ -66,9 +66,9 @@ fi
 if ((!skip_global_checks)) && [[ "$hook_name" == pre-commit ]]; then
   # プロジェクトの Node.js 設定に依存せず共通の LTS で検査
   if ! secretlint_node="$(mise -C "$HOME" which node --tool node@lts 2>/dev/null)" ||
-    ! secretlint_cli="$(mise -C "$HOME" which quick-start 2>/dev/null)"; then
+    ! secretlint_cli="$(mise -C "$HOME" which secretlint 2>/dev/null)"; then
     printf 'error: secretlint または Node.js LTS が見つかりません\n' >&2
-    printf '       mise -C ~ install node@lts npm:@secretlint/quick-start で導入してから、もう一度コミットしてください\n' >&2
+    printf '       mise -C ~ install node@lts npm:secretlint で導入してから、もう一度コミットしてください\n' >&2
     exit 1
   fi
   secretlint=(env "PATH=${secretlint_node%/*}:$PATH" "$secretlint_cli")
